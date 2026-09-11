@@ -374,11 +374,34 @@ flowchart TB
 
 | 决策点 | 结论 |
 | --- | --- |
-| 数据层 | **零 Docker 路线**（SQLite + Chroma + SQLite checkpoint + 本地文件），保留 3 个抽象接口 |
+| 数据层 | **本地真组件**：MySQL 8.0（业务数据）+ Redis 8.x（任务 checkpoint / 限流）+ Qdrant 1.x（向量检索），仍然保留 3 个抽象接口 |
 | 时间预算 | **3 个月以上**，9 个 Agent 全覆盖 + 12 项 P0/P1 技术点 |
 | 前端 | **全栈由我做**（React + Vite + React Flow 画 DAG + ECharts 画图表） |
 | Agent 数量 | 9 个全做，但**分两批落地**（先 4 个打通闭环，再补 5 个） |
 | 现有 `mcp-servers/` | 保留原地不动（它是独立可交付的"工具服务"，也是简历上的一个加分项） |
+
+### 10.1 修订：数据层从"零 Docker 替代方案"改为"本地真组件"
+
+§6 和 §9.3 当时建议走"零 Docker 替代路线"（SQLite + Chroma + SQLite checkpoint），
+理由是 Docker 安装受阻、要尽快开工。
+
+**实际执行时改成了本地真组件**，原因是：
+
+1. 本机**已经有 MySQL 8.0.43 在跑**，没有引入新依赖
+2. Redis 和 Qdrant 都有**免安装的 portable 版本**，解压即用，同样不需要 Docker
+3. 用真组件能讲的技术细节更多 —— Qdrant 的 payload 过滤、稀疏向量、混合检索、
+   内建重排，这些是 pgvector 的 SQL 写法讲不出来的
+4. Redis 的 AOF 持久化正好是"任务中断可恢复"这个技术点的存储基础
+
+**代价**：多了一层"服务没起就报错"的环境依赖，所以做了两件事兜底 ——
+
+- `deploy/scripts/services.ps1` 统一启停与状态检查
+- `/health` 做三项依赖探活，挂了返回结构化诊断而不是 500
+
+**Docker 仍然没装**，但架构上已经留好口子：换回 Docker 只需要改 `.env` 里的连接串，
+或者在 `VectorStore` / `StorageBackend` 抽象上加一个适配器类，业务代码不动。
+
+安装过程与踩到的坑记在 `docs/08-数据层安装记录.md`。
 
 ---
 
