@@ -1,0 +1,103 @@
+[project]
+name = "fashionops"
+version = "0.1.0"
+description = "服装电商多 Agent 运营中台 —— 全链路 AI 自动化工作台"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+# 核心依赖：Web 层 + 数据层（MySQL / Redis / Qdrant）+ Agent 编排
+#
+# 数据层选型说明：
+#   MySQL 8.0  —— 业务数据（商品/订单/BI/工单），本机已有实例
+#   Redis 8.x  —— 任务图 checkpoint、网关限流计数与熔断状态
+#   Qdrant 1.x —— 客服 RAG 的知识库向量检索
+# 三者都留了适配器接口，换实现只改适配器类。
+dependencies = [
+    # Web
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "httpx>=0.27",
+    "python-multipart>=0.0.9",
+    # 配置与校验
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    # 关系库
+    "sqlalchemy>=2.0",
+    "pymysql>=1.1",
+    # MySQL 8 默认用 caching_sha2_password 认证，pymysql 必须靠 cryptography 才能握手
+    "cryptography>=43.0",
+    # 缓存 / 任务状态
+    "redis>=5.0",
+    # 向量库
+    "qdrant-client>=1.12",
+    # Agent 编排
+    "langgraph>=0.2.60",
+    "langgraph-checkpoint-sqlite>=2.0",
+    "langgraph-checkpoint-redis>=0.0.1",
+    "langchain-core>=0.3.20",
+    "langchain-openai>=0.2.10",
+    # 假数据
+    "faker>=25.0",
+]
+
+[project.optional-dependencies]
+# 向量检索备选后端（不装 Qdrant 时可退回嵌入式 Chroma）
+vectors = [
+    "chromadb>=0.5.20",
+]
+# 可观测性：OpenTelemetry + OpenLLMetry
+observability = [
+    "opentelemetry-sdk>=1.27",
+    "opentelemetry-exporter-otlp>=1.27",
+    "traceloop-sdk>=0.35",
+]
+# 持久化执行（长任务崩溃续跑）
+durable = [
+    "dbos>=1.0",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=6.0",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+fashionops-seed = "fashionops.seed:main"
+fashionops-db = "fashionops.db.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fashionops"]
+
+[tool.ruff]
+# 用 120 而不是默认的 88：本项目有大量中文文档字符串与中文数据字面量，
+# 中文单字信息密度高，卡在 100 会逼出一堆没有信息量的换行。
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI 依赖注入的标准写法就是 Depends() / Query() 直接写在参数默认值上。
+# B008 把这种写法当“默认值里做函数调用”误报，这里把 FastAPI 的这几个
+# 工厂函数登记为可安全调用的。
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Body",
+    "fastapi.Header",
+    "fastapi.Cookie",
+    "fastapi.Form",
+    "fastapi.File",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

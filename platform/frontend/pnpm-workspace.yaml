@@ -1,0 +1,6 @@
+# pnpm 10+ 默认不再执行依赖的 postinstall 脚本（供应链安全考虑）。
+# esbuild 需要它来落地平台对应的原生二进制 —— 不放开的话 Vite 起不来。
+#
+# 注意：pnpm 12 起不再读 package.json 里的 "pnpm" 字段，设置只能写在这里。
+allowBuilds:
+  esbuild: true

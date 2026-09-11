@@ -1,0 +1,28 @@
+{
+  "name": "fashionops-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "服装电商多 Agent 运营中台 —— 运营工作台前端",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@xyflow/react": "^12.3.5",
+    "echarts": "^5.5.1",
+    "echarts-for-react": "^3.0.2",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.0.2"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.1",
+    "@types/react-dom": "^19.0.2",
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "^5.7.2",
+    "vite": "^7.0.0"
+  }
+}
