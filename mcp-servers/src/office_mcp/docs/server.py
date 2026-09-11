@@ -22,21 +22,19 @@
 
 from __future__ import annotations
 
-import functools
 import logging
 import os
-from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import Any
 
 from fastmcp import FastMCP
 
 from office_mcp.common import (
     OfficeMCPError,
-    get_audit_logger,
     get_secret_store,
     get_settings,
 )
 from office_mcp.common.paths import safe_filename
+from office_mcp.common.tooling import guard_tool
 from office_mcp.docs import office
 
 logger = logging.getLogger("office_mcp.docs")
@@ -51,51 +49,8 @@ mcp = FastMCP(
     ),
 )
 
-F = TypeVar("F", bound=Callable[..., Any])
-
-
-def _guard(tool_name: str) -> Callable[[F], F]:
-    """统一处理审计、异常转换与返回值包装。
-
-    - 审计：记录工具名、参数（自动脱敏）、耗时、状态
-    - 异常：``OfficeMCPError`` 转成带 ``hint`` 的结构化错误，其他异常兜底
-    - 返回值：统一为 ``{"ok": true, ...}`` 形态，模型更容易判断成功与否
-    """
-
-    def decorator(func: F) -> F:
-        @functools.wraps(func)
-        def wrapper(**kwargs: Any) -> dict[str, Any]:
-            audit = get_audit_logger()
-            with audit.tool_call(tool_name, **kwargs) as ctx:
-                try:
-                    result = func(**kwargs)
-                except OfficeMCPError as exc:
-                    # 业务异常已被转成模型友好的返回值，但审计里必须仍是 error，
-                    # 否则监控面板会把“参数错误”当成“调用成功”。
-                    ctx["status"] = "error"
-                    ctx["error_type"] = type(exc).__name__
-                    ctx["error_code"] = exc.code
-                    logger.info("%s 业务失败: %s", tool_name, exc.message)
-                    return exc.to_payload()
-                except Exception as exc:  # noqa: BLE001 - 兜底，避免 traceback 泄漏给模型
-                    ctx["status"] = "error"
-                    ctx["error_type"] = type(exc).__name__
-                    ctx["error_code"] = "internal_error"
-                    logger.exception("%s 未预期错误", tool_name)
-                    return {
-                        "ok": False,
-                        "code": "internal_error",
-                        "error": f"{type(exc).__name__}: {exc}",
-                        "hint": "这是服务端内部错误，请换一种方式重试或简化输入。",
-                    }
-                ctx["status"] = "ok"
-                if isinstance(result, dict):
-                    return {"ok": True, **result}
-                return {"ok": True, "result": result}
-
-        return wrapper  # type: ignore[return-value]
-
-    return decorator
+# 审计 / 异常转换 / 返回值包装统一在 common.tooling 里实现，多个 server 共用。
+_guard = guard_tool
 
 
 # --------------------------------------------------------------------------- #

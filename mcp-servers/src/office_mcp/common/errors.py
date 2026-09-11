@@ -48,6 +48,22 @@ class UpstreamUnavailableError(OfficeMCPError):
     code = "upstream_unavailable"
 
 
+class MailPolicyViolation(OfficeMCPError):
+    """发信被安全策略拒绝（白名单 / 附件类型 / 频率限制等）。
+
+    错误消息会明确告知模型**违反了哪条策略**以及**可以怎么做**，
+    避免它反复重试同一个注定失败的调用。
+    """
+
+    code = "mail_policy_violation"
+
+
+class MailOperationError(OfficeMCPError):
+    """邮件服务器返回了业务层错误（如文件夹不存在、UID 失效）。"""
+
+    code = "mail_operation_failed"
+
+
 class UnsupportedFormatError(OfficeMCPError):
     """不支持的文档格式。"""
 

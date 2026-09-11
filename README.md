@@ -97,6 +97,17 @@ uv run pytest -q
 - 测试用例 `test_no_credential_params_exposed` 会扫描所有工具的 JSON Schema，
   出现 `password` / `token` / `api_key` 等字段即失败
 
+### 2.5 会给外部世界造成不可撤回影响的能力，必须装闸门
+
+发邮件就是典型例子：邮件发出去就收不回来。所以 `office-email` 采用 **fail-closed** 设计 ——
+**白名单为空就谁都发不出去**，而不是默认放行：
+
+- `to` / `cc` / `bcc` 全部校验（只看 `to` 的话，把目标塞进 `cc` 就绕过了）
+- 附件扩展名 + 大小双限（挡住 `.env`、私钥这类文件外发）
+- 滑动窗口限流（挡住模型陷入循环反复发信）
+- 被拒时 `hint` 指向 `save_email_draft`，让 Agent 仍有办法把事做完
+- **`dry_run` 也计入限流** —— 否则离线永远验证不到限流，上线才第一次触发
+
 ### 3. 错误即提示：让模型能自我修复
 
 工具返回值统一为：
@@ -125,16 +136,24 @@ uv run pytest -q
 
 | 模块 | 状态 | 测试 |
 | --- | --- | --- |
-| `common` 横切层（配置/沙箱/凭证/审计） | ✅ 完成 | 覆盖 |
-| `docs` 文档处理 MCP 服务器 | ✅ 完成，7 个工具 | 覆盖 |
-| `email` 邮件 MCP 服务器 | 🚧 待开发 | — |
+| `common` 横切层（配置/沙箱/凭证/审计/工具装饰器） | ✅ 完成 | 覆盖 |
+| `docs` 文档处理 MCP 服务器（7 个工具） | ✅ 完成 | 覆盖 |
+| `email` 邮件 MCP 服务器（7 个工具 + 四层发送闸门） | ✅ 完成 | 覆盖 |
 | `calendar` 日历 MCP 服务器 | 🚧 待开发 | — |
 | 接入 DeerFlow（LangGraph 层） | 🚧 待开发 | — |
 | OpenTelemetry 全链路追踪 | 🚧 待开发 | — |
 | τ³-bench 评测流水线 | 🚧 待开发 | — |
 | 办公 Skill（周报/纪要/邮件起草） | 🚧 待开发 | — |
 
-**质量现状**：`ruff check` 全部通过 · `ruff format` 已统一 · `pytest` 74 passed / 1 skipped
+**质量现状**：`ruff check` 全部通过 · `ruff format` 已统一 · `pytest` 175 passed / 1 skipped
+
+**端到端演示**：
+
+```bash
+cd mcp-servers
+uv run python scripts/demo.py         # 文档处理：10 个场景
+uv run python scripts/demo_email.py   # 邮件 + 安全闸门：11 个场景
+```
 
 ---
 
