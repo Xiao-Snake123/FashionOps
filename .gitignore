@@ -1,0 +1,39 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.so
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# ---- Node ----
+node_modules/
+.next/
+out/
+dist/
+*.tsbuildinfo
+
+# ---- 运行时数据 ----
+mcp-servers/workspace/
+*.jsonl
+!package-lock.json
+.env
+.env.*
+!.env.example
+
+# ---- 第三方基座（不纳入本仓库，见 README 的克隆说明）----
+vendor/
+
+# ---- 编辑器 / 系统 ----
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
