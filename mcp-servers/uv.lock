@@ -3,8 +3,8 @@ revision = 3
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'emscripten'",
-    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'emscripten'",
     "python_full_version >= '3.14' and sys_platform != 'emscripten'",
+    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'emscripten'",
     "(python_full_version < '3.14' and sys_platform != 'emscripten') or (python_full_version < '3.12' and sys_platform == 'emscripten')",
 ]
 
@@ -1121,6 +1121,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastmcp" },
+    { name = "icalendar" },
     { name = "markdown-it-py" },
     { name = "openpyxl" },
     { name = "pydantic" },
@@ -1128,12 +1129,12 @@ dependencies = [
     { name = "python-docx" },
     { name = "python-pptx" },
     { name = "structlog" },
+    { name = "tzdata" },
 ]
 
 [package.optional-dependencies]
 calendar = [
     { name = "caldav" },
-    { name = "icalendar" },
 ]
 dev = [
     { name = "pytest" },
@@ -1145,7 +1146,7 @@ dev = [
 requires-dist = [
     { name = "caldav", marker = "extra == 'calendar'", specifier = ">=1.4" },
     { name = "fastmcp", specifier = ">=2.0" },
-    { name = "icalendar", marker = "extra == 'calendar'", specifier = ">=6.0" },
+    { name = "icalendar", specifier = ">=6.0" },
     { name = "markdown-it-py", specifier = ">=3.0" },
     { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "pydantic", specifier = ">=2.7" },
@@ -1156,6 +1157,7 @@ requires-dist = [
     { name = "python-pptx", specifier = ">=1.0.2" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
     { name = "structlog", specifier = ">=24.1" },
+    { name = "tzdata", specifier = ">=2024.1" },
 ]
 provides-extras = ["email", "calendar", "dev"]
 

@@ -139,20 +139,21 @@ uv run pytest -q
 | `common` 横切层（配置/沙箱/凭证/审计/工具装饰器） | ✅ 完成 | 覆盖 |
 | `docs` 文档处理 MCP 服务器（7 个工具） | ✅ 完成 | 覆盖 |
 | `email` 邮件 MCP 服务器（7 个工具 + 四层发送闸门） | ✅ 完成 | 覆盖 |
-| `calendar` 日历 MCP 服务器 | 🚧 待开发 | — |
+| `calendar` 日历 MCP 服务器（9 个工具 + 空闲时间计算） | ✅ 完成 | 覆盖 |
 | 接入 DeerFlow（LangGraph 层） | 🚧 待开发 | — |
 | OpenTelemetry 全链路追踪 | 🚧 待开发 | — |
 | τ³-bench 评测流水线 | 🚧 待开发 | — |
 | 办公 Skill（周报/纪要/邮件起草） | 🚧 待开发 | — |
 
-**质量现状**：`ruff check` 全部通过 · `ruff format` 已统一 · `pytest` 175 passed / 1 skipped
+**质量现状**：`ruff check` 全部通过 · `ruff format` 已统一 · `pytest` 297 passed / 1 skipped
 
-**端到端演示**：
+**端到端演示**（全部不需要 API Key，也不需要真实邮箱/日历服务）：
 
 ```bash
 cd mcp-servers
-uv run python scripts/demo.py         # 文档处理：10 个场景
-uv run python scripts/demo_email.py   # 邮件 + 安全闸门：11 个场景
+uv run python scripts/demo.py            # 文档处理：10 个场景
+uv run python scripts/demo_email.py      # 邮件 + 四层发送闸门：11 个场景
+uv run python scripts/demo_calendar.py   # 日历 + 空闲时间计算：12 个场景
 ```
 
 ---

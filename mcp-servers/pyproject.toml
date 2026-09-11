@@ -15,11 +15,14 @@ dependencies = [
     "python-pptx>=1.0.2",
     "markdown-it-py>=3.0",
     "structlog>=24.1",
+    "icalendar>=6.0",
+    # Windows 没有系统时区库，zoneinfo 需要 tzdata 才能解析 Asia/Shanghai
+    "tzdata>=2024.1",
 ]
 
 [project.optional-dependencies]
 email = []
-calendar = ["icalendar>=6.0", "caldav>=1.4"]
+calendar = ["caldav>=1.4"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
