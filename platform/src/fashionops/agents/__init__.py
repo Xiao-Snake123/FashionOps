@@ -25,7 +25,24 @@ from fashionops.agents.checkpoint import (
     latest_state,
     pending_nodes,
     reset_checkpointer_cache,
+    snapshot,
     thread_config,
+)
+from fashionops.agents.scoring import (
+    HardConstraints,
+    Rejection,
+    ScoredCandidate,
+    ScoreWeights,
+    SelectionOutcome,
+    apply_constraints,
+    rank_candidates,
+    score_candidates,
+)
+from fashionops.agents.selection import (
+    SelectionCriteria,
+    SelectionNarrative,
+    make_selection_node,
+    parse_criteria,
 )
 from fashionops.agents.state import (
     STATE_DEFAULTS,
@@ -39,6 +56,7 @@ from fashionops.agents.state import (
     check_budget,
     get_context,
     new_state,
+    step_update,
 )
 
 __all__ = [
@@ -46,17 +64,31 @@ __all__ = [
     "ApprovalRequest",
     "Artifact",
     "BudgetExceeded",
+    "HardConstraints",
+    "Rejection",
     "RunContext",
+    "ScoreWeights",
+    "ScoredCandidate",
+    "SelectionCriteria",
+    "SelectionNarrative",
+    "SelectionOutcome",
     "StepRecord",
     "TaskState",
+    "apply_constraints",
     "budget_status",
     "check_budget",
     "get_checkpointer",
     "get_context",
     "history",
     "latest_state",
+    "make_selection_node",
     "new_state",
+    "parse_criteria",
     "pending_nodes",
+    "rank_candidates",
     "reset_checkpointer_cache",
+    "score_candidates",
+    "snapshot",
+    "step_update",
     "thread_config",
 ]

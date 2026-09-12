@@ -43,6 +43,7 @@ from enum import Enum
 from typing import Any, Literal, Union, get_args, get_origin
 
 from pydantic import BaseModel, Field
+from pydantic_core import PydanticUndefined
 
 from fashionops.llm.pricing import estimate_cost
 from fashionops.llm.types import (
@@ -112,6 +113,30 @@ def _guess_string(field_name: str, description: str | None) -> str:
 MAX_NESTING_DEPTH = 6
 
 
+def numeric_bounds(field_info: Any) -> tuple[float | None, float | None]:
+    """从 Pydantic 的 FieldInfo 里取出数值上下界。
+
+    ``Field(ge=1, le=10)`` 这类约束存在 ``metadata`` 里（是 ``Ge(1)`` / ``Le(10)``
+    这种标记对象），不在 annotation 上。
+
+    **不读它的话 mock 会直接失效**：
+    ``count: int = Field(default=3, ge=1, le=10)`` 会被生成成 1~100 的随机数，
+    永远过不了校验；而修复循环也救不回来，因为 mock 每次生成的都一样烂 ——
+    表现为"结构化输出重试 3 次仍失败"。
+    """
+    low: float | None = None
+    high: float | None = None
+    for meta in getattr(field_info, "metadata", None) or []:
+        name = type(meta).__name__
+        for attr in ("ge", "gt"):
+            if name == attr.capitalize() and getattr(meta, attr, None) is not None:
+                low = float(getattr(meta, attr))
+        for attr in ("le", "lt"):
+            if name == attr.capitalize() and getattr(meta, attr, None) is not None:
+                high = float(getattr(meta, attr))
+    return low, high
+
+
 def fake_value(  # noqa: C901, PLR0911, PLR0912
     annotation: Any,
     field_name: str,
@@ -119,12 +144,14 @@ def fake_value(  # noqa: C901, PLR0911, PLR0912
     rng: random.Random,
     *,
     depth: int = 0,
+    bounds: tuple[float | None, float | None] | None = None,
 ) -> Any:
     """按类型注解造一个值。
 
     ``depth`` 只计**模型嵌套层数**，不计函数调用层数。
+    ``bounds`` 是字段声明的数值上下界（只有第一个参数层用得上）。
 
-    这里踩过两个坑：
+    这里踩过三个坑：
 
     1. 最初每递归一次就 +1，于是 ``SelectionResult → Candidate → PricePoint``
        这种两层嵌套加上容器各占一层，深度直接到 5 被截断成 ``None``，
@@ -132,6 +159,8 @@ def fake_value(  # noqa: C901, PLR0911, PLR0912
     2. 截断必须在**嵌套模型**那一个分支上做，不能放在函数入口 ——
        放入口的话 ``name: str`` 这种必需字段也会被填成 ``None``，
        而它并不接受 None。
+    3. 不读 ``Field(ge=..., le=...)`` 的话，``count: int = Field(ge=1, le=10)``
+       会被生成成 1~100，永远过不了校验。
     """
     origin = get_origin(annotation)
 
@@ -173,13 +202,24 @@ def fake_value(  # noqa: C901, PLR0911, PLR0912
         return True
 
     if annotation is int:
-        return rng.randint(1, 100)
+        low = int(bounds[0]) if bounds and bounds[0] is not None else 1
+        high = int(bounds[1]) if bounds and bounds[1] is not None else 100
+        return rng.randint(min(low, high), max(low, high))
 
     if annotation is float:
-        return round(rng.uniform(1.0, 100.0), 2)
+        low = bounds[0] if bounds and bounds[0] is not None else 1.0
+        high = bounds[1] if bounds and bounds[1] is not None else 100.0
+        if high < low:
+            low, high = high, low
+        # 有上界时取靠上位置：值落在边界附近更容易暴露"差一点点就不合格"的问题
+        return round(low + (high - low) * rng.uniform(0.2, 0.9), 4)
 
     if annotation is Decimal:
-        return Decimal(str(round(rng.uniform(10.0, 9999.0), 2)))
+        low = bounds[0] if bounds and bounds[0] is not None else 10.0
+        high = bounds[1] if bounds and bounds[1] is not None else 9999.0
+        if high < low:
+            low, high = high, low
+        return Decimal(str(round(low + (high - low) * rng.uniform(0.2, 0.9), 2)))
 
     if annotation is datetime:
         return datetime(2026, 9, 11, 21, 0, 0) - timedelta(hours=rng.randint(0, 72))
@@ -206,15 +246,37 @@ def fake_value(  # noqa: C901, PLR0911, PLR0912
 
 
 def fake_instance(schema: type[BaseModel], rng: random.Random, *, depth: int = 0) -> dict[str, Any]:
-    """按模型定义造一个合法实例（返回 dict，可直接 ``schema(**d)``）。"""
+    """按模型定义造一个合法实例（返回 dict，可直接 ``schema(**d)``）。
+
+    ## 标量字段优先用声明的默认值
+
+    一开始所有字段都随机生成，结果 ``min_stock: int = Field(default=30, ge=0, le=10000)``
+    被生成成 7000 —— 语义上完全不合理，而且会把候选池全部过滤空，
+    表现为"选品 Agent 跑出来一个候选都没有"。
+
+    默认值本来就是"一次典型调用长什么样"，直接用它最合适。
+    但**容器字段除外**：``tags: list[str] = Field(default_factory=list)``
+    用默认值就永远是空列表，嵌套结构和遍历逻辑都测不到 ——
+    那就失去了用 mock 跑通全链路的意义。
+    """
     result: dict[str, Any] = {}
     for name, field_info in schema.model_fields.items():
+        default = field_info.default
+        if (
+            default is not PydanticUndefined
+            and default is not None
+            and not isinstance(default, (list, dict, set, tuple))
+        ):
+            result[name] = default
+            continue
+
         result[name] = fake_value(
             field_info.annotation,
             name,
             field_info.description,
             rng,
             depth=depth,
+            bounds=numeric_bounds(field_info),
         )
     return result
 

@@ -272,6 +272,70 @@ def check_budget(state: TaskState) -> None:
         )
 
 
+def step_update(
+    state: TaskState,
+    *,
+    node: str,
+    agent: str,
+    status: NodeStatus = "succeeded",
+    summary: str = "",
+    tool_calls: list[str] | None = None,
+    attempts: int = 1,
+    duration_ms: int = 0,
+    tokens: int = 0,
+    cost: Decimal = Decimal("0"),
+    llm_calls: int = 0,
+    error: str | None = None,
+    progress: int | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """构造"记录一步执行"的状态更新片段。
+
+    ## 有 reducer 的字段和没有的字段，语义完全不同
+
+    这是写 LangGraph 节点时最容易搞错的地方：
+
+    * ``steps`` / ``completed_nodes`` / ``artifacts`` / ``errors``
+      **声明了 reducer**（``Annotated[list, operator.add]``），
+      节点只需返回**本次新增的那一项**，LangGraph 会负责追加。
+      如果在这里返回"累积后的完整列表"，结果会变成重复两遍。
+    * ``total_tokens`` / ``total_cost`` / ``llm_calls``
+      **没有 reducer**，是覆盖语义，节点必须返回**累加后的绝对值**。
+      如果只返回本次的增量，之前几轮的消耗就丢了 ——
+      预算控制会因此完全失效，而且不报错。
+
+    两种语义混在一个 dict 里，很容易顺手写错。所以统一收在这个函数里，
+    调用方只管传"这一步花了多少"，不用每次重新想一遍。
+    """
+    step = StepRecord(
+        node=node,
+        agent=agent,
+        status=status,
+        summary=summary,
+        tool_calls=list(tool_calls or []),
+        attempts=attempts,
+        duration_ms=duration_ms,
+        tokens=tokens,
+        cost=cost,
+        error=error,
+    )
+    update: dict[str, Any] = {
+        # 有 reducer：只返回新增项
+        "steps": [step],
+        "completed_nodes": [node],
+        # 无 reducer：返回累加后的绝对值
+        "current_node": node,
+        "llm_calls": int(state.get("llm_calls", 0)) + llm_calls,
+        "total_tokens": int(state.get("total_tokens", 0)) + tokens,
+        "total_cost": Decimal(str(state.get("total_cost", 0))) + cost,
+    }
+    if progress is not None:
+        update["progress"] = progress
+    if extra:
+        update.update(extra)
+    return update
+
+
 # ---------------------------------------------------------------------------
 # 依赖上下文（**不属于状态**）
 # ---------------------------------------------------------------------------
