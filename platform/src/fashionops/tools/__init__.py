@@ -47,11 +47,12 @@ def register_all_tools(registry: ToolRegistry | None = None) -> ToolRegistry:
     测试里传一个新建的，避免和别的测试互相污染。
     """
     from fashionops.gateway.registry import registry as default_registry
-    from fashionops.tools import erp, report
+    from fashionops.tools import erp, mail, report
 
     target = registry if registry is not None else default_registry
     erp.register(target)
     report.register(target)
+    mail.register(target)
     return target
 
 

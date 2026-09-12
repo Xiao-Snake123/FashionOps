@@ -26,6 +26,18 @@ from fashionops.net import ensure_localhost_bypasses_proxy
 # src/fashionops/config.py → parents[2] 就是 platform/
 _PLATFORM_ROOT = Path(__file__).resolve().parents[2]
 
+
+def _split_csv(raw: str | None) -> tuple[str, ...]:
+    """把逗号（或空白）分隔的配置拆成元组，顺手去掉空项。
+
+    白名单这类配置用字符串而不是列表，是为了在 ``.env`` 里好写：
+    写成 JSON 数组的话要处理引号和转义，改一次错一次。
+    """
+    if not raw:
+        return ()
+    parts = re.split(r"[,\s]+", raw.strip())
+    return tuple(p for p in parts if p)
+
 # 侧翼效应，但是必须的：只要有用到配置的地方，本地服务就得绕过系统代理。
 # 背景见 fashionops/net.py —— 不这么做的话，连本地 Qdrant 都会返回 502。
 ensure_localhost_bypasses_proxy()
@@ -159,6 +171,54 @@ class Settings(BaseSettings):
     )
     erp_api_mode: str = Field(default="mock", description="ERP：``mock`` / ``real``")
 
+    # ---- 邮件（通知 Agent）----
+    # 给 Agent 装上一双能发邮件的手，等于给它一个对外发声的通道。
+    # 邮件发出去了就收不回来，所以这里的每一个默认值都选了"更安全的那个"：
+    # 总开关默认关、dry_run 默认开、白名单默认空（空 = 禁发）。
+    # 漏配的后果必须是"发不出去"，而不是"能发给任何人"。
+    mail_enabled: bool = Field(
+        default=False, description="邮件发送总开关。false 时 mail.send 一律拒绝"
+    )
+    mail_dry_run: bool = Field(
+        default=True, description="只记录不投递。开发期默认开，要真发必须显式关掉"
+    )
+    mail_from: str = Field(default="agent@fashionops.local", description="发件人地址")
+    mail_send_allowlist: str = Field(
+        default="",
+        description=(
+            "收件人白名单，逗号分隔。支持三种写法：``*``（全部）/ "
+            "``@corp.com``（整个域）/ ``a@b.com``（精确）。**留空 = 禁止发送任何邮件**"
+        ),
+    )
+    mail_send_denylist: str = Field(
+        default="", description="收件人黑名单，逗号分隔。优先级高于白名单"
+    )
+    mail_max_recipients: int = Field(default=10, description="单封邮件收件人上限（防群发）")
+    mail_rate_limit_per_minute: int = Field(
+        default=6, description="每收件人每分钟最多收几封。防模型陷入循环反复发"
+    )
+    mail_max_attachment_bytes: int = Field(
+        default=20 * 1024 * 1024, description="单个附件大小上限（字节）"
+    )
+    mail_attachment_allowlist: str = Field(
+        default=".xlsx,.pdf,.csv,.png,.jpg,.jpeg",
+        description="允许外发的附件扩展名，逗号分隔。留空 = 不限制（不建议）",
+    )
+
+    # ---- SMTP ----
+    # 只用于真实投递。开发期 mail_dry_run=true 时完全用不到这些。
+    smtp_host: str = Field(default="", description="SMTP 服务器。留空则只能 dry_run")
+    smtp_port: int = Field(default=465, description="465=SSL 直连，587=STARTTLS")
+    smtp_user: str = Field(default="", description="SMTP 登录名，一般是发件邮箱全称")
+    smtp_password: str | None = Field(
+        default=None,
+        exclude=True,
+        repr=False,
+        description="SMTP 授权码。**填邮箱服务商生成的授权码，不是登录密码**",
+    )
+    smtp_use_ssl: bool = Field(default=True, description="true 用 SMTP_SSL（465），false 用 STARTTLS")
+    smtp_timeout: float = Field(default=20.0, description="SMTP 连接/发送超时秒数")
+
     # ---- 工具网关 ----
     gateway_rate_limit_per_minute: int = Field(
         default=120, description="工具调用每分钟上限（按工具名分别计数）"
@@ -248,6 +308,43 @@ class Settings(BaseSettings):
     def model_configured(self) -> bool:
         """是否配置了真实模型。``mock`` 模式下无需 Key，零成本跑通全流程。"""
         return self.model_provider != "mock" and bool(self.model_api_key)
+
+    # ---- 邮件派生属性 ----
+    @property
+    def mail_allowlist(self) -> tuple[str, ...]:
+        return _split_csv(self.mail_send_allowlist)
+
+    @property
+    def mail_denylist(self) -> tuple[str, ...]:
+        return _split_csv(self.mail_send_denylist)
+
+    @property
+    def mail_attachment_exts(self) -> tuple[str, ...]:
+        return tuple(
+            e.lower() if e.startswith(".") else f".{e.lower()}"
+            for e in _split_csv(self.mail_attachment_allowlist)
+        )
+
+    @property
+    def mail_can_really_send(self) -> bool:
+        """能不能真的投递出去（三个条件都满足才行）。"""
+        return self.mail_enabled and not self.mail_dry_run and bool(self.smtp_host)
+
+    def mail_policy_summary(self) -> dict[str, object]:
+        """给 ``/health`` 和模型看的策略摘要 —— 不含任何密码。"""
+        return {
+            "enabled": self.mail_enabled,
+            "dry_run": self.mail_dry_run,
+            "from": self.mail_from,
+            "allowlist": list(self.mail_allowlist),
+            "denylist": list(self.mail_denylist),
+            "max_recipients": self.mail_max_recipients,
+            "rate_limit_per_minute": self.mail_rate_limit_per_minute,
+            "max_attachment_bytes": self.mail_max_attachment_bytes,
+            "attachment_exts": list(self.mail_attachment_exts),
+            "smtp_host": self.smtp_host or "（未配置，只能 dry_run）",
+            "smtp_configured": self.mail_can_really_send,
+        }
 
 
 @lru_cache(maxsize=1)
