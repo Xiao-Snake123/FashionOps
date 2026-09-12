@@ -11,10 +11,10 @@ from __future__ import annotations
 
 from datetime import timedelta
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 
 from fashionops.db import session_scope
 from fashionops.db.base import utcnow
@@ -35,6 +35,18 @@ class QueryCandidatesArgs(BaseModel):
 
 class QueryInventoryArgs(BaseModel):
     sku_codes: list[str] = Field(min_length=1, max_length=100, description="SKU 编码列表")
+
+
+class SalesSummaryArgs(BaseModel):
+    """销售汇总查询参数。"""
+
+    days: int = Field(default=30, ge=1, le=180, description="回溯天数")
+    category: str | None = Field(default=None, description="只统计某个一级类目，留空表示全部")
+    group_by: Literal["category", "day", "channel"] = Field(
+        default="category",
+        description="按什么维度分组：类目 / 日期 / 渠道",
+    )
+    top_n: int = Field(default=30, ge=1, le=200, description="最多返回多少组，按 GMV 降序")
 
 
 # ---------------------------------------------------------------------------
@@ -167,6 +179,82 @@ def _fetch_inventory(sku_codes: list[str]) -> list[dict[str, Any]]:
         ]
 
 
+def _fetch_sales_summary(
+    days: int, category: str | None, group_by: str, top_n: int
+) -> list[dict[str, Any]]:
+    """按维度聚合订单。
+
+    **退货率按订单数算而不是按金额算**。按金额算会被大额订单带偏：
+    一单 5000 元的礼服退货，能把整体退货率拉高好几个点，
+    但它对"这个款到底好不好卖"几乎没有信息量。
+    行业里说的退货率一般也是订单口径。
+    """
+    since = utcnow() - timedelta(days=days)
+
+    if group_by == "day":
+        # func.date 在 SQLite 和 MySQL 上都能用，不用分平台写
+        key_expr = func.date(Order.paid_at).label("bucket")
+    elif group_by == "category":
+        key_expr = Product.category.label("bucket")
+    else:
+        key_expr = Order.channel.label("bucket")
+
+    stmt = (
+        select(
+            key_expr,
+            func.count().label("order_count"),
+            func.sum(Order.actual_amount).label("gmv"),
+            func.count(func.distinct(Order.buyer_nick)).label("customer_count"),
+            func.sum(
+                case((Order.status.in_(("refunded", "refunding")), Order.actual_amount), else_=0)
+            ).label("refund_amount"),
+            func.sum(
+                case((Order.status.in_(("refunded", "refunding")), 1), else_=0)
+            ).label("refund_count"),
+        )
+        .select_from(Order)
+        .where(Order.paid_at >= since, Order.status != "cancelled")
+        .group_by(key_expr)
+        .order_by(func.sum(Order.actual_amount).desc())
+        .limit(top_n)
+    )
+
+    if group_by == "category":
+        # outer join：订单的 sku_id 在商品被删时会置空，inner join 会把这些单子漏掉
+        stmt = stmt.outerjoin(SKU, SKU.id == Order.sku_id).outerjoin(
+            Product, Product.id == SKU.product_id
+        )
+
+    if category and group_by != "category":
+        stmt = stmt.outerjoin(SKU, SKU.id == Order.sku_id).outerjoin(
+            Product, Product.id == SKU.product_id
+        ).where(Product.category == category)
+    elif category:
+        stmt = stmt.where(Product.category == category)
+
+    rows: list[dict[str, Any]] = []
+    with session_scope() as session:
+        for bucket, orders, gmv, customers, refund, refund_count in session.execute(stmt).all():
+            gmv_d = _to_decimal(gmv) or Decimal("0")
+            refund_d = _to_decimal(refund) or Decimal("0")
+            orders = int(orders or 0)
+            rows.append(
+                {
+                    "group": str(bucket) if bucket is not None else "（未分类）",
+                    "order_count": orders,
+                    "customer_count": int(customers or 0),
+                    "gmv": float(gmv_d),
+                    "refund_amount": float(refund_d),
+                    "avg_order_value": float(
+                        (gmv_d / orders).quantize(Decimal("0.01")) if orders else Decimal("0")
+                    ),
+                    "refund_count": int(refund_count or 0),
+                    "return_rate": round(int(refund_count or 0) / orders, 4) if orders else 0.0,
+                }
+            )
+    return rows
+
+
 # ---------------------------------------------------------------------------
 # 注册
 # ---------------------------------------------------------------------------
@@ -205,3 +293,39 @@ def register(registry: ToolRegistry) -> None:
     def query_inventory(sku_codes: list[str]) -> dict[str, Any]:
         rows = _fetch_inventory(sku_codes)
         return {"count": len(rows), "items": rows}
+
+    @registry.tool(
+        name="erp.query_sales_summary",
+        description=(
+            "按类目 / 日期 / 渠道聚合销售数据，返回 GMV、订单数、客单价、"
+            "退款金额与退货率。用于经营分析与报表。"
+        ),
+        args_model=SalesSummaryArgs,
+        scopes=(Scope.ERP_READ,),
+        read_only=True,
+        timeout_s=20.0,
+        tags=("analytics",),
+        rate_limit_per_minute=30,
+    )
+    def query_sales_summary(
+        days: int = 30,
+        category: str | None = None,
+        group_by: str = "category",
+        top_n: int = 30,
+    ) -> dict[str, Any]:
+        rows = _fetch_sales_summary(days, category, group_by, top_n)
+        total_gmv = sum(r["gmv"] for r in rows)
+        total_orders = sum(r["order_count"] for r in rows)
+        total_refund = sum(r["refund_amount"] for r in rows)
+        return {
+            "days": days,
+            "group_by": group_by,
+            "count": len(rows),
+            "totals": {
+                "gmv": round(total_gmv, 2),
+                "order_count": total_orders,
+                "refund_amount": round(total_refund, 2),
+                "avg_order_value": round(total_gmv / total_orders, 2) if total_orders else 0.0,
+            },
+            "groups": rows,
+        }

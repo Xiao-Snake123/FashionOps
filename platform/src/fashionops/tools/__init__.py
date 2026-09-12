@@ -30,8 +30,8 @@ from fashionops.gateway.registry import Scope, ToolRegistry
 AGENT_SCOPES: dict[str, frozenset[str]] = {
     "orchestrator": frozenset({Scope.ERP_READ, Scope.ECOM_READ, Scope.AD_READ, Scope.KB_READ}),
     "selection": frozenset({Scope.ERP_READ, Scope.ECOM_READ}),
-    "analytics": frozenset({Scope.ERP_READ, Scope.ECOM_READ}),
-    "notification": frozenset({Scope.MAIL_SEND}),
+    "analytics": frozenset({Scope.ERP_READ, Scope.ECOM_READ, Scope.ASSET_WRITE}),
+    "notification": frozenset({Scope.MAIL_SEND, Scope.ASSET_WRITE}),
     "listing": frozenset({Scope.ERP_READ, Scope.ECOM_READ, Scope.ECOM_WRITE}),
     "ads": frozenset({Scope.ERP_READ, Scope.AD_READ, Scope.AD_WRITE}),
     "service": frozenset({Scope.ERP_READ, Scope.KB_READ, Scope.MAIL_SEND}),
@@ -47,10 +47,11 @@ def register_all_tools(registry: ToolRegistry | None = None) -> ToolRegistry:
     测试里传一个新建的，避免和别的测试互相污染。
     """
     from fashionops.gateway.registry import registry as default_registry
-    from fashionops.tools import erp
+    from fashionops.tools import erp, report
 
     target = registry if registry is not None else default_registry
     erp.register(target)
+    report.register(target)
     return target
 
 

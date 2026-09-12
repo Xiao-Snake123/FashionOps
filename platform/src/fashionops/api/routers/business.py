@@ -9,8 +9,9 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
+from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -38,6 +39,7 @@ from fashionops.db.models import (
     TaskEvent,
     Ticket,
 )
+from fashionops.storage import PathEscapeError, get_storage
 
 router = APIRouter(prefix="/api/v1", tags=["business"])
 
@@ -287,3 +289,39 @@ def list_kb(session: Session = Depends(get_db), category: str | None = None) -> 
         stmt = stmt.where(KBArticle.category == category)
     rows = session.scalars(stmt.order_by(KBArticle.article_no)).all()
     return [KBArticleOut.model_validate(r) for r in rows]
+
+
+@router.get(
+    "/assets/raw/{key:path}",
+    summary="下载素材原文件（report.export_excel 返回的 URL 就指向这里）",
+    response_class=Response,
+)
+def download_asset(key: str, session: Session = Depends(get_db)) -> Response:
+    """把存储里的原始文件流出去。
+
+    ``report.export_excel`` 返回的 ``url`` 指向这个路由 ——
+    没有它的话，Agent 写进邮件正文的链接是个死链，
+    "产出可见"这个目标就只完成了一半。
+
+    安全上做两层：先按 ``storage_path`` 查 ``assets`` 表（未登记的 key 一律不服务，
+    这比直接信任 URL 里的路径安全得多），再交给存储层自己去挡路径逃逸。
+    """
+    asset = session.scalar(select(Asset).where(Asset.storage_path == key))
+    if asset is None:
+        raise HTTPException(status_code=404, detail="素材不存在或未登记")
+
+    try:
+        payload = get_storage().read(key)
+    except (PathEscapeError, FileNotFoundError, OSError) as exc:
+        # 表里有记录但文件没了：明确报 410 而不是 500，
+        # 因为"文件被清理掉了"和"服务出错"对调用方是两件不同的事
+        raise HTTPException(status_code=410, detail=f"素材文件已不可用：{exc}") from exc
+
+    # 文件名可能是中文，必须按 RFC 5987 编码放在 filename* 里，
+    # 直接塞进 filename= 会让部分客户端拿到乱码或直接截断
+    disposition = f"attachment; filename*=UTF-8''{quote(asset.name)}"
+    return Response(
+        content=payload,
+        media_type=asset.mime_type or "application/octet-stream",
+        headers={"Content-Disposition": disposition},
+    )

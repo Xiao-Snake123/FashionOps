@@ -37,6 +37,8 @@ dependencies = [
     "langgraph-checkpoint-redis>=0.0.1",
     "langchain-core>=0.3.20",
     "langchain-openai>=0.2.10",
+    # 文档生成（数据分析 Agent 出报表）
+    "openpyxl>=3.1",
     # 假数据
     "faker>=25.0",
 ]
