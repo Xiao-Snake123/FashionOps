@@ -26,7 +26,6 @@ from fashionops.config import get_settings  # noqa: E402
 from fashionops.db import session_scope  # noqa: E402
 from fashionops.db.models import Product  # noqa: E402
 from fashionops.gateway import (  # noqa: E402
-    CallContext,
     MemoryAuditSink,
     ToolGateway,
     get_circuit_breaker,
