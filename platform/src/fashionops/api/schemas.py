@@ -14,7 +14,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Generic, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 
 T = TypeVar("T")
 
@@ -114,6 +114,32 @@ class TaskOut(ORMBase):
     created_at: datetime
     finished_at: datetime | None = None
 
+    @field_validator("dag", mode="before")
+    @classmethod
+    def _normalize_dag(cls, value: object) -> object:
+        """库里的 DAG 有新、旧两种形状，在**唯一出口**统一成新形状。
+
+        放这里（而不是只在详情接口里调一次）的原因是：列表页和详情页
+        必须拿到同一种形状，否则前端每处渲染都要写两套分支。
+        """
+        from fashionops.agents.planner import normalize_dag
+
+        if isinstance(value, dict):
+            return normalize_dag(value)
+        return value
+
+
+class TaskDetailOut(TaskOut):
+    """任务详情。在列表字段之上补「挂起状态」和「审批载荷」。"""
+
+    #: 非空 = 任务停在人工闸口，前端据此弹确认框
+    approval_payload: dict | None = None
+    #: 进程内是否有线程正在跑它（和 status 不同：status 落库有延迟）
+    is_running: bool = False
+    #: 还在迁移态（pending/running/waiting_approval）—— 即"值得继续轮询"
+    is_pending: bool = False
+    started_at: datetime | None = None
+
 
 class TaskEventOut(ORMBase):
     id: int
@@ -182,6 +208,47 @@ class AssetOut(ORMBase):
     generator: str | None = None
     review_status: str
     created_at: datetime
+    #: 存储 key。不直接给前端拼 URL，而是下面用 download_url 算好 ——
+    #: 让前端知道存储路径的话，一旦存储后端从 local 换成 MinIO，
+    #: 拼 URL 的规则要同步改前端代码，而前端不该知道存储层的实现细节。
+    storage_path: str = ""
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def download_url(self) -> str:
+        """可直接点开的下载地址（指向 ``/api/v1/assets/raw/{key}``）。"""
+        return f"/api/v1/assets/raw/{self.storage_path}" if self.storage_path else ""
+
+
+class EmailOut(ORMBase):
+    """邮件记录。
+
+    **被闸门拦下的邮件也要出现在列表里** —— 这是四层闸门设计最该展示的地方。
+    只展示"成功发出的"，运维就看不到"还有几封被策略挡住、而业务方以为已通知"。
+    """
+
+    id: int
+    message_no: str
+    direction: str
+    to_addrs: list | None = None
+    cc_addrs: list | None = None
+    bcc_addrs: list | None = None
+    from_addr: str | None = None
+    subject: str | None = None
+    body_text: str | None = None
+    attachments: list | None = None
+    status: str
+    gate_decision: str | None = None
+    gate_reason: str | None = None
+    error_message: str | None = None
+    sent_at: datetime | None = None
+    created_at: datetime
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def blocked(self) -> bool:
+        """是不是被策略拦下的。前端拿它决定要不要标红。"""
+        return bool(self.gate_decision and self.gate_decision.startswith("blocked"))
 
 
 class KBArticleOut(ORMBase):

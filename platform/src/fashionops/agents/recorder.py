@@ -49,6 +49,10 @@ EVENT_APPROVAL = "approval_required"
 EVENT_RESUMED = "task_resumed"
 EVENT_FINISHED = "task_finished"
 EVENT_FAILED = "task_failed"
+#: 人工驳回导致的终止。刻意**不复用** ``task_failed``：
+#: 在事件流里看到 ``task_failed`` 时读的人会去查错误栈，
+#: 而取消根本没有错误 —— 是人做的决定。混淆这两件事会误导排查方向。
+EVENT_CANCELLED = "task_cancelled"
 
 #: 编排层自身的节点，不是业务 Agent —— 它们不该进 ``agent_runs``
 #: （那张表是"Agent 成功率/延迟/成本"的数据源，混进编排节点会把指标算歪）
@@ -153,16 +157,22 @@ class TaskRecorder:
                 task.approval_payload = None
 
         self._safe(_do)
+        if status == "cancelled":
+            event_type, level = EVENT_CANCELLED, "warn"
+        elif status == "failed":
+            event_type, level = EVENT_FAILED, "error"
+        else:
+            event_type, level = EVENT_FINISHED, "info"
         self.event(
             task_no,
-            EVENT_FAILED if status in ("failed", "cancelled") else EVENT_FINISHED,
+            event_type,
             {
                 "node": "finalize",
                 "status": status,
                 "total_tokens": total_tokens,
                 "total_cost": float(total_cost),
             },
-            level="error" if status == "failed" else "info",
+            level=level,
         )
 
     def mark_waiting_approval(self, task_no: str, approval: Any) -> None:
@@ -391,7 +401,16 @@ def null_recorder() -> Iterator[TaskRecorder]:
 
 
 def read_events(task_no: str, *, since_seq: int = 0, limit: int = 500) -> list[dict[str, Any]]:
-    """按 seq 增量读事件 —— SSE 的取数函数。"""
+    """按 seq 增量读事件 —— SSE 与 ``/events`` 接口共用这一个取数函数。
+
+    **字段名刻意和 ``TaskEventOut`` 保持一致**（``node_name`` / ``agent_name`` /
+    ``created_at`` …）。一开始这里用的是 ``node`` / ``agent`` / ``occurred_at``，
+    结果同一个东西在 REST 和 SSE 两条路上长得不一样 ——
+    前端要写两套解析，而且改一处必漏另一处。
+
+    额外多一个 ``payload``：REST 那边不暴露（可能含大字段），
+    但 SSE 的消费方需要它渲染细节。
+    """
     with session_scope() as session:
         task = session.scalar(select(Task).where(Task.task_no == task_no))
         if task is None:
@@ -404,14 +423,16 @@ def read_events(task_no: str, *, since_seq: int = 0, limit: int = 500) -> list[d
         ).all()
         return [
             {
+                "id": r.id,
                 "seq": r.seq,
                 "event_type": r.event_type,
-                "node": r.node_name,
-                "agent": r.agent_name,
+                "node_name": r.node_name,
+                "agent_name": r.agent_name,
                 "level": r.level,
                 "message": r.message,
+                "duration_ms": r.duration_ms,
+                "created_at": _iso(r.created_at),
                 "payload": r.payload or {},
-                "occurred_at": _iso(r.created_at),
             }
             for r in rows
         ]
@@ -447,6 +468,7 @@ def _iso(value: datetime | None) -> str | None:
 
 __all__ = [
     "EVENT_APPROVAL",
+    "EVENT_CANCELLED",
     "EVENT_FAILED",
     "EVENT_FINISHED",
     "EVENT_NODE",

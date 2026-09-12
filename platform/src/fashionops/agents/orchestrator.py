@@ -325,6 +325,19 @@ def make_finalize_node() -> Any:
                 "failed_steps": failed,
                 "skipped_steps": skipped,
                 "artifact_refs": [a.ref for a in state.get("artifacts", [])],
+                # 带上下载地址与文件名：前端拿这个直接渲染下载链接。
+                # 只给 asset_no 的话前端要么再查一次接口、要么自己拼 URL ——
+                # 而 URL 的拼法属于存储层细节，不该溢出到前端
+                "artifacts": [
+                    {
+                        "kind": a.kind,
+                        "name": a.name,
+                        "ref": a.ref,
+                        "url": (a.meta or {}).get("url", ""),
+                        "size_bytes": (a.meta or {}).get("size_bytes"),
+                    }
+                    for a in state.get("artifacts", [])
+                ],
                 "step_count": len(state.get("steps", [])),
                 "llm_calls": state.get("llm_calls", 0),
                 "total_tokens": state.get("total_tokens", 0),

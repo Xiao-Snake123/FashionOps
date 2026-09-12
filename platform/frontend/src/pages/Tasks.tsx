@@ -1,34 +1,124 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, type Task } from '../api'
 import { num, ProgressBar, StatusBadge } from '../ui'
+
+/**
+ * 示例需求。点一下填进输入框 —— 这是**发现功能的主要入口**：
+ * 用户不知道该问什么的时候，光给一个空文本框等于没告诉他这个系统能干什么。
+ */
+const EXAMPLES = [
+  '帮我选 3 款秋季女装，再出一份近 30 天的经营分析报表发给 ops@example.com',
+  '看一下最近 30 天的经营情况，把异常指标汇总后发邮件通知我',
+  '挑 5 款适合上新的秋季连衣裙',
+]
 
 export default function Tasks() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [total, setTotal] = useState(0)
   const [status, setStatus] = useState('')
   const [error, setError] = useState<string | null>(null)
+
+  const [request, setRequest] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
   const navigate = useNavigate()
+  // 提交后要立刻打开一个「还没写进列表」的任务详情页，
+  // 所以这里不能靠刷新列表，直接用后端返回的任务号跳走
+  const submittingRef = useRef(false)
+
+  const refresh = useCallback(
+    () =>
+      api
+        .tasks({ page_size: 50, status: status || undefined })
+        .then((page) => {
+          setTasks(page.items)
+          setTotal(page.total)
+          setError(null)
+        })
+        .catch((e: Error) => setError(e.message)),
+    [status],
+  )
 
   useEffect(() => {
-    api
-      .tasks({ page_size: 50, status: status || undefined })
-      .then((page) => {
-        setTasks(page.items)
-        setTotal(page.total)
-        setError(null)
-      })
-      .catch((e: Error) => setError(e.message))
-  }, [status])
+    void refresh()
+  }, [refresh])
+
+  const submit = async () => {
+    const text = request.trim()
+    if (text.length < 2 || submittingRef.current) return
+
+    submittingRef.current = true
+    setSubmitting(true)
+    setSubmitError(null)
+    try {
+      const result = await api.submitTask({ user_request: text })
+      setRequest('')
+      navigate(`/tasks/${result.task_no}`)
+    } catch (err) {
+      setSubmitError((err as Error).message)
+    } finally {
+      submittingRef.current = false
+      setSubmitting(false)
+    }
+  }
 
   return (
     <>
       <h2 className="page-title">任务工作台</h2>
       <p className="page-desc">
-        点任意一行进入任务详情，可以看到编排 DAG 与逐步事件流。共 {total} 条。
+        用一句话交办需求，总控 Agent 会自己拆解成 DAG 并逐步执行；需要人工确认的步骤会停下来等你点。
+        点任意一行进入详情可以看到编排 DAG 与实时事件流。共 {total} 条。
       </p>
 
       {error && <div className="error-box">{error}</div>}
+
+      <div className="card" style={{ marginBottom: 14 }}>
+        <h3>交办新需求</h3>
+        <label className="field-label" htmlFor="user-request">
+          用中文描述你想让 Agent 做什么（可同时包含选品、分析、通知，系统会自己拆步骤）
+        </label>
+        <textarea
+          id="user-request"
+          value={request}
+          onChange={(e) => setRequest(e.target.value)}
+          disabled={submitting}
+          placeholder="例如：帮我选 3 款秋季女装，再出一份近 30 天的经营分析报表发给 ops@example.com"
+          // Ctrl/Cmd + Enter 提交：这是个多行输入框，单独按 Enter 应该是换行
+          onKeyDown={(e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') void submit()
+          }}
+        />
+        <div style={{ marginTop: 9 }}>
+          {EXAMPLES.map((example) => (
+            <span
+              key={example}
+              className="prompt-chip"
+              onClick={() => !submitting && setRequest(example)}
+              title="点击填入"
+            >
+              {example.length > 34 ? `${example.slice(0, 34)}…` : example}
+            </span>
+          ))}
+        </div>
+        <div className="toolbar" style={{ marginTop: 12, marginBottom: 0 }}>
+          <button
+            className="btn primary"
+            disabled={submitting || request.trim().length < 2}
+            onClick={() => void submit()}
+          >
+            {submitting ? '已提交，正在跳转…' : '提交任务'}
+          </button>
+          <span className="muted" style={{ fontSize: 12.5 }}>
+            也可以按 Ctrl/⌘ + Enter 提交
+          </span>
+        </div>
+        {submitError && (
+          <div className="error-box" style={{ marginTop: 12, marginBottom: 0 }}>
+            {submitError}
+          </div>
+        )}
+      </div>
 
       <div className="toolbar">
         <select value={status} onChange={(e) => setStatus(e.target.value)}>
@@ -82,7 +172,7 @@ export default function Tasks() {
               {tasks.length === 0 && (
                 <tr>
                   <td colSpan={9} className="empty">
-                    没有任务。先跑 <span className="mono">uv run fashionops-seed</span> 灌假数据
+                    还没有任务。在上面填一句话交办一个，或用 <span className="mono">uv run fashionops-seed</span> 灌假数据
                   </td>
                 </tr>
               )}

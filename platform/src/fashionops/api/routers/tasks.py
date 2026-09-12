@@ -41,9 +41,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from fashionops.api.schemas import Page, TaskEventOut, TaskOut
-from fashionops.db import get_db
-from fashionops.db.models import Task, TaskEvent
+from fashionops.api.schemas import Page, TaskDetailOut, TaskEventOut, TaskOut
+from fashionops.db import get_db, session_scope
+from fashionops.db.models import Task
 
 logger = logging.getLogger("fashionops.api.tasks")
 
@@ -144,14 +144,72 @@ def build_runner(task_no: str, *, task_id: int | None = None) -> Any:
 def submit_task(payload: SubmitTaskRequest) -> TaskActionResponse:
     task_no = payload.task_no or _new_task_no()
     _claim(task_no)
-    _EXECUTOR.submit(
-        _run_guarded, task_no, payload.user_request, payload.task_type, payload.created_by
-    )
+    try:
+        # **先落库再返回**，不能交给后台线程去做。
+        #
+        # 之前这里是直接 submit 到线程池就 return，结果前端拿到 task_no 立刻
+        # 去 GET 详情 —— 而那一行还没插进去，于是 404。表现是刚提交完就跳到一个
+        # "请求失败：404" 的死页面，而且因为首次加载失败、SSE 也没挂上，
+        # 等任务真跑起来后页面**永远不会自己恢复**。
+        #
+        # 用 curl 手工测的时候看不出来：人打完命令再敲第二条中间隔着好几秒，
+        # 刚好够后台线程把行写进去。
+        _create_task_row(
+            task_no,
+            user_request=payload.user_request,
+            task_type=payload.task_type,
+            created_by=payload.created_by,
+        )
+        _EXECUTOR.submit(
+            _run_guarded, task_no, payload.user_request, payload.task_type, payload.created_by
+        )
+    except Exception:
+        _release(task_no)
+        raise
     return TaskActionResponse(
         task_no=task_no,
-        status="running",
-        message="任务已提交。订阅 GET /api/v1/tasks/{task_no}/stream 看实时进度",
+        status="pending",
+        message="任务已受理。订阅 GET /api/v1/tasks/{task_no}/stream 看实时进度",
     )
+
+
+def _create_task_row(
+    task_no: str, *, user_request: str, task_type: str, created_by: str
+) -> int | None:
+    """插入 ``tasks`` 行（``pending``），返回它的 id。
+
+    状态给 ``pending`` 而不是 ``running``：后台线程还没真的开跑，
+    标成 running 会让"有线程在跑"和"只是排着队"两件事在界面上分不出来。
+    ``pending`` 也在 ``_RUNNING_STATES`` 里，所以前端照样会挂 SSE 等它。
+    """
+    from fashionops.db.base import utcnow
+
+    with session_scope() as session:
+        existing = session.scalar(select(Task).where(Task.task_no == task_no))
+        if existing is not None:
+            # 重跑同一个 task_no：把上一轮的终态清干净，否则界面会先显示旧结果
+            existing.status = "pending"
+            existing.progress = 0
+            existing.result = None
+            existing.error_message = None
+            existing.approval_payload = None
+            existing.finished_at = None
+            existing.started_at = utcnow()
+            return existing.id
+        task = Task(
+            task_no=task_no,
+            title=user_request[:120] or task_no,
+            user_request=user_request,
+            task_type=task_type,
+            status="pending",
+            progress=0,
+            thread_id=task_no,
+            created_by=created_by,
+            started_at=utcnow(),
+        )
+        session.add(task)
+        session.flush()
+        return task.id
 
 
 @router.post(
@@ -211,34 +269,22 @@ def list_tasks(
     )
 
 
-@router.get("/{task_no}", summary="任务详情（含 DAG、执行轨迹、挂起状态）")
-def get_task(task_no: str, session: Session = Depends(get_db)) -> dict[str, Any]:
+@router.get(
+    "/{task_no}",
+    response_model=TaskDetailOut,
+    summary="任务详情（含 DAG、挂起状态、审批载荷）",
+)
+def get_task(task_no: str, session: Session = Depends(get_db)) -> TaskDetailOut:
     task = session.scalar(select(Task).where(Task.task_no == task_no))
     if task is None:
         raise HTTPException(status_code=404, detail=f"任务 {task_no} 不存在")
 
-    return {
-        "task_no": task.task_no,
-        "title": task.title,
-        "user_request": task.user_request,
-        "task_type": task.task_type,
-        "status": task.status,
-        "progress": task.progress,
-        "current_node": task.current_node,
-        "dag": task.dag,
-        "result": task.result,
-        # 这个字段非空 = 任务停在人工闸口，前端据此弹确认框
-        "approval_payload": task.approval_payload,
-        "error_message": task.error_message,
-        "llm_calls": task.llm_calls,
-        "total_tokens": task.total_tokens,
-        "total_cost": float(task.total_cost or 0),
-        "is_running": task_no in _RUNNING,
-        "is_pending": task.status in _RUNNING_STATES,
-        "started_at": _iso(task.started_at),
-        "finished_at": _iso(task.finished_at),
-        "created_at": _iso(task.created_at),
-    }
+    detail = TaskDetailOut.model_validate(task)
+    # 这两个是**进程内**状态，不在库里，得手工补 ——
+    # status 落库有延迟，光看它会以为任务还在跑
+    detail.is_running = task_no in _RUNNING
+    detail.is_pending = task.status in _RUNNING_STATES
+    return detail
 
 
 @router.get(
@@ -248,18 +294,13 @@ def get_task(task_no: str, session: Session = Depends(get_db)) -> dict[str, Any]
 )
 def get_events(
     task_no: str,
-    session: Session = Depends(get_db),
     since_seq: int = Query(0, ge=0, description="只取 seq 大于该值的事件"),
 ) -> list[TaskEventOut]:
-    task = session.scalar(select(Task).where(Task.task_no == task_no))
-    if task is None:
-        raise HTTPException(status_code=404, detail=f"任务 {task_no} 不存在")
-    rows = session.scalars(
-        select(TaskEvent)
-        .where(TaskEvent.task_id == task.id, TaskEvent.seq > since_seq)
-        .order_by(TaskEvent.seq)
-    ).all()
-    return [TaskEventOut.model_validate(r) for r in rows]
+    # 直接复用 SSE 的取数函数 —— 两条路走同一份实现，
+    # 避免"REST 和 SSE 字段名不一样"这种要写两套解析的坑
+    from fashionops.agents.recorder import read_events
+
+    return [TaskEventOut.model_validate(e) for e in read_events(task_no, since_seq=since_seq)]
 
 
 @router.get("/{task_no}/stream", summary="SSE 实时进度流")
@@ -302,12 +343,14 @@ def _event_source(task_no: str, cursor: int) -> Any:
     idle_rounds = 0
 
     def frame(event: dict[str, Any]) -> str:
-        # SSE 规范：id 供断线续传，event 是事件名，data 是载荷
-        return (
-            f"id: {event['seq']}\n"
-            f"event: {event['event_type']}\n"
-            f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-        )
+        # ``id`` 供断线续传（浏览器重连时会自动带上 ``Last-Event-ID``）。
+        #
+        # 刻意**不写** ``event: <名字>``：事件类型已经在 ``data.event_type`` 里了，
+        # 再在 SSE 的 ``event`` 字段上写一遍就是同一份信息存两处 ——
+        # 代价是前端得为每个类型各注册一个监听器，于是后端新增一种事件时
+        # 前端会**静默漏掉**（不报错，只是不显示）。不具名的事件全部落到
+        # ``EventSource.onmessage``，一个 handler 就能接住任意类型。
+        return f"id: {event['seq']}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
 
     while time.monotonic() < deadline:
         events = read_events(task_no, since_seq=cursor)
@@ -318,8 +361,12 @@ def _event_source(task_no: str, cursor: int) -> Any:
 
         snapshot = task_snapshot(task_no)
         if snapshot is None:
-            payload = json.dumps({"detail": f"任务 {task_no} 不存在"}, ensure_ascii=False)
-            yield f"event: error\ndata: {payload}\n\n"
+            payload = json.dumps(
+                # ``type`` 是控制帧的判别字段；数据帧用的是 ``event_type``，两者不重叠
+                {"type": "task_error", "detail": f"任务 {task_no} 不存在"},
+                ensure_ascii=False,
+            )
+            yield f"data: {payload}\n\n"
             return
 
         if snapshot["status"] not in _RUNNING_STATES:
@@ -327,8 +374,10 @@ def _event_source(task_no: str, cursor: int) -> Any:
             for event in read_events(task_no, since_seq=cursor):
                 cursor = int(event["seq"])
                 yield frame(event)
-            done = json.dumps({"status": snapshot["status"], "seq": cursor}, ensure_ascii=False)
-            yield f"event: done\ndata: {done}\n\n"
+            done = json.dumps(
+                {"type": "done", "status": snapshot["status"], "seq": cursor}, ensure_ascii=False
+            )
+            yield f"data: {done}\n\n"
             return
 
         # 心跳：长时间没事件就发个注释行，防止中间代理掐掉空闲连接。

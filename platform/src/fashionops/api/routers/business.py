@@ -19,6 +19,7 @@ from fashionops.api.schemas import (
     AdCampaignOut,
     AssetOut,
     BIMetricOut,
+    EmailOut,
     KBArticleOut,
     Page,
     ProductOut,
@@ -30,6 +31,7 @@ from fashionops.db.models import (
     AdCampaign,
     Asset,
     BIMetric,
+    EmailMessage,
     Inventory,
     KBArticle,
     Product,
@@ -247,6 +249,54 @@ def list_kb(session: Session = Depends(get_db), category: str | None = None) -> 
         stmt = stmt.where(KBArticle.category == category)
     rows = session.scalars(stmt.order_by(KBArticle.article_no)).all()
     return [KBArticleOut.model_validate(r) for r in rows]
+
+
+@router.get("/emails", response_model=Page[EmailOut], summary="邮件记录（含被闸门拦下的）")
+def list_emails(
+    session: Session = Depends(get_db),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+    status: str | None = None,
+    gate_decision: str | None = Query(None, description="精确匹配某个闸门决策码"),
+    only_blocked: bool = Query(False, description="只看被策略拦下的"),
+) -> Page[EmailOut]:
+    """邮件列表。
+
+    **默认同时返回放行和被拦的**。只给"发成功的"会让被拦的完全不可见 ——
+    运维看到"这周只发了 12 封"，却不知道还有 8 封被策略挡住、
+    而业务方以为已经通知了。静默拦截比报错更危险，因为没人会去查。
+    """
+    stmt = select(EmailMessage)
+    if status:
+        stmt = stmt.where(EmailMessage.status == status)
+    if gate_decision:
+        stmt = stmt.where(EmailMessage.gate_decision == gate_decision)
+    if only_blocked:
+        stmt = stmt.where(EmailMessage.gate_decision.like("blocked%"))
+    stmt = stmt.order_by(EmailMessage.created_at.desc())
+
+    rows, total = _paginate(session, stmt, page, page_size)
+    return Page[EmailOut](
+        items=[EmailOut.model_validate(r) for r in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get("/emails/stats", summary="邮件闸门统计（被拦截原因分布）")
+def email_gate_stats(session: Session = Depends(get_db)) -> dict:
+    """按 ``gate_decision`` 分组计数。界面上直接画成一张分布图。"""
+    rows = session.execute(
+        select(EmailMessage.gate_decision, func.count())
+        .group_by(EmailMessage.gate_decision)
+        .order_by(func.count().desc())
+    ).all()
+    return {
+        "by_decision": [{"decision": d or "unknown", "count": n} for d, n in rows],
+        "blocked_total": sum(n for d, n in rows if d and d.startswith("blocked")),
+        "total": sum(n for _, n in rows),
+    }
 
 
 @router.get(

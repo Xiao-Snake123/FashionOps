@@ -599,6 +599,39 @@ class TestHitl:
         # 任务结束了，待审批内容要清掉，否则界面一直挂着"待确认"
         assert snap["approval_payload"] is None
 
+    def test_cancel_has_its_own_event_type(self, seeded_env):
+        """人工取消**不能**复用 ``task_failed``。
+
+        事件流是给人排查用的：看到 ``task_failed`` 的人会去查错误栈，
+        而取消根本没有错误 —— 是人做的决定。混在同一个名字里会误导排查方向。
+
+        同一类问题还有：任务终态是 cancelled，但 error_message 有值
+        （记的是"为什么被取消"），前端不能据此就扣"失败原因"的帽子。
+        """
+        runner, _saver = _runner(seeded_env)
+        runner.submit(task_no="H7", user_request="选品出报表发给 ops@example.com")
+        runner.resume(task_no="H7", decision={"approved": False, "by": "王五", "reason": "名单没核对"})
+
+        kinds = [e["event_type"] for e in read_events("H7")]
+        assert kinds[-1] == "task_cancelled"
+        assert "task_failed" not in kinds
+        # 取消要看得见，但不该像真失败那样报 error 级
+        assert read_events("H7")[-1]["level"] == "warn"
+
+    def test_failure_keeps_using_task_failed(self, seeded_env):
+        """反过来：真失败仍然必须是 ``task_failed`` + error 级。
+
+        不加这条的话，把两种终态一起改成 ``task_cancelled`` 也能让上一条用例通过 ——
+        两条用例合起来才真正锁住"取消与失败是两种东西"。
+        """
+        runner, _saver = _runner(seeded_env)
+        runner.submit(task_no="H8", user_request="选品出报表发给 ops@example.com")
+        runner.recorder.finish(task_no="H8", status="failed", error_message="boom")
+
+        events = read_events("H8")
+        assert events[-1]["event_type"] == "task_failed"
+        assert events[-1]["level"] == "error"
+
     @pytest.mark.parametrize("decision", [True, {"approved": True}, "yes", {"approve": "y"}])
     def test_decision_formats_tolerated(self, seeded_env, decision):
         """resume 的载荷格式容忍多种写法 —— 调用方可能是前端、脚本或人。"""

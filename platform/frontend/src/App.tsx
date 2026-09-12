@@ -7,6 +7,7 @@ import TaskDetail from './pages/TaskDetail'
 import Products from './pages/Products'
 import Tickets from './pages/Tickets'
 import Campaigns from './pages/Campaigns'
+import Emails from './pages/Emails'
 
 export default function App() {
   const [summary, setSummary] = useState<Summary | null>(null)
@@ -55,6 +56,9 @@ export default function App() {
         <NavLink to="/campaigns" className="nav-link">
           <span>广告投放</span>
         </NavLink>
+        <NavLink to="/emails" className="nav-link">
+          <span>邮件闸门</span>
+        </NavLink>
         <NavLink to="/products" className="nav-link">
           <span>商品库</span>
         </NavLink>
@@ -85,6 +89,7 @@ export default function App() {
           <Route path="/tasks/:taskNo" element={<TaskDetail />} />
           <Route path="/tickets" element={<Tickets />} />
           <Route path="/campaigns" element={<Campaigns />} />
+          <Route path="/emails" element={<Emails />} />
           <Route path="/products" element={<Products />} />
         </Routes>
       </main>

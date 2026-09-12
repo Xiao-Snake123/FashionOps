@@ -413,3 +413,217 @@ input[type='text']:focus {
   text-align: right;
   margin-left: auto;
 }
+
+/* ---------- 表单 ---------- */
+textarea {
+  width: 100%;
+  min-height: 78px;
+  resize: vertical;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 7px;
+  padding: 9px 11px;
+  font-size: 13px;
+  font-family: inherit;
+  line-height: 1.5;
+  outline: none;
+}
+
+textarea:focus {
+  border-color: var(--accent);
+}
+
+textarea:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.field-label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+/* 示例需求：点一下就填进去，省得用户想不出该怎么问 */
+.prompt-chip {
+  display: inline-block;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 11px;
+  font-size: 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+  margin: 0 6px 6px 0;
+}
+
+.prompt-chip:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+/* ---------- 按钮变体 ---------- */
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 500;
+}
+
+.btn.primary:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.btn.danger {
+  background: rgba(239, 95, 107, 0.14);
+  border-color: rgba(239, 95, 107, 0.4);
+  color: #ffb6bc;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ---------- 审批横幅 ---------- */
+/*
+ * 停在人工闸口时最显眼的一块。用黄色实心边而不是弹窗——
+ * 弹窗可以被随手关掉，而"任务正卡在等你点确认"这件事在用户关掉后
+ * 就没地方看了，改成一个常驻横幅就不会漏。
+ */
+.banner {
+  border-radius: var(--radius);
+  padding: 14px 18px;
+  margin-bottom: 16px;
+  border: 1px solid rgba(232, 178, 58, 0.4);
+  background: rgba(232, 178, 58, 0.08);
+}
+
+.banner.danger {
+  border-color: rgba(239, 95, 107, 0.4);
+  background: rgba(239, 95, 107, 0.08);
+}
+
+.banner.ok {
+  border-color: rgba(53, 192, 122, 0.35);
+  background: rgba(53, 192, 122, 0.07);
+}
+
+.banner h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.banner .actions {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+/* 审批草稿的只读预览：等宽字体 + 可滚动，避免长正文把页面撑开 */
+.draft {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 10px 12px;
+  margin-top: 10px;
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  max-height: 210px;
+  overflow-y: auto;
+}
+
+/* ---------- 产物下载 ---------- */
+.artifact-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 6px;
+}
+
+.artifact {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.artifact .name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- 分布条（邮件闸门统计） ---------- */
+.bar-row {
+  display: grid;
+  grid-template-columns: 170px 1fr 52px;
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
+  margin-bottom: 7px;
+}
+
+.bar-track {
+  background: var(--panel-2);
+  border-radius: 999px;
+  height: 16px;
+  overflow: hidden;
+}
+
+.bar-track > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.3s;
+}
+
+.bar-track > span.danger {
+  background: var(--danger);
+}
+
+.bar-track > span.warn {
+  background: var(--warn);
+}
+
+.bar-track > span.ok {
+  background: var(--ok);
+}
+
+.bar-row .count {
+  text-align: right;
+  color: var(--text-dim);
+}
+
+/* 活着的连接标记：告诉用户"页面在自己更新，不用手动刷新" */
+.live-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
+  margin-right: 6px;
+  vertical-align: middle;
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+

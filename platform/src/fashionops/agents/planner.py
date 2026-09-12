@@ -576,6 +576,57 @@ def plan_as_text(plan: dict[str, Any] | None) -> str:
     return " → ".join(parts)
 
 
+def normalize_dag(raw: dict[str, Any] | None) -> dict[str, Any] | None:
+    """把库里的 DAG 统一成一种形状，让前端只处理一种。
+
+    库里存着**两种历史形状**：
+
+    * 旧（seed 灌的演示任务）：``{nodes: [{id, name, agent, interrupt}], edges: [[from, to]]}``
+    * 新（W4 起的真任务）：``{reasoning, steps: [{step_id, agent, goal, depends_on, approval_required}]}``
+
+    兼容逻辑放后端而不是前端，理由是：前端一旦要同时认两种形状，
+    每处渲染都得写 ``if`` 分支；以后要加第三种形状时改的地方会翻倍。
+
+    归一化放在 ``TaskOut`` 的校验器里（**所有出口共用**），而不是
+    只在详情接口里调一次 —— 否则列表和详情会返回两种形状，
+    前端还是得写两套。
+
+    不改库数据：已写入的行改造要写迁移脚本，而且旧演示任务早晚会被清掉，
+    在读取时兼容成本最低。
+    """
+    if not raw:
+        return None
+    if "steps" in raw:
+        return raw  # 已经是新形状
+
+    nodes = raw.get("nodes") or []
+    edges = raw.get("edges") or []
+    if not nodes:
+        return raw
+
+    incoming: dict[str, list[str]] = {}
+    for edge in edges:
+        if isinstance(edge, (list, tuple)) and len(edge) == 2:
+            incoming.setdefault(str(edge[1]), []).append(str(edge[0]))
+
+    steps = [
+        {
+            "step_id": n.get("id"),
+            "agent": n.get("agent") or "",
+            # 旧形状的 name 是给人看的步骤名，对应新形状的 goal
+            "goal": n.get("name") or "",
+            "depends_on": incoming.get(str(n.get("id")), []),
+            "approval_required": bool(n.get("interrupt")),
+        }
+        for n in nodes
+    ]
+    return {
+        "reasoning": "（历史任务：由 seed 生成的演示数据，已归一化为新形状）",
+        "steps": steps,
+        "legacy": True,
+    }
+
+
 def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, default=str)
 
@@ -597,6 +648,7 @@ __all__ = [
     "default_plan_for",
     "graph_has_entry",
     "make_plan_node",
+    "normalize_dag",
     "plan_as_text",
     "plan_route_target",
     "requested_agents",
