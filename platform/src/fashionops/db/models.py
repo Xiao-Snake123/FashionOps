@@ -1,4 +1,4 @@
-"""业务数据模型 —— 15 张表。
+"""业务数据模型 —— 15 张业务表 + 8 张身份表。
 
 | # | 表 | 用途 | 主要使用方 |
 | --- | --- | --- | --- |
@@ -17,6 +17,10 @@
 | 13 | ``ad_campaigns`` | 广告投放 | 广告投放 Agent |
 | 14 | ``email_messages`` | 邮件记录 | 邮件通知 Agent |
 | 15 | ``audit_logs`` | 审计日志（工具网关） | 工具网关 |
+
+身份域（用户/角色/权限/会话/外部身份/API Key）在 ``models_identity.py``，
+本模块把它一并导入并挂进 ``ALL_MODELS``，所以
+**建表、迁移、健康检查仍然只看那一份清单**。
 
 设计约定见 ``base.py``：时间存 naive UTC、金额用 ``Numeric``、比例用 0~1 小数。
 """
@@ -43,6 +47,20 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fashionops.db.base import Base, utcnow
+
+# 身份模型。**必须在这里 import**：`ALL_MODELS` 和 Alembic 的 autogenerate
+# 都只看 `Base.metadata`，而 metadata 是导入时填充的 ——
+# 不导入就等于"这些表不存在"。
+from fashionops.db.models_identity import (
+    APIKey,
+    ExternalIdentity,
+    Permission,
+    RefreshToken,
+    Role,
+    RolePermission,
+    User,
+    UserRole,
+)
 
 # ---------------------------------------------------------------------------
 # 统一的列类型。SQLAlchemy 的 TypeEngine 实例是无状态的，可以安全共享。
@@ -453,7 +471,27 @@ class Task(Base):
     total_tokens: Mapped[int] = mapped_column(Integer, default=0)
     total_cost: Mapped[Decimal] = mapped_column(COST, default=Decimal("0"))
 
+    # ---- 发起人 ----
+    #: 外键指向真实用户。**可空**：历史数据（seed 灌的演示任务）没有归属人。
+    created_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    #: 用户名**快照**。
+    #: 为什么不直接 join users 拿名字：用户被删/改名后，
+    #: 历史任务上会显示成别人的名字或空白 —— 而"这个任务当时是谁交办的"
+    #: 是个事实，不该随后续变更而改变。
     created_by: Mapped[str] = mapped_column(String(64), default="user")
+
+    # ---- 人工确认留痕（HITL 闸口存在的意义就在这里）----
+    #: 谁批的。只记"任务被批准了"没有意义，必须能回答"**谁**批的"。
+    approved_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    approved_by: Mapped[str | None] = mapped_column(String(64))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime)
+    #: 驳回理由 / 审批备注
+    approval_reason: Mapped[str | None] = mapped_column(Text)
+
     started_at: Mapped[datetime | None] = mapped_column(DateTime)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
@@ -693,6 +731,17 @@ class EmailMessage(Base):
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime)
     error_message: Mapped[str | None] = mapped_column(Text)
+
+    # ---- 审批留痕 ----
+    #: 这封信是**谁批准发出去的**。
+    #: 邮件是对外且不可撤销的动作，事后被问"这封是谁让发的"时
+    #: 必须能从库直接答出来，而不是去翻聊天记录。
+    approved_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    approved_by: Mapped[str | None] = mapped_column(String(64))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
@@ -722,6 +771,15 @@ class AuditLog(Base):
     task_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"))
 
     actor: Mapped[str] = mapped_column(String(64), comment="agent 名 / user / system")
+    #: 发起这次调用的**人**。``actor`` 记的是"哪个 Agent"，
+    #: 但排查时更常问的是"谁触发的"—— 一个 Agent 可能是被任何人的任务调起来的。
+    actor_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    #: 用户名**快照**。外键在用户被删时会置空，只留 ID 的话审计记录
+    #: 就成了"某人干的" —— 合规上一文不值。
+    #: 审计的铁律：它记录"当时发生了什么"，不能随后续变更而改变。
+    actor_username: Mapped[str | None] = mapped_column(String(64))
     tool_name: Mapped[str] = mapped_column(String(128))
     action: Mapped[str | None] = mapped_column(String(64), comment="read/write/execute/approve")
     resource: Mapped[str | None] = mapped_column(String(255))
@@ -740,8 +798,22 @@ class AuditLog(Base):
 
 # ---------------------------------------------------------------------------
 # 表清单（建表、文档、健康检查都用这一份，避免各处手写列表对不上）
+#
+# **顺序即依赖顺序**（父表在前）：清理数据时要按序删，反了会被外键挡住。
+# 身份相关的表排在最前 —— 业务表通过 created_by_id / approved_by_id /
+# actor_user_id 指向 users，所以 users 必须先建、后删。
 # ---------------------------------------------------------------------------
 ALL_MODELS: tuple[type[Base], ...] = (
+    # ---- 身份域（models_identity.py）----
+    User,
+    Role,
+    Permission,
+    UserRole,
+    RolePermission,
+    RefreshToken,
+    ExternalIdentity,
+    APIKey,
+    # ---- 业务域 ----
     Product,
     SKU,
     Inventory,
@@ -758,10 +830,11 @@ ALL_MODELS: tuple[type[Base], ...] = (
     EmailMessage,
     AuditLog,
 )
-"""15 张表，顺序即依赖顺序（父表在前，方便按序清理数据）。"""
+"""23 张表：8 张身份表 + 15 张业务表，顺序即依赖顺序（父表在前）。"""
 
 __all__ = [
     "ALL_MODELS",
+    "APIKey",
     "AdCampaign",
     "AgentRun",
     "Asset",
@@ -769,12 +842,19 @@ __all__ = [
     "BIMetric",
     "Competitor",
     "EmailMessage",
+    "ExternalIdentity",
     "Inventory",
     "KBArticle",
     "Order",
+    "Permission",
     "Product",
+    "RefreshToken",
+    "Role",
+    "RolePermission",
     "SKU",
     "Task",
     "TaskEvent",
     "Ticket",
+    "User",
+    "UserRole",
 ]

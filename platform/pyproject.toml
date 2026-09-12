@@ -31,6 +31,18 @@ dependencies = [
     "redis>=5.0",
     # 向量库
     "qdrant-client>=1.12",
+    # 数据库迁移（schema 变更不能靠 drop 重建）
+    "alembic>=1.13",
+    # 认证：JWT 签发/校验 + 密码哈希
+    #   密码哈希选 argon2id 而不是 bcrypt：bcrypt 有 72 字节截断问题，
+    #   而中文密码按 UTF-8 算很快就超了 —— 超出的部分会被**静默丢弃**，
+    #   表现为"前 72 字节相同的两个不同密码都能登录"。
+    "pyjwt>=2.9",
+    "argon2-cffi>=23.1",
+    # 结构化日志（JSON），便于采集到 ELK/Loki
+    "structlog>=24.1",
+    # Prometheus 指标
+    "prometheus-client>=0.21",
     # Agent 编排
     "langgraph>=0.2.60",
     "langgraph-checkpoint-sqlite>=2.0",
@@ -52,7 +64,16 @@ vectors = [
 observability = [
     "opentelemetry-sdk>=1.27",
     "opentelemetry-exporter-otlp>=1.27",
+    "opentelemetry-instrumentation-fastapi>=0.48b0",
+    "opentelemetry-instrumentation-sqlalchemy>=0.48b0",
+    "opentelemetry-instrumentation-redis>=0.48b0",
     "traceloop-sdk>=0.35",
+]
+# 外部系统真实对接（HTTP 适配器）
+#   httpx 已是核心依赖，这里只补重试与断路器
+integrations = [
+    "httpx-retry>=0.1",
+    "tenacity>=9.0",
 ]
 # 持久化执行（长任务崩溃续跑）
 durable = [
@@ -63,6 +84,9 @@ dev = [
     "pytest-asyncio>=0.23",
     "pytest-cov>=6.0",
     "ruff>=0.6",
+    # 真正的 MySQL/Redis 实例由 docker-compose 提供，
+    # 这几项不参与运行时，只给本地 CI 用
+    "pre-commit>=3.7",
 ]
 
 [project.scripts]
