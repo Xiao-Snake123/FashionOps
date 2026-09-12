@@ -22,8 +22,6 @@ from fashionops.api.schemas import (
     KBArticleOut,
     Page,
     ProductOut,
-    TaskEventOut,
-    TaskOut,
     TicketOut,
 )
 from fashionops.db import get_db
@@ -35,8 +33,6 @@ from fashionops.db.models import (
     Inventory,
     KBArticle,
     Product,
-    Task,
-    TaskEvent,
     Ticket,
 )
 from fashionops.storage import PathEscapeError, get_storage
@@ -137,63 +133,13 @@ def low_stock(
 
 
 # ---------------------------------------------------------------------------
-# 任务与事件流
-# ---------------------------------------------------------------------------
-@router.get("/tasks", response_model=Page[TaskOut], summary="任务列表")
-def list_tasks(
-    session: Session = Depends(get_db),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=200),
-    status: str | None = None,
-    task_type: str | None = None,
-) -> Page[TaskOut]:
-    stmt = select(Task)
-    if status:
-        stmt = stmt.where(Task.status == status)
-    if task_type:
-        stmt = stmt.where(Task.task_type == task_type)
-    stmt = stmt.order_by(Task.created_at.desc())
-
-    rows, total = _paginate(session, stmt, page, page_size)
-    return Page[TaskOut](
-        items=[TaskOut.model_validate(r) for r in rows],
-        total=total,
-        page=page,
-        page_size=page_size,
-    )
-
-
-@router.get("/tasks/{task_no}", response_model=TaskOut, summary="任务详情（含 DAG 定义）")
-def get_task(task_no: str, session: Session = Depends(get_db)) -> TaskOut:
-    task = session.scalar(select(Task).where(Task.task_no == task_no))
-    if task is None:
-        raise HTTPException(status_code=404, detail=f"任务 {task_no} 不存在")
-    return TaskOut.model_validate(task)
-
-
-@router.get(
-    "/tasks/{task_no}/events",
-    response_model=list[TaskEventOut],
-    summary="任务事件流（前端轮询/SSE 的数据源）",
-)
-def get_task_events(
-    task_no: str,
-    session: Session = Depends(get_db),
-    since_seq: int = Query(0, ge=0, description="只取 seq 大于该值的事件，用于增量拉取"),
-) -> list[TaskEventOut]:
-    task = session.scalar(select(Task).where(Task.task_no == task_no))
-    if task is None:
-        raise HTTPException(status_code=404, detail=f"任务 {task_no} 不存在")
-    rows = session.scalars(
-        select(TaskEvent)
-        .where(TaskEvent.task_id == task.id, TaskEvent.seq > since_seq)
-        .order_by(TaskEvent.seq)
-    ).all()
-    return [TaskEventOut.model_validate(r) for r in rows]
-
-
-# ---------------------------------------------------------------------------
 # 工单 / 广告 / 指标 / 素材 / 知识库
+# ---------------------------------------------------------------------------
+# 注：``/tasks*`` 那一组已经搬到 ``routers/tasks.py`` ——
+# 它现在是**写接口**（提交任务 / 人工确认 / SSE），和这里的只读查询
+# 不是同一张责任表。**一个资源只能有一个所有者**：
+# 两边都定义 ``/tasks/{no}`` 的话，FastAPI 会静默使用先注册的那个，
+# 表现为"改了代码没生效"，极难排查。
 # ---------------------------------------------------------------------------
 @router.get("/tickets", response_model=Page[TicketOut], summary="客服工单列表")
 def list_tickets(

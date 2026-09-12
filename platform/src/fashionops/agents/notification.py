@@ -116,17 +116,27 @@ def make_notification_node(
         cost = Decimal("0")
         llm_calls = 0
 
-        analytics = state.get("findings", {}).get("analytics")
-        if not analytics:
+        # ---- 上游结论：有什么用什么，不和特定节点耦合 ----
+        #
+        # 第一版硬依赖 findings['analytics']，结果真实模型把「选品 + 分析」
+        # 合并成一个步骤（agent=selection）时，通知节点直接失败 ——
+        # 而实际上选品结论本身就值得发一封邮件。
+        #
+        # 该 Agent 的职责是"把已有结论组织成邮件"，不是"等某个特定上游"。
+        # 只要上游有任何一条结论文，它就应该能干活。
+        upstream = state.get("findings", {}) or {}
+        analytics = upstream.get("analytics")
+        selection = upstream.get("selection")
+        if not analytics and not selection:
             return step_update(
                 state, node="notification", agent="notification", status="failed",
-                summary="上游没有产出分析结论，无法起草邮件",
+                summary="上游没有任何结论（selection / analytics 都为空），无法起草邮件",
                 tool_calls=tool_names, duration_ms=_ms(started),
-                error="缺少 findings['analytics']",
-                extra={"errors": ["notification 缺少上游分析结论"]},
+                error="缺少上游结论",
+                extra={"errors": ["notification 缺少上游结论"]},
             )
 
-        draft, response = _draft(ctx, state, analytics, recipients)
+        draft, response = _draft(ctx, state, analytics or {}, selection, recipients)
         if response is not None:
             tokens += response.usage.total_tokens
             cost += response.cost
@@ -154,7 +164,7 @@ def make_notification_node(
         to_addrs = list(recipients or model_picked or fallback)
 
         # ---- 附件：只能挂系统真的产出过的素材 ----
-        asset_nos = _report_asset_nos(state, analytics)
+        asset_nos = _report_asset_nos(state, analytics or {})
 
         # ---- 没有收件人：在调工具之前就拦下来 ----
         #
@@ -337,6 +347,7 @@ def _draft(
     ctx: RunContext,
     state: TaskState,
     analytics: dict[str, Any],
+    selection: dict[str, Any] | None,
     recipients: list[str] | None,
 ) -> tuple[EmailDraft | None, Any]:
     """让模型起草邮件。只喂精炼结论，不喂原始数据。"""
@@ -353,7 +364,7 @@ def _draft(
         "system_summary": analytics.get("summary", ""),
         "attachment": (analytics.get("report") or {}).get("filename"),
         # 上游选品结论只给摘要，不给完整候选明细
-        "upstream_selection": _compact(state.get("findings", {}).get("selection")),
+        "upstream_selection": _compact(selection),
     }
     result = structured_call(
         ctx.model,

@@ -648,11 +648,33 @@ class TestNotificationNode:
         assert update["approval"].payload["body_text"] == "正文"
 
     def test_missing_upstream_findings_fails_cleanly(self, seeded_env):
+        """上游一条结论都没有时才失败 —— 有任意一条就该能干活。
+
+        第一版硬依赖 ``findings['analytics']``，结果真实模型把「选品 + 分析」
+        合并成一个步骤时，通知节点直接失败 —— 而选品结论本身就值得发一封邮件。
+        这个 Agent 的职责是"把已有结论组织成邮件"，不是"等某个特定上游"。
+        """
         ctx, _ = _build_context(model=MockModelClient(script=[_draft_reply()]))
         state = new_state(task_no="T201", user_request="发邮件")
         update = make_notification_node(ctx)(state)
         assert update["steps"][0].status == "failed"
-        assert "analytics" in update["steps"][0].error
+        assert "上游" in update["steps"][0].error
+
+    def test_works_from_selection_only(self, seeded_env):
+        """只有选品结论、没有分析结论时也要能发邮件。"""
+        ctx, _ = _build_context(model=MockModelClient(script=[_draft_reply()]))
+        state = new_state(task_no="T202", user_request="选品结果发给 ops@example.com")
+        state["findings"] = {
+            "selection": {
+                "criteria": {"category": "女装", "count": 3},
+                "passed": 3,
+                "filtered_out": 1,
+                "overall": "选中 3 款秋季女装",
+            }
+        }
+        update = make_notification_node(ctx)(state)
+        assert update["steps"][0].status == "succeeded"
+        assert update["findings"]["notification"]["decision"] == "dry_run"
 
     def test_budget_accumulates(self, seeded_env):
         ctx, _ = _build_context(model=MockModelClient(script=[_draft_reply()]))

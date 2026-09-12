@@ -122,14 +122,45 @@ class TaskState(TypedDict, total=False):
 
     # ---- 编排 ----
     plan: dict[str, Any] | None
-    """总控 Agent 拆出来的 DAG：``{"nodes": [...], "edges": [...]}``"""
+    """总控 Agent 拆出来的 DAG：``{"steps": [...]}``，每步带 ``step_id`` / ``agent`` /
+    ``depends_on`` / ``approval_required``。见 ``agents/planner.py``。"""
 
     current_node: str
     completed_nodes: Annotated[list[str], operator.add]
-    """**累积**而不是替换：从 checkpoint 恢复后还要知道之前跑过哪些节点。"""
+    """**累积**而不是替换：从 checkpoint 恢复后还要知道之前跑过哪些节点。
+
+    存的是**节点名**（selection / analytics / …），不是计划里的 step_id。
+    """
+
+    completed_steps: Annotated[list[str], operator.add]
+    """已完成的**计划步骤** id。
+
+    为什么不复用 ``completed_nodes``：节点名和 step_id 不是一回事 ——
+    模型生成的计划里 step_id 可能是 ``pick_items``，而节点名只能是 ``selection``。
+    拿节点名去算"这一步做完没"会错位，表现为步骤被重复执行。
+    """
+
+    approved_steps: Annotated[list[str], operator.add]
+    """人工已批准的计划步骤 id。审批闸口通过后写入，避免重复弹审批。"""
+
+    failed_steps: Annotated[list[str], operator.add]
+    """执行失败的计划步骤 id。
+
+    存在的意义是**阻断下游**：上游没跑成，下游的输入就是残缺的，
+    让它接着跑只会得到"看起来成功、实际基于缺失数据"的结论 ——
+    这种结果比直接失败危险得多，因为它会被人当真。
+    """
 
     route: str | None
     """条件边用的路由决策，由当前节点写入、由路由函数读取。"""
+
+    pending_step: str
+    """当前正在处理 / 等待审批的**计划步骤 id**。
+
+    为什么不直接用 ``route``：``route`` 在等审批时存的是哨兵值
+    （``__approval__``），拿它当 step_id 会把审批结果记到哨兵头上 ——
+    表现为"批准了但下次还弹同一个审批"，无限循环。
+    """
 
     # ---- 中间数据 ----
     # 这个名字很重要：这里放"给下一个 Agent 用的精炼结论"，不是原始数据。
@@ -173,6 +204,9 @@ class TaskState(TypedDict, total=False):
 STATE_DEFAULTS: dict[str, Any] = {
     "messages": [],
     "completed_nodes": [],
+    "completed_steps": [],
+    "approved_steps": [],
+    "failed_steps": [],
     "artifacts": [],
     "steps": [],
     "errors": [],
@@ -181,6 +215,7 @@ STATE_DEFAULTS: dict[str, Any] = {
     "selected": [],
     "plan": None,
     "route": None,
+    "pending_step": "",
     "approval": None,
     "pending_approval": False,
     "retry_count": 0,

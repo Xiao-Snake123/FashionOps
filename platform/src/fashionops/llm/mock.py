@@ -92,14 +92,50 @@ _STRING_HINTS: list[tuple[tuple[str, ...], str]] = [
 ]
 
 
-def _guess_string(field_name: str, description: str | None) -> str:
+#: 标识符类字段的后缀。这类字段**必须唯一**，不能拿固定样本值。
+_IDENTIFIER_SUFFIXES = ("_id", "_no", "_code", "_key", "_ref")
+
+#: 不参与标识符判定的，避免误伤（如 ``valid`` 以 ``id`` 结尾）
+_IDENTIFIER_WHITELIST = frozenset({"valid", "void", "grid", "apid"})
+
+
+def _is_identifier(field_name: str) -> bool:
     lowered = field_name.lower()
+    if lowered in _IDENTIFIER_WHITELIST:
+        return False
+    return lowered.endswith(_IDENTIFIER_SUFFIXES)
+
+
+def _guess_string(field_name: str, description: str | None, rng: random.Random) -> str:
+    """造一个字符串值。
+
+    这里两个坑都是实测撞出来的：
+
+    1. **不能把 ``description`` 当值用**。原意是"作者写给人看的解释，当样本很合适"，
+       但实际产出的是 ``"执行该步骤的 Agent，必须从给定列表里选"`` 这种句子，
+       它永远不可能是合法值。``description`` 是文档，不是例子。
+    2. **标识符类字段不能拿固定样本**。``step_id`` 命中了提示表里的
+       ``("stage", "step", "phase") → "analyze"``，于是列表里每个元素都叫
+       ``analyze`` —— 生成出来的计划必然报 "step_id 重复"，而 mock 的本意是
+       生成**合法**数据。
+
+    处理方式：**先按提示表拿到可读的样本，再给标识符类字段接一个唯一后缀**。
+    两边的诉求都照顾到 —— 输出仍然一眼能看懂是什么字段（``SKU00001_483920``），
+    又不会在列表里撞车。后缀用下划线而不是连字符，
+    因为形如 ``^[a-z][a-z0-9_]*$`` 的 pattern 不认连字符。
+    """
+    lowered = field_name.lower()
+    token = f"{rng.randrange(10**6):06d}"
+    identifier = _is_identifier(lowered)
+
     for keywords, sample in _STRING_HINTS:
         if any(k in lowered for k in keywords):
-            return sample
-    # 字段本身带了 description 就用它 —— 那是作者写给人看的解释，当样本很合适
-    if description and len(description) <= 60:
-        return description
+            return f"{sample}_{token}" if identifier else sample
+
+    if identifier:
+        return f"{lowered}_{token}"
+
+    del description  # 故意不用，理由见 docstring
     return f"{field_name} 示例内容"
 
 
@@ -196,7 +232,7 @@ def fake_value(  # noqa: C901, PLR0911, PLR0912
 
     # ---- 标量 ----
     if annotation is str or annotation is Any or annotation is None:
-        return _guess_string(field_name, description)
+        return _guess_string(field_name, description, rng)
 
     if annotation is bool:
         return True
@@ -242,7 +278,7 @@ def fake_value(  # noqa: C901, PLR0911, PLR0912
         return fake_instance(annotation, rng, depth=depth + 1)
 
     # 兜底：交给字符串生成，至少不会让整个流程崩
-    return _guess_string(field_name, description)
+    return _guess_string(field_name, description, rng)
 
 
 def fake_instance(schema: type[BaseModel], rng: random.Random, *, depth: int = 0) -> dict[str, Any]:

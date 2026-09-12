@@ -21,7 +21,7 @@ from sqlalchemy import inspect
 from sqlalchemy.exc import SQLAlchemyError
 
 from fashionops import __version__
-from fashionops.api.routers import business_router, system_router
+from fashionops.api.routers import business_router, system_router, tasks_router
 from fashionops.config import get_settings
 from fashionops.db import get_engine
 from fashionops.db.models import ALL_MODELS
@@ -60,6 +60,7 @@ def create_app() -> FastAPI:
 
     app.include_router(system_router)
     app.include_router(business_router)
+    app.include_router(tasks_router)
 
     # ------------------------------------------------------------------
     # 请求日志：记录耗时，慢请求打 warning
