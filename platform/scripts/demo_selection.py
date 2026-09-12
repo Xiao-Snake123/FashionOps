@@ -32,19 +32,26 @@ from fashionops.gateway import (  # noqa: E402
     get_rate_limiter,
     registry,
 )
-from fashionops.llm import MockModelClient  # noqa: E402
+from fashionops.llm import MockModelClient, get_model_client  # noqa: E402
 from fashionops.tools import AGENT_SCOPES, register_all_tools  # noqa: E402
 
 DEFAULT_REQUEST = "帮我选 3 款秋季女装，库存要够，别亏本卖"
 
 
 def main() -> int:
-    request = " ".join(sys.argv[1:]) or DEFAULT_REQUEST
+    argv = list(sys.argv[1:])
+    # --mock 强制用假模型，方便和真实模型做对照
+    force_mock = "--mock" in argv
+    argv = [a for a in argv if a != "--mock"]
+    request = " ".join(argv) or DEFAULT_REQUEST
     settings = get_settings()
+
+    # 默认用 .env 里配的模型；provider=mock 或没填 key 时会自动降级为假模型
+    model = MockModelClient() if force_mock else get_model_client(settings)
 
     _header("环境")
     print(f"  数据源    : {settings.dependency_summary()['database']}")
-    print(f"  模型      : {settings.model_provider}（零 API Key）")
+    print(f"  模型      : {settings.model_provider} / {settings.model_name} -> {type(model).__name__}")
     print(f"  限流后端  : {settings.cache_backend}")
 
     with session_scope() as session:
@@ -67,7 +74,7 @@ def main() -> int:
 
     ctx = RunContext(
         gateway=gateway,
-        model=MockModelClient(),
+        model=model,
         actor="selection_agent",
         scopes=AGENT_SCOPES["selection"],
     )
