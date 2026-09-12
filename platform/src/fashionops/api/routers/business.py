@@ -12,7 +12,7 @@ from decimal import Decimal
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from fashionops.api.schemas import (
@@ -229,7 +229,19 @@ def list_campaigns(
     stmt = select(AdCampaign)
     if only_losing:
         stmt = stmt.where(AdCampaign.roi < Decimal("1.0"))
-    stmt = stmt.order_by(AdCampaign.roi.asc().nulls_last())
+
+    # ROI 可能为 NULL（计划刚建、还没回传数据），这些要排在**最后**。
+    #
+    # 原本写的是 ``AdCampaign.roi.asc().nulls_last()``，在 SQLite 上一直正常 ——
+    # SQLite 3.30+ 支持 ``ORDER BY x NULLS LAST``。
+    # 但 **MySQL 8.0 不支持这个语法**，会直接报：
+    #     1064 ... near 'NULLS LAST'
+    # 这个 bug 只在切到真 MySQL 时才暴露，是典型的“开发库选型掩盖了方言差异”。
+    #
+    # 用 ``case`` 显式排序键来兼容两边：NULL 记 1、非 NULL 记 0，
+    # 升序排序时非 NULL 自然排在前面。语义一目了然，也不依赖任何方言特性。
+    null_rank = case((AdCampaign.roi.is_(None), 1), else_=0)
+    stmt = stmt.order_by(null_rank, AdCampaign.roi.asc())
 
     rows, total = _paginate(session, stmt, page, page_size)
     return Page[AdCampaignOut](
