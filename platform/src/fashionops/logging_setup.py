@@ -50,20 +50,51 @@ from structlog.contextvars import bind_contextvars, clear_contextvars
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-#: 这些第三方库在 INFO 级别非常吵，会把有用的日志淹掉。
-#: 单独压到 WARNING —— 注意是**按需压制**，不是一刀切把 root 级别调高，
-#: 那样会把我们自己的 INFO 也一起丢掉。
-_NOISY_LOGGERS = (
+#: 第三方库的**名字前缀**，这些库在 INFO 级别非常吵，会把有用的日志淹掉。
+#:
+#: 用前缀匹配而不是精确名字，是有真实教训的：
+#: ``openai`` SDK 把 httpx **内置并改名**成了 ``httpx2`` / ``httpcore2``
+#: （它不想要用户的 httpx 版本影响自己），于是
+#: ``logging.getLogger("httpx").setLevel(WARNING)`` 完全盖不住它 ——
+#: 日志里照样一行行刷 "HTTP Request: POST ... 200 OK"。
+#:
+#: 靠精确名字维护一份名单本质上是追不上的：依赖 vendored、改名、拆包都会绕过它。
+#: 前缀匹配能自动盖上这类情况。
+_NOISY_PREFIXES = (
     "httpx",
     "httpcore",
     "urllib3",
     "qdrant_client",
     "langchain",
-    "langchain_core",
+    "langgraph",
     "openai",
+    "anthropic",
     "sqlalchemy.engine",
     "asyncio",
+    "matplotlib",
+    "PIL",
 )
+
+
+class _NoisyPrefixFilter(logging.Filter):
+    """在 handler 里丢掉吵人库的日志。
+
+    **装在 handler 上而不是给每个 logger 设级别**，两个理由：
+
+    1. 配日志之后才被 ``import`` 的库，它的 logger 会直接继承 root 的 INFO 级别，
+       之前设的 level 管不到它。而 handler 过滤器对所有记录都生效。
+    2. 一处收口。新增要静音的库时只改 ``_NOISY_PREFIXES``，
+       不用去猜哪些 logger 已经存在。
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        name = record.name
+        # 自己的日志（fashionops.*）永远放行 ——
+        # 万一将来有个模块叫 fashionops.httpx_helper，也不该被误伤
+        if name.startswith("fashionops"):
+            return True
+        return not name.startswith(_NOISY_PREFIXES)
+
 
 _configured = False
 
@@ -176,6 +207,8 @@ def setup_logging(
 
     handler = logging.StreamHandler(_utf8_stream())
     handler.setFormatter(formatter)
+    # 过滤器装在 handler 上，对所有记录生效（包括配完日志之后才创建的 logger）
+    handler.addFilter(_NoisyPrefixFilter())
 
     root = logging.getLogger()
     # 清掉已有 handler（uvicorn 可能会先装一个），避免一条日志打两遍
@@ -184,8 +217,11 @@ def setup_logging(
     root.addHandler(handler)
     root.setLevel(log_level)
 
-    for name in _NOISY_LOGGERS:
-        logging.getLogger(name).setLevel(logging.WARNING)
+    # 再对已知的吵人 logger 显式设一次级别，作为双保险：
+    # 它们如果自己装了 handler（比如某些库会 addHandler），
+    # 我们的 handler 过滤器就管不到那条路径，但这个 level 能拦住
+    for prefix in _NOISY_PREFIXES:
+        logging.getLogger(prefix).setLevel(logging.WARNING)
 
     # 让 uvicorn 自己的日志也并进来（它的 access log 我们已经有中间件替代）
     for name in ("uvicorn", "uvicorn.error"):

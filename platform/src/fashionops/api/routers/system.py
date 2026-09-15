@@ -11,7 +11,6 @@ import time
 from datetime import datetime, timedelta
 from decimal import Decimal
 
-import httpx
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
@@ -76,15 +75,61 @@ def _check_redis(settings: Settings) -> DependencyStatus:
 
 
 def _check_qdrant(settings: Settings) -> DependencyStatus:
+    """向量库探活。
+
+    **不满足于 ping 一下。** 原来这里只请求 ``/healthz``，于是
+    “Qdrant 进程活着但知识库根本没建索引”在健康检查上看起来是完全健康的 ——
+    而那时客服 Agent 会声称“知识库里没有相关内容”，把一个运维问题
+    伪装成业务结论。
+
+    所以这里同时报出 collection 的向量数与所用 embedding 模型：
+    向量数为 0 = 索引没建；模型与配置不一致 = 向量空间不兼容，检索结果没意义。
+    两者都是“服务活着但功能不对”，比进程挂掉更难发现。
+    """
     started = time.perf_counter()
     try:
-        with httpx.Client(timeout=settings.qdrant_timeout) as client:
-            resp = client.get(f"{settings.qdrant_url.rstrip('/')}/healthz")
-            resp.raise_for_status()
+        from fashionops.vectors import build_vector_store
+
+        store = build_vector_store(settings)
+        try:
+            ok, detail = store.healthy()
+            if not ok:
+                return DependencyStatus(name="qdrant", ok=False, detail=detail)
+
+            collection = settings.qdrant_collection_kb
+            # exact=False：健康检查会被高频调用，精确计数要扫全量，
+            # 数据量上来后它自己会变成慢请求
+            info = store.info(collection, exact=False)
+            if not info.exists:
+                detail = f"{detail}；⚠ 知识库索引未建（collection {collection} 不存在）"
+            elif info.vector_count == 0:
+                detail = f"{detail}；⚠ 知识库索引为空（{collection} 里 0 个向量）"
+            elif info.embedding_model and info.embedding_model != settings.embedding_model:
+                detail = (
+                    f"{detail}；⚠ 向量模型不一致（库里 {info.embedding_model}，"
+                    f"配置 {settings.embedding_model}）→ 检索结果无意义，需重建索引"
+                )
+            else:
+                detail = (
+                    f"{detail}；{collection}: {info.vector_count} 个向量"
+                    f"（{info.dimension} 维 / {info.embedding_model or '未知模型'}）"
+                )
+        finally:
+            store.close()
+
         latency = (time.perf_counter() - started) * 1000
-        return DependencyStatus(name="qdrant", ok=True, detail="Qdrant 就绪", latency_ms=round(latency, 2))
+        return DependencyStatus(
+            name="qdrant", ok=True, detail=detail, latency_ms=round(latency, 2)
+        )
     except Exception as exc:  # noqa: BLE001
-        return DependencyStatus(name="qdrant", ok=False, detail=f"{type(exc).__name__}: {exc}")
+        # 把地址一起带上：只说“Qdrant 不可用”对排查毫无帮助。
+        # 我们真踩过：系统代理把请求拦成 502，而日志里没有地址，
+        # 第一反应是“Qdrant 挂了”，实际是代理问题。
+        return DependencyStatus(
+            name="qdrant",
+            ok=False,
+            detail=f"{type(exc).__name__}: {exc}（地址 {settings.qdrant_url}）",
+        )
 
 
 # ---------------------------------------------------------------------------

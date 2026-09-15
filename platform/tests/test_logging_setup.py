@@ -237,6 +237,51 @@ class TestNoisyLibraries:
         # 我们自己的 logger 不受影响（它继承 root 的 INFO）
         assert logging.getLogger("fashionops").getEffectiveLevel() <= logging.INFO
 
+    def test_vendored_renamed_dependency_is_also_filtered(self, capfd):
+        """**回归真实问题**：依赖被 vendor 并改名后，精确名单盖不住。
+
+        ``openai`` SDK 把 httpx 内置成了 ``httpx2``（还有 ``httpcore2``），
+        于是 ``logging.getLogger("httpx").setLevel(WARNING)`` 完全不起作用 ——
+        日志里照样一行行刷 "HTTP Request: POST ... 200 OK"。
+
+        所以过滤器用**前缀匹配**。这条用例锁住它。
+        """
+        setup_logging(level="INFO", json_output=False)
+
+        # 这两个名字是 openai SDK 真实用到的
+        logging.getLogger("httpx2").info("HTTP Request: POST /embeddings 200 OK")
+        logging.getLogger("httpcore2.connection").info("send_request_headers")
+
+        out, err = capfd.readouterr()
+        text = out + err
+        assert "HTTP Request" not in text, "vendor 改名后的 httpx2 没被静音"
+        assert "send_request_headers" not in text
+
+    def test_later_created_logger_is_also_filtered(self, capfd):
+        """配置之后才创建的 logger 也要被拦住。
+
+        只给已存在的 logger 设级别是漏的：新 logger 会继承 root 的 INFO。
+        过滤器装在 handler 上就没有这个窗口。
+        """
+        setup_logging(level="INFO", json_output=False)
+        # 这个名字在前面的步骤里从没出现过
+        logging.getLogger("httpx3.brand.new").info("不该出现的噪音")
+
+        out, err = capfd.readouterr()
+        assert "不该出现的噪音" not in (out + err)
+
+    def test_our_own_logs_are_never_filtered(self, capfd):
+        """``fashionops.*`` 永远放行。
+
+        万一将来有个模块叫 ``fashionops.httpx_helper``，
+        前缀匹配会误伤它 —— 这条用例防的就是那个。
+        """
+        setup_logging(level="INFO", json_output=False)
+        logging.getLogger("fashionops.httpx_helper").info("自己的日志")
+
+        out, err = capfd.readouterr()
+        assert "自己的日志" in (out + err)
+
     def test_uvicorn_logs_are_merged_not_duplicated(self, capfd):
         """uvicorn 自带的 handler 要清掉并让它 propagate。
 

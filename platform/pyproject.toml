@@ -93,6 +93,7 @@ dev = [
 fashionops-seed = "fashionops.seed:main"
 fashionops-db = "fashionops.db.cli:main"
 fashionops-config = "fashionops.config_cli:main"
+fashionops-kb = "fashionops.kb.cli:main"
 
 [build-system]
 requires = ["hatchling"]

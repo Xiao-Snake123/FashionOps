@@ -135,6 +135,25 @@ class Settings(BaseSettings):
     )
     embedding_dim: int = Field(default=1024, description="向量维度，需与 embedding 模型一致")
 
+    # ---- Embedding（文本向量化，客服 RAG 用）----
+    # 默认**复用 chat 的 provider 和 Key**：智谱等厂商同一个 Key 同时管
+    # chat 和 embedding，再让用户配一份是多余的心智负担。
+    # 需要混用（chat 用智谱、embedding 用本地 BGE）时才填下面这几个。
+    embedding_provider: str = Field(
+        default="", description="留空则跟随 ``model_provider``；可填 zhipu/qwen/local/mock"
+    )
+    embedding_model: str = Field(
+        default="embedding-2",
+        description="智谱 embedding-2 是 1024 维（和 embedding_dim 对应）；OpenAI 用 text-embedding-3-small",
+    )
+    embedding_api_key: str | None = Field(
+        default=None, exclude=True, repr=False, description="留空则跟随 ``model_api_key``"
+    )
+    embedding_base_url: str = Field(
+        default="", description="留空则按 provider 推导；本地部署的 embedding 服务必须显式填"
+    )
+    embedding_timeout: float = Field(default=30.0, description="单次向量化请求超时秒数")
+
     # ---- 对象存储 ----
     storage_backend: str = Field(
         default="local",
