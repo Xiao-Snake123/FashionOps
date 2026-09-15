@@ -92,6 +92,7 @@ dev = [
 [project.scripts]
 fashionops-seed = "fashionops.seed:main"
 fashionops-db = "fashionops.db.cli:main"
+fashionops-config = "fashionops.config_cli:main"
 
 [build-system]
 requires = ["hatchling"]

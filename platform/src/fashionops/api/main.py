@@ -23,12 +23,18 @@ from sqlalchemy.exc import SQLAlchemyError
 from fashionops import __version__
 from fashionops.api.routers import business_router, system_router, tasks_router
 from fashionops.config import get_settings
+from fashionops.config_doctor import check_config
 from fashionops.db import get_engine
 from fashionops.db.models import ALL_MODELS
+from fashionops.logging_setup import new_request_id, request_context, setup_logging
 
 # Windows 控制台默认 GBK，日志里的中文会抛 UnicodeEncodeError
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
+
+# 日志必须在**任何模块打第一条日志之前**配好。放模块顶层而不是 startup 事件里：
+# startup 事件在 lifespan 之后才跑，而 import 期就可能已经有日志被丢掉了。
+setup_logging()
 
 logger = logging.getLogger("fashionops")
 
@@ -63,24 +69,37 @@ def create_app() -> FastAPI:
     app.include_router(tasks_router)
 
     # ------------------------------------------------------------------
-    # 请求日志：记录耗时，慢请求打 warning
-    # 阶段 3 换成 OpenTelemetry 的 span，这里先用最朴素的方式
+    # 请求日志：分配 request_id 并绑定到上下文，记录耗时，慢请求打 warning
+    #
+    # request_id 绑进 contextvars 之后，**这次请求里任何地方打的日志都会自动带上它** ——
+    # 网关、Agent、工具层都不需要把它当参数一路透传。
+    # 排查线上问题时，"把一次请求涉及的所有日志捞出来"是最常用的动作。
+    #
+    # 客户端传了 X-Request-ID 就用它的（便于和上游/网关的链路对上），
+    # 没传就生成一个。回写在响应头里，方便前端把它记进 bug 报告。
+    #
+    # 阶段 3 换成 OpenTelemetry 的 span，这里先用最朴素的方式。
     # ------------------------------------------------------------------
     @app.middleware("http")
     async def timing_middleware(request: Request, call_next):  # noqa: ANN001, ANN202
+        request_id = request.headers.get("X-Request-ID") or new_request_id()
         started = time.perf_counter()
-        response = await call_next(request)
-        elapsed_ms = (time.perf_counter() - started) * 1000
-        response.headers["X-Process-Time-Ms"] = f"{elapsed_ms:.2f}"
-        if elapsed_ms > 500:
-            logger.warning(
-                "慢请求 %s %s -> %s 用时 %.0fms",
-                request.method,
-                request.url.path,
-                response.status_code,
-                elapsed_ms,
-            )
-        return response
+
+        with request_context(request_id, method=request.method, path=request.url.path):
+            response = await call_next(request)
+            elapsed_ms = (time.perf_counter() - started) * 1000
+            response.headers["X-Process-Time-Ms"] = f"{elapsed_ms:.2f}"
+            response.headers["X-Request-ID"] = request_id
+
+            if elapsed_ms > 500:
+                logger.warning(
+                    "慢请求 %s %s -> %s 用时 %.0fms",
+                    request.method,
+                    request.url.path,
+                    response.status_code,
+                    elapsed_ms,
+                )
+            return response
 
     # ------------------------------------------------------------------
     # 数据库异常统一转 503，不要把 SQL 原文和连接串糊到响应里
@@ -105,6 +124,17 @@ def create_app() -> FastAPI:
         settings_ = get_settings()
         logger.info("启动 %s v%s (env=%s)", settings_.app_name, __version__, settings_.env)
         logger.info("数据库: %s", settings_.dependency_summary()["database"])
+
+        # 配置体检。拼错的配置项会被 pydantic 静默丢掉（extra="ignore"），
+        # 如果不在启动时报出来，就只能等到"邮件怎么发不出去"的时候发现 ——
+        # 而那时排查方向会跑到邮件代码上，真正的原因在一个字母里。
+        report = check_config(settings_)
+        for issue in report.errors:
+            logger.error("配置错误 [%s] %s %s", issue.key, issue.message, issue.suggestion)
+        for issue in report.warnings:
+            logger.warning("配置可疑 [%s] %s %s", issue.key, issue.message, issue.suggestion)
+        if report.ok:
+            logger.info("配置体检通过（%d 个已知配置项）", report.known_count)
 
         try:
             existing = set(inspect(get_engine(settings_)).get_table_names())

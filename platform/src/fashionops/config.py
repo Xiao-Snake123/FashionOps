@@ -26,6 +26,11 @@ from fashionops.net import ensure_localhost_bypasses_proxy
 # src/fashionops/config.py → parents[2] 就是 platform/
 _PLATFORM_ROOT = Path(__file__).resolve().parents[2]
 
+#: 所有环境变量的统一前缀。
+#: 抽成常量是因为 ``config_doctor`` 要靠它反推"合法的环境变量名有哪些"——
+#: 两边各写一份字面量的话，改了前缀就会出现"体检工具自己过时了"的静默失效。
+ENV_PREFIX = "FASHIONOPS_"
+
 
 def _split_csv(raw: str | None) -> tuple[str, ...]:
     """把逗号（或空白）分隔的配置拆成元组，顺手去掉空项。
@@ -47,11 +52,17 @@ class Settings(BaseSettings):
     """进程级配置。"""
 
     model_config = SettingsConfigDict(
-        env_prefix="FASHIONOPS_",
+        env_prefix=ENV_PREFIX,
         # 绝对路径放在前面，保证在任意工作目录启动（uvicorn / pytest / uv run）
         # 都能读到同一份 platform/.env，不会因为 cwd 不同而读到别的配置
         env_file=(_PLATFORM_ROOT / ".env", ".env"),
         env_file_encoding="utf-8",
+        # 未知环境变量**不报错、直接丢弃**。
+        #
+        # 这是刻意的：改成 forbid 的话，一个多余的变量就会让应用起不来，
+        # 而生产上"起不来"比"配置没生效"严重得多。
+        # 代价是拼错变量名**没有任何反馈** —— 所以配了 `config_doctor`
+        # 在启动日志和 CLI 里把这类问题报出来。
         extra="ignore",
     )
 
@@ -63,6 +74,19 @@ class Settings(BaseSettings):
         description="本地数据根目录（SQLite 文件、素材、报表、日志都放这里）",
     )
     timezone: str = "Asia/Shanghai"
+
+    # ---- 日志 ----
+    log_level: str = Field(
+        default="INFO",
+        description="DEBUG / INFO / WARNING / ERROR。开发期想看清链路就改 DEBUG",
+    )
+    log_format: str = Field(
+        default="",
+        description=(
+            "``console``（人读，带颜色）或 ``json``（机器读，接 ELK/Loki）。"
+            "留空则按 env 自动选：prod 用 json，其余用 console"
+        ),
+    )
 
     # ---- 数据库 ----
     # 不配 db_host 就落到 SQLite 文件：跑单测、或先看界面时不需要 MySQL 在跑。
