@@ -1,0 +1,91 @@
+# =============================================================================
+# pre-commit —— 拦在"提交之前"而不是"CI 之后"
+# -----------------------------------------------------------------------------
+# ## 为什么值得装
+#
+# CI 挂了要等一两分钟才能看到，而人已经切去做别的事了 ——
+# 回来时上下文已经丢了，于是"改一行看看"变成三五轮来回。
+# pre-commit 把同一件事提前到 3 秒，改动还在脑子里。
+#
+# ## 装法
+#
+#     pip install pre-commit        # 或 uv tool install pre-commit
+#     pre-commit install            # 装 git hook
+#     pre-commit run --all-files    # 首次全量跑一遍
+#
+# ## 这里只放"秒级能跑完"的检查
+#
+# 不放 pytest：全量 546 项要 80 多秒，每次 commit 等这么久的结果是
+# **有人开始用 `--no-verify`**，然后所有检查都失效了。
+# 测试交给 CI。pre-commit 只负责"格式和低级错误"这一类秒级的事。
+# =============================================================================
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        # 只缩到这些扩展名。不加限制的话它会去改二进制文件和 lock 文件
+        files: \.(py|ts|tsx|css|md|yml|yaml|toml|json|ini)$
+      - id: end-of-file-fixer
+        files: \.(py|ts|tsx|css|md|yml|yaml|toml|json|ini)$
+      - id: check-yaml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=2048"]
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.6
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+        files: ^platform/(src|tests|scripts)/.*\.py$
+      - id: ruff-format
+        files: ^platform/(src|tests|scripts)/.*\.py$
+
+  # ---- 本地钩子 ----
+  - repo: local
+    hooks:
+      # `alembic.ini` 必须是纯 ASCII。
+      #
+      # Alembic 用 `configparser.read(path, encoding="locale")` 读它，
+      # Windows 中文环境下 locale 是 GBK → ini 里一个中文就让
+      # **每一条 alembic 命令**（包括 `--help`）报 UnicodeDecodeError。
+      # 而 `PYTHONUTF8=1` 救不了，因为 encoding="locale" 走的是
+      # `locale.getencoding()`，UTF-8 模式下它仍返回 GBK。
+      #
+      # 这条已经踩过一次，所以放一个钩子在这里挡着 ——
+      # 只写在文档里的规则等于没有规则。
+      - id: alembic-ini-ascii
+        name: alembic.ini 必须只含 ASCII
+        language: system
+        entry: python -c "import sys;d=open('platform/alembic.ini','rb').read();sys.exit('platform/alembic.ini 含非 ASCII 字节，Alembic 在中文 Windows 上会读不了。中文说明请写到 migrations/README.md' if any(b>127 for b in d) else 0)"
+        files: ^platform/alembic\.ini$
+        pass_filenames: false
+
+      # 迁移文件里不允许出现匿名的外键/索引操作。
+      #
+      # `create_foreign_key(None, ...)` 生成的约束没有名字，
+      # downgrade 时想删却不知道该删哪个 —— Alembic 自己都会警告
+      # "this directive will fail as rendered"。所有给已有表加的外键
+      # 必须显式命名（见 docs/11 §6.2）。
+      - id: no-anonymous-constraints
+        name: 迁移里不允许匿名外键/约束
+        language: pygrep
+        entry: 'create_(foreign_key|unique_constraint|primary_key|check_constraint)\(\s*None'
+        files: ^platform/migrations/versions/.*\.py$
+        types: [python]
+
+      # 密钥不许进仓库。
+      #
+      # 这条是有牙齿的：`.env` 已经在 .gitignore 里，但"把 Key 贴进某个
+      # 调试脚本"是更常见的泄露路径，而那种文件不在 .gitignore 里。
+      - id: no-hardcoded-secrets
+        name: 疑似硬编码密钥
+        language: pygrep
+        entry: '(sk-[A-Za-z0-9]{20,}|[A-Za-z0-9]{24}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{20,})'
+        files: \.(py|ts|tsx|md|json|yml|yaml)$
+        # 文档里会有占位符和示例，不检查 docs/
+        exclude: ^docs/

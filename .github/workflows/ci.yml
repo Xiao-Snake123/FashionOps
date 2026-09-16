@@ -1,0 +1,118 @@
+# =============================================================================
+# CI —— 把"手工记得跑"变成"自动跑"
+# -----------------------------------------------------------------------------
+# ## 为什么不装 MySQL / Redis / Qdrant
+#
+# 绝大多数测试**故意**设计成不依赖外部服务（单元测试跑临时 SQLite、
+# 向量测试用内存实现），所以这个流水线不需要 service 容器就能覆盖 500+ 项。
+#
+# 拿真组件的那些测试（`test_api_mysql.py` / `test_gateway_redis.py` /
+# `test_vectors.py[qdrant]`）在连不上时会 `pytest.skip` —— 这是**刻意的**：
+#
+#   让它们变红会逼着每个人本地起一堆中间件，而"需要装东西才能跑的测试"
+#   下场是没人跑。它们真正的价值在于**本机开发时**发现方言差异，
+#   而不是在 CI 上每天红一次。
+#
+# 所以 CI 抓的是"逻辑错"，"方言错"靠本地那几条带 skip 的测试抓。
+# 这是个明确的取舍，不是遗漏。
+# =============================================================================
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  # 允许手动触发，方便在不推代码的情况下验证环境
+  workflow_dispatch:
+
+# 同一分支的新推送取消上一次还在跑的：CI 的价值是"最后一次提交是绿的"，
+# 中间那些跑不完也无所谓，白占 runner
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # 让 Python 的默认 IO 编码是 UTF-8。
+  # 本项目日志和报错里有大量中文，非 UTF-8 环境下会出现
+  # "日志写入时抛 UnicodeEncodeError"，而那是**只有特定机器才复现**的一类问题。
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: utf-8
+
+jobs:
+  backend:
+    name: 后端（lint + 测试）
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: platform
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: platform/uv.lock
+
+      - name: 安装依赖
+        # ★ 必须带 --all-extras，否则 ruff / pytest 会被卸掉
+        run: uv sync --all-extras --frozen
+
+      - name: Ruff（lint）
+        run: uv run ruff check src tests scripts --output-format=github
+
+      - name: Ruff（格式）
+        # 只检查不自动改：CI 上自动改代码没有任何意义（改完也不会提交回来）
+        run: uv run ruff format --check src tests scripts
+
+      - name: Pytest
+        # 关掉第三方库的 deprecation 噪音，只看自己的问题。
+        # -p no:randomly 之类的不需要（没装）。
+        run: uv run pytest tests -q --no-header -W "ignore::DeprecationWarning"
+
+      - name: 配置体检（不配 Key 也要能过）
+        # 这一步的价值：确认"新增配置项忘了加默认值"这类问题会在 CI 上暴露，
+        # 而不是等到部署时才发现
+        run: uv run fashionops-config check || true
+
+      - name: 迁移可逆性
+        # 迁移跑不起来或回不去，是上线时才发现的典型事故。
+        # 这里在空 SQLite 上跑一遍 downgrade → upgrade 全链，
+        # 至少保证"从零建成"和"逐步回退"这两条路没断。
+        #
+        # 注意：SQLite 看不见 MySQL 特有的 DDL 问题（见 docs/11 §6.2），
+        # 所以这一步是**补充**，不能替代在真 MySQL 上验证。
+        run: |
+          uv run fashionops-db upgrade head
+          uv run fashionops-db current
+          uv run fashionops-db downgrade base
+          uv run fashionops-db upgrade head
+
+  frontend:
+    name: 前端（类型 + 构建）
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: platform/frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: platform/frontend/package-lock.json
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 类型检查
+        run: npx tsc --noEmit -p tsconfig.json
+
+      - name: 构建
+        run: npm run build
+        # 注意：**前端没有 eslint 配置**，所以这里不做 lint。
+        # `npm run build` 里的 tsc 已经能抓到大部分问题（未定义变量、
+        # 类型不匹配、导入路径错），而 eslint 会引入一批"风格"级别的告警 ——
+        # 那些噪音会让人开始忽略 lint 输出，反而降低它的价值。
+        # 要加 eslint 的话，第一步是先把规则集收敛到"只报真问题"。

@@ -10,6 +10,7 @@ import {
   type TaskEvent,
 } from '../api'
 import { num, StatusBadge } from '../ui'
+import { currentUserSnapshot } from '../auth'
 
 const NODE_W = 158
 const NODE_H = 64
@@ -128,7 +129,6 @@ export default function TaskDetail() {
   const [streamState, setStreamState] = useState<'idle' | 'live' | 'closed' | 'error'>('idle')
 
   // 审批表单
-  const [approver, setApprover] = useState('user')
   const [reason, setReason] = useState('')
   const [deciding, setDeciding] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -264,7 +264,7 @@ export default function TaskDetail() {
     setDeciding(true)
     setActionError(null)
     try {
-      await api.approveTask(taskNo, { approved, by: approver, reason })
+      await api.approveTask(taskNo, { approved, reason })
       setReason('')
       await loadTask()
     } catch (err) {
@@ -357,13 +357,13 @@ export default function TaskDetail() {
             <div style={{ marginTop: 8, fontSize: 13 }}>{String(approval.question)}</div>
           )}
           <div className="actions">
-            <input
-              type="text"
-              value={approver}
-              onChange={(e) => setApprover(e.target.value)}
-              placeholder="审批人"
-              style={{ width: 130 }}
-            />
+            {/* 审批人**不再让前端输入**，而是显示当前登录用户。
+                让前端传"我是谁"等于把审计变成自证 —— 谁都能以别人的名义
+                批准一封要发出去的邮件，而 HITL 闸口存在的全部意义就是
+                "**谁**批准了"。审批人由后端从访问令牌取。 */}
+            <span className="approver-chip" title="审批人取自当前登录账号">
+              审批人：{currentUserSnapshot()?.full_name || currentUserSnapshot()?.username || '未登录'}
+            </span>
             <input
               type="text"
               value={reason}

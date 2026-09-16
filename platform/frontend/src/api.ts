@@ -5,7 +5,17 @@
  *  - 一律走相对路径（`/api/...`），由 Vite 的 proxy 转到后端。
  *    这样浏览器同源、完全不涉及 CORS，后端换端口也只改 vite.config.ts 一处。
  *  - 统一错误处理：非 2xx 抛 ApiError，页面层只关心 catch。
+ *  - **认证与 401 续期在这里统一做掉**，页面层不需要知道令牌的存在。
  */
+
+import {
+  currentAccessToken,
+  currentRefreshToken,
+  expireSession,
+  saveSession,
+  type TokenPair,
+  type User,
+} from './auth'
 
 export interface Page<T> {
   items: T[]
@@ -246,32 +256,138 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    headers: { 'Content-Type': 'application/json' },
-    ...init,
-  })
+/**
+ * 从响应体里取"给人看的那句话"。
+ *
+ * 后端三种错误形状都要照顾到：
+ *  - `{detail: "..."}` —— 大多数业务错误（含 HTTPException）
+ *  - `{detail: [{msg, loc}]}` —— pydantic 校验失败，是**数组**
+ *  - `{hint: "..."}` —— 503 那类，hint 比 detail 有用得多
+ *
+ * 只处理第一种的话，参数校验失败会显示成 `[object Object]`。
+ */
+function extractMessage(payload: unknown, fallback: string): string {
+  if (typeof payload === 'string' && payload.trim()) return payload
+  if (typeof payload !== 'object' || payload === null) return fallback
+
+  const body = payload as Record<string, unknown>
+
+  if (typeof body.hint === 'string' && body.hint) return body.hint
+
+  const detail = body.detail
+  if (typeof detail === 'string' && detail) return detail
+  if (Array.isArray(detail)) {
+    const first = detail[0] as Record<string, unknown> | undefined
+    if (first && typeof first.msg === 'string') return first.msg
+  }
+  if (typeof body.message === 'string' && body.message) return body.message
+  return fallback
+}
+
+/** 正在进行的刷新请求。单飞：并发的 401 只会触发**一次** refresh。 */
+let refreshInFlight: Promise<boolean> | null = null
+
+async function refreshSession(): Promise<boolean> {
+  if (refreshInFlight) return refreshInFlight
+
+  refreshInFlight = (async () => {
+    const token = currentRefreshToken()
+    if (!token) return false
+    try {
+      // 用**裸 fetch**，不走 request() —— 否则刷新失败会再触发一次刷新，无限递归
+      const response = await fetch('/api/v1/auth/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: token }),
+      })
+      if (!response.ok) return false
+      saveSession((await response.json()) as TokenPair)
+      return true
+    } catch {
+      // 网络错误也算刷新失败。**不要**在这里清会话 ——
+      // 断网一秒就把用户登出，体验极差；让调用方决定（它会返回错误，用户可以重试）
+      return false
+    } finally {
+      refreshInFlight = null
+    }
+  })()
+
+  return refreshInFlight
+}
+
+async function rawRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers)
+  if (init?.body && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json')
+  }
+  const token = currentAccessToken()
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+
+  const response = await fetch(path, { ...init, headers })
 
   if (!response.ok) {
     let payload: unknown
+    const text = await response.text()
     try {
-      payload = await response.json()
+      payload = text ? JSON.parse(text) : undefined
     } catch {
-      payload = await response.text()
+      payload = text
     }
-    // 后端的 503 会带 hint 字段，直接透出来比显示 "Request failed" 有用得多
-    const hint =
-      typeof payload === 'object' && payload !== null && 'hint' in payload
-        ? String((payload as { hint: unknown }).hint)
-        : undefined
     throw new ApiError(
-      hint ?? `请求失败：${response.status} ${response.statusText}`,
+      extractMessage(payload, `请求失败：${response.status} ${response.statusText}`),
       response.status,
       payload,
     )
   }
 
-  return (await response.json()) as T
+  if (response.status === 204) return undefined as T
+  const text = await response.text()
+  return (text ? JSON.parse(text) : undefined) as T
+}
+
+/**
+ * 带认证与自动续期的请求。
+ *
+ * ## 401 的处理顺序（顺序很重要）
+ *
+ * 1. 收到 401 → 如果**有 refresh token**，刷新一次 access token 然后重试原请求
+ * 2. 刷新成功 → 用户完全无感（他只多等了一次往返）
+ * 3. 刷新失败 → 清会话 + 通知上层跳登录页
+ *
+ * 为什么不直接跳登录页：access token 只活 30 分钟，用户每半小时被打断一次，
+ * 而他手上的 refresh token 明明还有效 —— 这是纯粹的体验损失。
+ *
+ * ## 为什么只重试一次
+ *
+ * 刷新后的新 token 如果还是 401，说明问题不在"过期"（而是被禁用、密钥变了、
+ * 权限被撤）。再试下去就会变成**无限循环**，而表现是浏览器一直转圈。
+ */
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  try {
+    return await rawRequest<T>(path, init)
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 401) throw error
+
+    // 登录/刷新这两个接口的 401 是**业务结果**（密码错、refresh 失效），
+    // 不该触发"刷新后重试" —— 那会让输错密码变成一次多余的 refresh 请求。
+    if (path.includes('/auth/login') || path.includes('/auth/refresh')) throw error
+
+    const refreshed = await refreshSession()
+    if (!refreshed) {
+      expireSession()
+      throw error
+    }
+    try {
+      return await rawRequest<T>(path, init)
+    } catch (retryError) {
+      if (retryError instanceof ApiError && retryError.status === 401) {
+        expireSession()
+      }
+      throw retryError
+    }
+  }
 }
 
 function qs(params: Record<string, string | number | boolean | undefined | null>): string {
@@ -303,7 +419,13 @@ export interface TaskStreamHandlers {
  * 服务端只要按 seq 发 `id:`，重连后浏览器会自己把进度接上，
  * 前端一行重连逻辑都不用写。
  *
- * 代价：它只能发 GET、不能带自定义头（所以将来上鉴权只能靠 cookie）。
+ * 代价：它只能发 GET、不能带自定义头。
+ *
+ * **所以 token 只能走查询串 `?token=`。** 这是原生 EventSource 的硬限制，
+ * 不是偷懒。代价是这个 token 会进浏览器历史、Referer、nginx access log ——
+ * 所以：
+ *  - 只传 **access token**（30 分钟过期），绝不传 refresh token
+ *  - 后端只在 SSE 这一个端点上接受查询串令牌（见 `security/deps.py`）
  *
  * 记得调用返回的函数关闭连接，否则页面切走后连接还挂着，
  * 服务端那条 SSE 协程要一直等到超时才结束。
@@ -311,7 +433,10 @@ export interface TaskStreamHandlers {
 export function openTaskStream(taskNo: string, handlers: TaskStreamHandlers): () => void {
   const { sinceSeq = 0, onEvent, onDone, onError } = handlers
   const source = new EventSource(
-    `/api/v1/tasks/${encodeURIComponent(taskNo)}/stream${qs({ since_seq: sinceSeq })}`,
+    `/api/v1/tasks/${encodeURIComponent(taskNo)}/stream${qs({
+      since_seq: sinceSeq,
+      token: currentAccessToken() ?? undefined,
+    })}`,
   )
   let closed = false
 
@@ -363,6 +488,42 @@ export const api = {
   summary: () => request<Summary>('/api/v1/summary'),
   meta: () => request<Record<string, unknown>>('/api/v1/meta'),
 
+  // ---- 认证 ----
+  /** 登录。**不经过 request() 的 401 重试** —— 密码错的 401 是业务结果，
+   *  不该触发一次多余的刷新。 */
+  login: (username: string, password: string) =>
+    rawRequest<TokenPair>('/api/v1/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    }),
+  logout: (refreshToken: string | null) =>
+    request<{ revoked: boolean; message: string }>('/api/v1/auth/logout', {
+      method: 'POST',
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    }),
+  me: () => request<User>('/api/v1/auth/me'),
+  /** 直接刷新并落盘。给“应用启动时校验会话”用。 */
+  refresh: async (): Promise<TokenPair | null> => {
+    const token = currentRefreshToken()
+    if (!token) return null
+    try {
+      const pair = await rawRequest<TokenPair>('/api/v1/auth/refresh', {
+        method: 'POST',
+        body: JSON.stringify({ refresh_token: token }),
+      })
+      saveSession(pair)
+      return pair
+    } catch {
+      return null
+    }
+  },
+  providers: () =>
+    request<{
+      providers: { provider: string; configured: boolean; implemented: boolean; hint: string }[]
+      note: string
+      enabled: boolean
+    }>('/api/v1/auth/providers'),
+
   products: (p: { page?: number; page_size?: number; category?: string; season?: string; q?: string } = {}) =>
     request<Page<Product>>(`/api/v1/products${qs(p)}`),
   productFacets: () =>
@@ -378,16 +539,19 @@ export const api = {
       `/api/v1/tasks/${encodeURIComponent(taskNo)}/events${qs({ since_seq: sinceSeq })}`,
     ),
 
-  /** 提交新任务。返回后它在后台线程跑，用 `openTaskStream` 跟进度。 */
-  submitTask: (body: {
-    user_request: string
-    task_type?: string
-    task_no?: string
-    created_by?: string
-  }) => request<TaskActionResponse>('/api/v1/tasks', { method: 'POST', body: JSON.stringify(body) }),
+  /** 提交新任务。返回后它在后台线程跑，用 `openTaskStream` 跟进度。
+   *
+   *  **不再传 created_by** —— 提交人由后端从访问令牌里取。
+   *  让前端声明"我是谁"等于把审计变成自证。
+   */
+  submitTask: (body: { user_request: string; task_type?: string; task_no?: string }) =>
+    request<TaskActionResponse>('/api/v1/tasks', { method: 'POST', body: JSON.stringify(body) }),
 
-  /** 人工闸口的批复。`approved=false` 会把任务置为 cancelled。 */
-  approveTask: (taskNo: string, body: { approved: boolean; by?: string; reason?: string }) =>
+  /** 人工闸口的批复。`approved=false` 会把任务置为 cancelled。
+   *
+   *  **同样不传 `by`** —— 审批人由后端从令牌取。
+   */
+  approveTask: (taskNo: string, body: { approved: boolean; reason?: string }) =>
     request<TaskActionResponse>(`/api/v1/tasks/${encodeURIComponent(taskNo)}/approve`, {
       method: 'POST',
       body: JSON.stringify(body),

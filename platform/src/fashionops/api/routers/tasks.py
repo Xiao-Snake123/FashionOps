@@ -22,6 +22,23 @@
 ``ThreadPoolExecutor`` 够用且不引入新中间件。
 真要多机部署时把 ``_EXECUTOR.submit`` 换成投递到队列即可 ——
 任务状态本来就在数据库和 checkpoint 里，不依赖进程内存。
+
+## 鉴权：权限是**两层**的
+
+1. **接口层**：谁能调这个接口（`require_permission`）
+2. **传导层**：Agent 跑起来之后能调哪些工具 ——
+   这里用的是 `effective_scopes(用户权限, Agent 权限集)` 的**交集**
+
+只做第 1 层是不够的。第 1 层只挡住了"直接调接口"，
+而用户完全可以说一句"帮我发封邮件给所有人" —— 模型会去调 `mail.send`，
+用的是 Agent 的身份。如果 Agent 的权限不受提交人影响，
+那么一个只有 `task:submit` 的人就能达成他没有的 `mail:send`。
+**交集那行代码是整个 RBAC 设计里唯一真正防住越权的地方。**
+
+## SSE 的令牌怎么传
+
+浏览器的原生 `EventSource` **不能设置请求头**，所以 `?token=` 是唯一选择。
+详见 `security/deps.get_stream_principal` 里的权衡说明。
 """
 
 from __future__ import annotations
@@ -35,7 +52,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -44,6 +61,17 @@ from sqlalchemy.orm import Session
 from fashionops.api.schemas import Page, TaskDetailOut, TaskEventOut, TaskOut
 from fashionops.db import get_db, session_scope
 from fashionops.db.models import Task
+from fashionops.security.deps import (
+    StreamPrincipal,
+    record_audit,
+    require_permission,
+)
+from fashionops.security.permissions import (
+    PERM_TASK_APPROVE,
+    PERM_TASK_READ,
+    PERM_TASK_SUBMIT,
+)
+from fashionops.security.service import Principal, effective_scopes
 
 logger = logging.getLogger("fashionops.api.tasks")
 
@@ -72,6 +100,13 @@ _RUNNING_STATES = ("pending", "running", "waiting_approval")
 # 请求 / 响应模型
 # ---------------------------------------------------------------------------
 class SubmitTaskRequest(BaseModel):
+    """提交任务的入参。
+
+    **刻意没有 `created_by` 字段。** 提交人一律取自访问令牌 ——
+    让请求体声明"我是谁"等于把审计变成自证，"谁交办的"这个问题就不可信了。
+    （旧版有这个字段，改成鉴权后删掉了。前端如果还传，pydantic 会忽略。）
+    """
+
     user_request: str = Field(
         min_length=2,
         max_length=2000,
@@ -83,12 +118,17 @@ class SubmitTaskRequest(BaseModel):
         max_length=64,
         description="自定义任务号。留空自动生成；传已存在的号会重跑该任务",
     )
-    created_by: str = Field(default="user", max_length=64)
 
 
 class ApprovalDecision(BaseModel):
+    """审批决定。
+
+    **同样没有 `by` 字段**：审批人取自令牌。
+    否则任何人都能以别人的名义批准一封要发出去的邮件，
+    而 HITL 闸口存在的全部意义就是"**谁**批准了"。
+    """
+
     approved: bool = Field(description="批准 / 驳回")
-    by: str = Field(default="user", max_length=64, description="审批人")
     reason: str = Field(default="", max_length=500, description="驳回理由或备注")
 
 
@@ -101,8 +141,18 @@ class TaskActionResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # 组装 runner
 # ---------------------------------------------------------------------------
-def build_runner(task_no: str, *, task_id: int | None = None) -> Any:
-    """组装一个能跑图并记账的 TaskRunner。抽成函数是为了让测试能直接调。"""
+def build_runner(
+    task_no: str,
+    *,
+    task_id: int | None = None,
+    scopes: frozenset[str] | None = None,
+) -> Any:
+    """组装一个能跑图并记账的 TaskRunner。抽成函数是为了让测试能直接调。
+
+    ``scopes`` 是**用户权限 ∩ Agent 权限集**的结果（见模块 docstring）。
+    传 ``None`` 时退回 Agent 的完整权限集 —— 这是给脚本/演示用的路径，
+    **HTTP 入口必须传**，否则权限传导就断了。
+    """
     from fashionops.agents.checkpoint import get_checkpointer
     from fashionops.agents.recorder import TaskRecorder
     from fashionops.agents.runner import TaskRunner
@@ -131,7 +181,7 @@ def build_runner(task_no: str, *, task_id: int | None = None) -> Any:
         gateway=gateway,
         model=get_model_client(settings),
         actor=f"orchestrator:{task_no}",
-        scopes=AGENT_SCOPES["orchestrator"],
+        scopes=AGENT_SCOPES["orchestrator"] if scopes is None else scopes,
         task_id=task_id,
     )
     return TaskRunner(ctx, recorder=TaskRecorder(), checkpointer=get_checkpointer(settings))
@@ -140,8 +190,19 @@ def build_runner(task_no: str, *, task_id: int | None = None) -> Any:
 # ---------------------------------------------------------------------------
 # 提交 / 确认
 # ---------------------------------------------------------------------------
-@router.post("", response_model=TaskActionResponse, summary="提交任务（后台异步执行）")
-def submit_task(payload: SubmitTaskRequest) -> TaskActionResponse:
+@router.post(
+    "",
+    response_model=TaskActionResponse,
+    summary="提交任务（后台异步执行，需要 task:submit 权限）",
+)
+def submit_task(
+    payload: SubmitTaskRequest,
+    request: Request,
+    principal: Principal = Depends(require_permission(PERM_TASK_SUBMIT)),  # noqa: B008
+    session: Session = Depends(get_db),  # noqa: B008
+) -> TaskActionResponse:
+    from fashionops.tools import AGENT_SCOPES
+
     task_no = payload.task_no or _new_task_no()
     _claim(task_no)
     try:
@@ -158,10 +219,38 @@ def submit_task(payload: SubmitTaskRequest) -> TaskActionResponse:
             task_no,
             user_request=payload.user_request,
             task_type=payload.task_type,
-            created_by=payload.created_by,
+            # **提交人来自令牌，不来自请求体**。用请求体里的值等于让调用方
+            # 自己声明"我是谁"，审计就完全失去意义了。
+            created_by=principal.username,
+            created_by_id=principal.user_id,
         )
+
+        # 用户权限向下传导：Agent 只能用"提交人本来就有的"权限
+        granted = effective_scopes(principal, AGENT_SCOPES["orchestrator"])
+
+        record_audit(
+            session,
+            principal=principal,
+            action="task.submit",
+            resource=f"/api/v1/tasks/{task_no}",
+            detail={
+                "task_no": task_no,
+                "task_type": payload.task_type,
+                "request": payload.user_request[:500],
+                # 把交集结果记进审计：出了越权争议时，
+                # "当时他有哪些权限"和"Agent 实际拿到了哪些"都要能回答
+                "granted_scopes": sorted(granted),
+            },
+            request=request,
+        )
+
         _EXECUTOR.submit(
-            _run_guarded, task_no, payload.user_request, payload.task_type, payload.created_by
+            _run_guarded,
+            task_no,
+            payload.user_request,
+            payload.task_type,
+            principal.username,
+            granted,
         )
     except Exception:
         _release(task_no)
@@ -174,7 +263,12 @@ def submit_task(payload: SubmitTaskRequest) -> TaskActionResponse:
 
 
 def _create_task_row(
-    task_no: str, *, user_request: str, task_type: str, created_by: str
+    task_no: str,
+    *,
+    user_request: str,
+    task_type: str,
+    created_by: str,
+    created_by_id: int | None = None,
 ) -> int | None:
     """插入 ``tasks`` 行（``pending``），返回它的 id。
 
@@ -195,6 +289,16 @@ def _create_task_row(
             existing.approval_payload = None
             existing.finished_at = None
             existing.started_at = utcnow()
+            # 重跑换人时也要把提交人改掉，否则审计里是上一个人的名字
+            existing.created_by = created_by
+            existing.created_by_id = created_by_id
+            # 上一轮的审批结果必须清掉。不清的话，这一轮的审计里会带着
+            # 上一位审批人的名字 —— 而这一轮的决策者可能完全是另一个人，
+            # “谁批准了这封邮件”就答错了。**审计里答错比没有更危险。**
+            existing.approved_by = None
+            existing.approved_by_id = None
+            existing.approved_at = None
+            existing.approval_reason = None
             return existing.id
         task = Task(
             task_no=task_no,
@@ -205,6 +309,7 @@ def _create_task_row(
             progress=0,
             thread_id=task_no,
             created_by=created_by,
+            created_by_id=created_by_id,
             started_at=utcnow(),
         )
         session.add(task)
@@ -213,11 +318,30 @@ def _create_task_row(
 
 
 @router.post(
-    "/{task_no}/approve", response_model=TaskActionResponse, summary="人工确认（批准 / 驳回）"
+    "/{task_no}/approve",
+    response_model=TaskActionResponse,
+    summary="人工确认（批准 / 驳回，需要 task:approve 权限）",
 )
 def approve_task(
-    task_no: str, payload: ApprovalDecision, session: Session = Depends(get_db)
+    task_no: str,
+    payload: ApprovalDecision,
+    request: Request,
+    principal: Principal = Depends(require_permission(PERM_TASK_APPROVE)),  # noqa: B008
+    session: Session = Depends(get_db),  # noqa: B008
 ) -> TaskActionResponse:
+    """批准/驳回挂在人工闸口的任务。
+
+    ## 审批人**只能来自令牌**
+
+    请求体里没有 `by` 字段，这是刻意的。如果让前端传"我是谁"，
+    那么任何人都能以别人的名义批准一封要发出去的邮件 ——
+    而 HITL 闸口存在的全部意义就是"**谁**批准了"。审计里那个名字必须可信。
+
+    ## 为什么批准和驳回都要记审计
+
+    驳回也是决策。"这封邮件为什么没发出去"和"为什么发出去了"
+    是同等重要的两个问题，只记批准的话，前一个问题的答案就丢了。
+    """
     task = session.scalar(select(Task).where(Task.task_no == task_no))
     if task is None:
         raise HTTPException(status_code=404, detail=f"任务 {task_no} 不存在")
@@ -229,11 +353,63 @@ def approve_task(
             detail=f"任务 {task_no} 当前状态是 {task.status}，没有等待确认的步骤",
         )
 
+    # ---- 职责分离（可配置）----
+    # 默认关闭：小团队里提交人往往就是唯一能批的人，硬拦会让流程走不动。
+    # 但它**必须能被打开** —— 有合规要求时（比如财务审批）这条是强制的。
+    from fashionops.config import get_settings
+
+    settings = get_settings()
+    if (
+        settings.approval_require_separate_user
+        and payload.approved
+        and task.created_by
+        and task.created_by == principal.username
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "不能批准自己提交的任务（FASHIONOPS_APPROVAL_REQUIRE_SEPARATE_USER=true）。"
+                "请让另一位有审批权限的同事处理"
+            ),
+        )
+
     _claim(task_no)
+    try:
+        from fashionops.db.base import utcnow
+
+        # 审批结果直接落库（除了 recorder 里的审批请求载荷之外，
+        # 这里也记一份"人"的维度），这样"谁批的"不依赖事件流的完整性
+        task.approved_by = principal.username
+        task.approved_by_id = principal.user_id
+        task.approved_at = utcnow()
+        task.approval_reason = payload.reason or ""
+        session.flush()
+
+        record_audit(
+            session,
+            principal=principal,
+            action="task.approve" if payload.approved else "task.reject",
+            resource=f"/api/v1/tasks/{task_no}",
+            detail={
+                "task_no": task_no,
+                "approved": payload.approved,
+                "reason": payload.reason,
+                "task_owner": task.created_by,
+            },
+            # 驳回记 `blocked` 而不是 `success`/`error`：
+            # 它不是失败（系统没坏），但也不该算成功执行了一次动作。
+            # 统计"被拦下多少次"时，这个值是唯一的分组依据。
+            status="success" if payload.approved else "blocked",
+            request=request,
+        )
+    except Exception:
+        _release(task_no)
+        raise
+
     _EXECUTOR.submit(
         _resume_guarded,
         task_no,
-        {"approved": payload.approved, "by": payload.by, "reason": payload.reason},
+        {"approved": payload.approved, "by": principal.username, "reason": payload.reason},
     )
     verb = "批准" if payload.approved else "驳回"
     return TaskActionResponse(
@@ -244,14 +420,16 @@ def approve_task(
 # ---------------------------------------------------------------------------
 # 查询
 # ---------------------------------------------------------------------------
-@router.get("", response_model=Page[TaskOut], summary="任务列表")
+@router.get("", response_model=Page[TaskOut], summary="任务列表（需要 task:read 权限）")
 def list_tasks(
-    session: Session = Depends(get_db),
+    principal: Principal = Depends(require_permission(PERM_TASK_READ)),  # noqa: B008
+    session: Session = Depends(get_db),  # noqa: B008
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     status: str | None = None,
     task_type: str | None = None,
 ) -> Page[TaskOut]:
+    del principal
     stmt = select(Task)
     if status:
         stmt = stmt.where(Task.status == status)
@@ -274,7 +452,12 @@ def list_tasks(
     response_model=TaskDetailOut,
     summary="任务详情（含 DAG、挂起状态、审批载荷）",
 )
-def get_task(task_no: str, session: Session = Depends(get_db)) -> TaskDetailOut:
+def get_task(
+    task_no: str,
+    principal: Principal = Depends(require_permission(PERM_TASK_READ)),  # noqa: B008
+    session: Session = Depends(get_db),  # noqa: B008
+) -> TaskDetailOut:
+    del principal
     task = session.scalar(select(Task).where(Task.task_no == task_no))
     if task is None:
         raise HTTPException(status_code=404, detail=f"任务 {task_no} 不存在")
@@ -294,8 +477,10 @@ def get_task(task_no: str, session: Session = Depends(get_db)) -> TaskDetailOut:
 )
 def get_events(
     task_no: str,
+    principal: Principal = Depends(require_permission(PERM_TASK_READ)),  # noqa: B008
     since_seq: int = Query(0, ge=0, description="只取 seq 大于该值的事件"),
 ) -> list[TaskEventOut]:
+    del principal
     # 直接复用 SSE 的取数函数 —— 两条路走同一份实现，
     # 避免"REST 和 SSE 字段名不一样"这种要写两套解析的坑
     from fashionops.agents.recorder import read_events
@@ -303,9 +488,10 @@ def get_events(
     return [TaskEventOut.model_validate(e) for e in read_events(task_no, since_seq=since_seq)]
 
 
-@router.get("/{task_no}/stream", summary="SSE 实时进度流")
+@router.get("/{task_no}/stream", summary="SSE 实时进度流（令牌从 ?token= 传）")
 def stream_task(
     task_no: str,
+    principal: StreamPrincipal,
     since_seq: int = Query(0, ge=0, description="只推 seq 大于该值的事件"),
     last_event_id: str | None = Query(
         None, alias="Last-Event-ID", description="浏览器 EventSource 断线重连时自动带上"
@@ -315,7 +501,17 @@ def stream_task(
 
     ``Last-Event-ID`` 会被当成 ``since_seq`` 用 —— 浏览器原生 ``EventSource``
     重连时会自动带上它，所以**前端不用写重连逻辑**，也不会重复收到看过的事件。
+
+    **令牌只能从查询串传**：原生 `EventSource` 不支持自定义请求头。
+    代价和缓解手段见 `security/deps.get_stream_principal`。
     """
+    if not principal.has(PERM_TASK_READ):
+        # SSE 端点手工判权限（不用 require_permission）是因为它的主体来自
+        # 另一个依赖（StreamPrincipal）。用 403 而不是 401：
+        # EventSource 收到 401 会**无限重连**，403 才会放弃 ——
+        # 用错状态码会让一个没权限的页面挂在那里疯狂重连。
+        raise HTTPException(status_code=403, detail="没有查看任务事件的权限")
+
     cursor = since_seq
     if last_event_id:
         # 头里可能是任意字符串，解析失败就忽略 —— 退回 since_seq 即可，
@@ -391,15 +587,28 @@ def _event_source(task_no: str, cursor: int) -> Any:
 # ---------------------------------------------------------------------------
 # 后台执行（异常必须在这里兜住）
 # ---------------------------------------------------------------------------
-def _run_guarded(task_no: str, user_request: str, task_type: str, created_by: str) -> None:
+def _run_guarded(
+    task_no: str,
+    user_request: str,
+    task_type: str,
+    created_by: str,
+    scopes: frozenset[str] | None = None,
+) -> None:
     """后台线程里跑任务。
 
     **异常必须在这里兜住。** 线程里抛出去的异常没人接，
     表现是"任务永远停在 running"而日志里什么都没有 —— 最难查的一类问题。
+
+    ``scopes`` 必须从请求线程传进来，不能在这里重新算 ——
+    后台线程里没有请求上下文（拿不到 Principal）。
+    这也意味着**审批通过后的续跑用的是提交时的权限快照**，
+    而不是审批时的权限：如果提交人的权限被中途撤销，续跑仍用旧快照。
+    这个窗口是任务的生命周期（分钟级），并且审计里记了当时的 granted_scopes，
+    对当前场景可以接受；要彻底解决得把权限随任务持久化并在续跑时重新求交。
     """
     runner = None
     try:
-        runner = build_runner(task_no)
+        runner = build_runner(task_no, scopes=scopes)
         runner.submit(
             task_no=task_no,
             user_request=user_request,

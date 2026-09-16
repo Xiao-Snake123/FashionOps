@@ -25,6 +25,11 @@ mcp-servers/workspace/
 .env
 .env.*
 !.env.example
+# 模板文件要能提交：它们里面只有占位符，是"照着填"的起点。
+# 少了这几行，`.env.*` 会把它们一起挡掉，而表现是
+# "文档里说复制这个文件，但仓库里根本没有" —— 得靠人肉发现。
+!.env.docker.example
+!.env.*.example
 
 # ---- 第三方基座（不纳入本仓库，见 README 的克隆说明）----
 vendor/

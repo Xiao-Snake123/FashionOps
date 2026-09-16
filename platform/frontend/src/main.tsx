@@ -6,6 +6,9 @@ import { BrowserRouter } from 'react-router-dom'
 // 后加载的那份赢 —— 结果就是自己写的节点配色全不生效。
 import '@xyflow/react/dist/style.css'
 import './styles.css'
+// 认证相关样式放最后：它里面有 .login-card .button 这类会覆盖通用按钮样式的规则，
+// 必须在 styles.css 之后加载才生效
+import './auth.css'
 import App from './App'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

@@ -262,6 +262,92 @@ class Settings(BaseSettings):
     smtp_use_ssl: bool = Field(default=True, description="true 用 SMTP_SSL（465），false 用 STARTTLS")
     smtp_timeout: float = Field(default=20.0, description="SMTP 连接/发送超时秒数")
 
+    # ---- 认证 / 会话 ----
+    # 默认值的选取原则和邮件闸门一样：**漏配的后果必须是"进不来"，不能是"谁都能进"**。
+    # 所以 auth_required 默认 True —— 反过来的话，一次忘记配置就等于全站裸奔。
+    auth_required: bool = Field(
+        default=True,
+        description=(
+            "是否强制鉴权。true 时所有 /api/v1 接口都要求登录（/health 与 /docs 除外）。"
+            "本地纯演示可以关掉，但**生产必须为 true**"
+        ),
+    )
+    auth_allow_anonymous_scopes: str = Field(
+        default="",
+        description="允许匿名访问的只读路径前缀，逗号分隔。留空表示除白名单外一律要登录",
+    )
+    jwt_secret: str = Field(
+        default="",
+        description=(
+            "JWT 签名密钥。**留空时启动会自动生成一个随机值并打 warning** ——"
+            " 这样服务能起来（不会因为忘了配就起不来），但重启后所有 token 失效，"
+            "所以生产必须显式配。生成：python -c \"import secrets;print(secrets.token_urlsafe(48))\""
+        ),
+    )
+    jwt_algorithm: str = Field(default="HS256", description="HS256（对称）够用；上 RS256 要配公私钥")
+    access_token_minutes: int = Field(
+        default=30, description="访问令牌有效期（分钟）。短一些是对的：它无状态、撤不回来"
+    )
+    refresh_token_days: int = Field(
+        default=14, description="刷新令牌有效期（天）。它入库可撤销，所以可以长一些"
+    )
+
+    # ---- 登录安全 ----
+    password_min_length: int = Field(default=10, description="密码最短长度")
+    password_require_classes: int = Field(
+        default=2,
+        description="至少要包含几类字符（小写/大写/数字/符号）。2 类兼顾安全和可用性",
+    )
+    login_max_failures: int = Field(
+        default=5, description="连续登录失败几次后锁定账号。防在线暴力破解"
+    )
+    login_lock_minutes: int = Field(default=15, description="锁定时长（分钟）")
+    login_rate_limit_per_minute: int = Field(
+        default=20,
+        description=(
+            "同一 IP + 用户名每分钟最多尝试几次登录。**和账号锁定是互补的两层**："
+            "锁定防「盯着一个账号爆」，限流防「拿着一批账号扫」（碰库时每个账号只试一次，"
+            "永远触发不了锁定）"
+        ),
+    )
+
+    # ---- 审批职责分离 ----
+    approval_require_separate_user: bool = Field(
+        default=False,
+        description=(
+            "批准时是否禁止「自己批自己提交的任务」。**默认关**：小团队里提交人往往就是"
+            "唯一有审批权的人，硬拦会让流程走不动。有合规要求（财务/对外发信）时应打开"
+        ),
+    )
+
+    # ---- 初始管理员 ----
+    # 首次启动没有用户就没法登录，所以要在建表后创建第一个管理员。
+    # 密码留空则**不创建**，改由 `fashionops-user create-admin` 显式创建 ——
+    # 自动生成一个随机密码打印在日志里，比不创建更危险（日志会被采集走）。
+    bootstrap_admin_username: str = Field(default="", description="首次初始化时创建的管理员用户名")
+    bootstrap_admin_password: str | None = Field(
+        default=None, exclude=True, repr=False, description="上面那个管理员的初始密码"
+    )
+
+    # ---- 钉钉 / 企业微信扫码登录 ----
+    # ⚠ 当前**只有接口和配置位，没有真实调用**（见 security/oauth.py 的说明）。
+    # 留成"能配但不用"而不是删掉：真接入时只需要填这四个值 + 一个 provider 实现，
+    # 不用再改数据模型和前端流程。
+    dingtalk_client_id: str = Field(default="", description="钉钉应用 AppKey")
+    dingtalk_client_secret: str | None = Field(
+        default=None, exclude=True, repr=False, description="钉钉应用 AppSecret"
+    )
+    dingtalk_corp_id: str = Field(default="", description="钉钉企业 CorpId")
+    wecom_corp_id: str = Field(default="", description="企业微信 CorpId")
+    wecom_agent_id: str = Field(default="", description="企业微信应用 AgentId")
+    wecom_secret: str | None = Field(
+        default=None, exclude=True, repr=False, description="企业微信应用 Secret"
+    )
+    oauth_redirect_base: str = Field(
+        default="http://localhost:5173/oauth/callback",
+        description="扫码登录后前端回调地址。**必须在第三方后台登记过**，否则会被拒",
+    )
+
     # ---- 工具网关 ----
     gateway_rate_limit_per_minute: int = Field(
         default=120, description="工具调用每分钟上限（按工具名分别计数）"

@@ -1,8 +1,19 @@
-"""业务查询接口（阶段 0 全部只读）。
+"""业务查询接口（全部只读）。
 
 这些接口的作用是**让前端有真实数据可渲染**。
-到了阶段 1，写入侧的接口（提交任务、人工确认、改预算）会走工具网关，
+写入侧的接口（提交任务、人工确认、改预算）走工具网关，
 带上限流、审计、熔断 —— 不会像这里这样直连 Session。
+
+## 鉴权：路由级"要登录" + 端点级"要权限"
+
+先在整个 router 上挂 `Depends(get_principal)`，保证**任何**业务数据都要求登录 ——
+这样新增端点时"忘了加鉴权"不会发生（默认就是关着的）。
+
+然后按资源加具体权限。为什么不全用路由级一刀切：
+`/emails` 会返回**收件人地址和邮件正文**（对外通信的内容），
+而 `/products` 只是商品列表。两者的敏感度差一个数量级，
+用同一个门槛意味着"能看商品的人也能看所有人的对外邮件"。
+**权限粒度按数据敏感度定，不按代码方便定。**
 """
 
 from __future__ import annotations
@@ -37,9 +48,25 @@ from fashionops.db.models import (
     Product,
     Ticket,
 )
+from fashionops.security.deps import get_principal, require_permission
+from fashionops.security.permissions import (
+    PERM_AD_READ,
+    PERM_ERP_READ,
+    PERM_KB_READ,
+    PERM_MAIL_SEND,
+    PERM_TASK_READ,
+)
+from fashionops.security.service import Principal
 from fashionops.storage import PathEscapeError, get_storage
 
-router = APIRouter(prefix="/api/v1", tags=["business"])
+#: 路由级：**所有**业务接口都要求登录。
+#: 放在 router 上而不是每个函数签名里，是为了让"新加的端点忘了加鉴权"
+#: 这件事在结构上不可能发生 —— 依赖注入默认就是开着的。
+router = APIRouter(
+    prefix="/api/v1",
+    tags=["business"],
+    dependencies=[Depends(get_principal)],
+)
 
 
 def _paginate(session: Session, stmt, page: int, page_size: int):  # noqa: ANN001
@@ -58,7 +85,8 @@ def _paginate(session: Session, stmt, page: int, page_size: int):  # noqa: ANN00
 # ---------------------------------------------------------------------------
 @router.get("/products", response_model=Page[ProductOut], summary="商品列表")
 def list_products(
-    session: Session = Depends(get_db),
+    _: Principal = Depends(require_permission(PERM_ERP_READ)),  # noqa: B008
+    session: Session = Depends(get_db),  # noqa: B008
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     category: str | None = None,
@@ -87,7 +115,10 @@ def list_products(
 
 
 @router.get("/products/categories", summary="类目与季节的可选值（给前端筛选器用）")
-def product_facets(session: Session = Depends(get_db)) -> dict:
+def product_facets(
+    _: Principal = Depends(require_permission(PERM_ERP_READ)),  # noqa: B008
+    session: Session = Depends(get_db),  # noqa: B008
+) -> dict:
     cats = session.execute(
         select(Product.category, func.count()).group_by(Product.category)
     ).all()
@@ -105,6 +136,7 @@ def product_facets(session: Session = Depends(get_db)) -> dict:
 # ---------------------------------------------------------------------------
 @router.get("/inventory/low-stock", summary="库存告急 SKU（选品会被硬约束过滤掉的）")
 def low_stock(
+    _: Principal = Depends(require_permission(PERM_ERP_READ)),  # noqa: B008
     session: Session = Depends(get_db),
     threshold: int = Query(5, ge=0, le=1000),
 ) -> list[dict]:
@@ -145,6 +177,7 @@ def low_stock(
 # ---------------------------------------------------------------------------
 @router.get("/tickets", response_model=Page[TicketOut], summary="客服工单列表")
 def list_tickets(
+    _: Principal = Depends(require_permission(PERM_KB_READ)),  # noqa: B008
     session: Session = Depends(get_db),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
@@ -169,6 +202,7 @@ def list_tickets(
 
 @router.get("/campaigns", response_model=Page[AdCampaignOut], summary="广告投放计划")
 def list_campaigns(
+    _: Principal = Depends(require_permission(PERM_AD_READ)),  # noqa: B008
     session: Session = Depends(get_db),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
@@ -202,6 +236,7 @@ def list_campaigns(
 
 @router.get("/metrics/daily", response_model=list[BIMetricOut], summary="日度经营指标")
 def daily_metrics(
+    _: Principal = Depends(require_permission(PERM_AD_READ)),  # noqa: B008
     session: Session = Depends(get_db),
     category: str = Query("全部"),
     days: int = Query(30, ge=1, le=180),
@@ -220,6 +255,9 @@ def daily_metrics(
 
 @router.get("/assets", response_model=Page[AssetOut], summary="素材列表")
 def list_assets(
+    # 产物（报表/图片/视频）是任务的产出，所以用 task:read 把关 ——
+    # 能看到任务的人就能看到它产出了什么，这个粒度是自然的
+    _: Principal = Depends(require_permission(PERM_TASK_READ)),  # noqa: B008
     session: Session = Depends(get_db),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
@@ -243,7 +281,11 @@ def list_assets(
 
 
 @router.get("/kb", response_model=list[KBArticleOut], summary="客服知识库文章（RAG 的召回源）")
-def list_kb(session: Session = Depends(get_db), category: str | None = None) -> list[KBArticleOut]:
+def list_kb(
+    _: Principal = Depends(require_permission(PERM_KB_READ)),  # noqa: B008
+    session: Session = Depends(get_db),  # noqa: B008
+    category: str | None = None,
+) -> list[KBArticleOut]:
     stmt = select(KBArticle).where(KBArticle.is_active.is_(True))
     if category:
         stmt = stmt.where(KBArticle.category == category)
@@ -253,6 +295,10 @@ def list_kb(session: Session = Depends(get_db), category: str | None = None) -> 
 
 @router.get("/emails", response_model=Page[EmailOut], summary="邮件记录（含被闸门拦下的）")
 def list_emails(
+    # **邮件记录里含收件人地址和正文**，是对外通信的内容。
+    # 门槛设成 mail:send（而不是 erp:read 那种普适读权限）：
+    # “能不能对外发消息”和“能不能看到别人对外发了什么”是同一档敏感度。
+    _: Principal = Depends(require_permission(PERM_MAIL_SEND)),  # noqa: B008
     session: Session = Depends(get_db),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
@@ -285,7 +331,10 @@ def list_emails(
 
 
 @router.get("/emails/stats", summary="邮件闸门统计（被拦截原因分布）")
-def email_gate_stats(session: Session = Depends(get_db)) -> dict:
+def email_gate_stats(
+    _: Principal = Depends(require_permission(PERM_MAIL_SEND)),  # noqa: B008
+    session: Session = Depends(get_db),  # noqa: B008
+) -> dict:
     """按 ``gate_decision`` 分组计数。界面上直接画成一张分布图。"""
     rows = session.execute(
         select(EmailMessage.gate_decision, func.count())
@@ -304,7 +353,11 @@ def email_gate_stats(session: Session = Depends(get_db)) -> dict:
     summary="下载素材原文件（report.export_excel 返回的 URL 就指向这里）",
     response_class=Response,
 )
-def download_asset(key: str, session: Session = Depends(get_db)) -> Response:
+def download_asset(
+    key: str,
+    _: Principal = Depends(require_permission(PERM_TASK_READ)),  # noqa: B008
+    session: Session = Depends(get_db),  # noqa: B008
+) -> Response:
     """把存储里的原始文件流出去。
 
     ``report.export_excel`` 返回的 ``url`` 指向这个路由 ——

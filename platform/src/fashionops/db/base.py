@@ -178,13 +178,36 @@ def session_scope() -> Iterator[Session]:
 
 
 def get_db() -> Iterator[Session]:
-    """FastAPI 依赖：每个请求一个 Session。
+    """FastAPI 依赖：每个请求一个 Session，**成功后自动提交**。
 
-    只做 ``close``，不在这里 commit —— 让路由自己决定事务边界，
-    避免"读接口顺带提交了半截写操作"。
+    ## 为什么不在这里 commit 曾经是一个真 bug
+
+    初版只做 ``close``（不提交），注释写的是"让路由自己决定事务边界"。
+    听起来很干净，但它制造了一大类**静默丢数据**的 bug：
+
+    * 登录接口 `session.add(RefreshToken(...))` 没写 commit
+      → 快为刷新令牌根本没落库 → **登录后第一次刷新就是 401**
+    * 审批接口 `task.approved_by = principal.username` + `flush()` 没写 commit
+      → “这封邮件是谁批准的”被回滚掉 —— **HITL 闸口存在的全部意义就是这个问题**
+    * `record_audit()` 写进 `audit_logs` 的行也一样没存住
+
+    这三处都不报错，接口全部返回 200，而且**代码 review 时看不出来** ——
+    因为“改了一个对象属性”和“改了一个对象属性并持久化”在 diff 里长得一样。
+
+    所以改成单元工作（unit of work）语义：**路由只管改，框架负责提**。
+    “忘了 commit” 这个失败模式在结构上就不再存在。
+
+    ## 失败时回滚
+
+    路由抛异常（包括 HTTPException）时回滚，避免“半个写操作”留在事务里
+    被后续请求复用 —— 连接池会复用底层连接，脏事务会隷到下一个请求。
     """
     session = get_session_factory()()
     try:
         yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
     finally:
         session.close()

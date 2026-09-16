@@ -17,7 +17,9 @@ SQLite 3.30+ 支持 ``ORDER BY x NULLS LAST``，所以开发期一切正常；
 没有 MySQL 时整个文件自动跳过（沿用 ``test_gateway_redis.py`` 的做法），
 所以 CI 上不装 MySQL 也能跑。
 
-> 注意：接口全是只读 GET，不会往开发库里写数据。
+> 注意：接口全是只读 GET。但跑的库是**开发库**，所以它确实会写入一条
+> `users` 行（测试管理员，超管）—— 跑完会删掉。需要绝对不改开发库时，
+> 把 `.env` 的 db_host 留空，整个文件会自动跳过。
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 import pytest
+from conftest import TEST_ADMIN_USERNAME, admin_headers_for, delete_user
 from fastapi.testclient import TestClient
 from sqlalchemy import inspect, text
 
@@ -125,6 +128,9 @@ def sqlite_client(tmp_path, monkeypatch):
 
     app.dependency_overrides[get_db] = _override
     with TestClient(app) as client:
+        # 加了鉴权之后这些接口都要先登录。**真的跑一遍登录**，
+        # 而不是伪造一个 token —— 原因见 conftest 的模块说明。
+        client.headers.update(admin_headers_for(client, factory))
         yield client
     app.dependency_overrides.clear()
     reset_engine()
@@ -193,7 +199,14 @@ def mysql_client(mysql_engine):
 
     app.dependency_overrides[get_db] = _override
     with TestClient(app) as client:
+        # 在**真 MySQL** 上建一个临时超管并登录。
+        #
+        # 这一步顺带验证了三件新增代码里最容易"只在 SQLite 上测通"的事：
+        # 权限同步能在 MySQL 上跑、登录接口能在 MySQL 上跑、令牌校验能过。
+        client.headers.update(admin_headers_for(client, factory))
         yield client
+        # 走完就清理。这是个超管账号，留在开发库里是真实风险。
+        delete_user(factory, TEST_ADMIN_USERNAME)
     app.dependency_overrides.clear()
 
 

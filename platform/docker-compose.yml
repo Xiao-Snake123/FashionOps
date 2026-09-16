@@ -1,0 +1,184 @@
+# =============================================================================
+# FashionOps 全栈本地编排
+# -----------------------------------------------------------------------------
+# ⚠⚠ **这个文件还没有在真实 Docker 上跑过。**
+#     本机 Docker CLI 不在 PATH 上，所以只做了静态检查。
+#     第一次跑之前请按下面「第一次跑之前检查这几项」逐条确认。
+#
+# 用法：
+#     cp .env.docker.example .env.docker      # 填密码和密钥
+#     docker compose --env-file .env.docker up -d --build
+#     docker compose exec api fashionops-db init
+#     docker compose exec api fashionops-seed
+#     docker compose exec api fashionops-user create-admin admin   # 密码只显示一次
+#     docker compose exec api fashionops-kb index --rebuild
+#     打开 http://localhost:5173
+#
+# ## 第一次跑之前检查这几项
+#
+# 1. **`uv.lock` 必须存在且是最新的**（Dockerfile 里 COPY 了它）。
+#      本机跑 `uv lock` 生成，然后提交进仓库。
+# 2. **`FASHIONOPS_JWT_SECRET` 必须显式设置**，不能留空。
+#      留空时后端会生成临时密钥并打 warning —— 容器重启后所有人被登出，
+#      而且 api 和其他进程各有一份不同的密钥。
+# 3. **MySQL 的字符集必须是 utf8mb4**。中文数据用默认的 latin1 会变成乱码，
+#      而且**写入时不报错**（只是显示错），等发现时已经存了一堆乱码。
+#      下面的 command 已经显式加了 `--character-set-server=utf8mb4`。
+# 4. **前端容器的 `/api` 代理要指向服务名 `api` 而不是 `127.0.0.1`**。
+#      容器里的 127.0.0.1 是它自己，不是后端。见 web 服务的 VITE_API_TARGET。
+# 5. 首次启动 MySQL 初始化要 20~40 秒。api 服务有 depends_on + healthcheck，
+#      所以它会等 MySQL 就绪（但**不会**等建表 —— 建表要手动跑 `init`）。
+# =============================================================================
+
+name: fashionops
+
+services:
+  # ---------------------------------------------------------------------------
+  # MySQL：业务数据
+  # ---------------------------------------------------------------------------
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      # 业务时区。容器默认 UTC，而 MySQL 的 DATETIME 不带时区 ——
+      # 应用侧统一写 UTC（见 db/base.utcnow），这里也设成 UTC 让两边一致。
+      - --default-time-zone=+00:00
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?必须设置 MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: fashionops
+      MYSQL_USER: fashionops
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?必须设置 MYSQL_PASSWORD}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    ports:
+      # 只绑回环：数据库不该暴露到局域网。
+      # 需要从别的机器连就显式改成 "3306:3306"，并且知道自己在做什么。
+      - "127.0.0.1:3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # Redis：网关限流计数 + 任务图 checkpoint
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - 256mb
+      # 限流键和 checkpoint 都是"可重建"的数据，所以用 allkeys-lru：
+      # 内存满时淘汰旧键，而不是拒绝写入把服务打挂。
+      - --maxmemory-policy
+      - allkeys-lru
+    volumes:
+      - redis-data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Qdrant：向量检索
+  # ---------------------------------------------------------------------------
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    restart: unless-stopped
+    volumes:
+      - qdrant-data:/qdrant/storage
+    ports:
+      - "127.0.0.1:6333:6333"
+    healthcheck:
+      # Qdrant 的 /healthz 没有认证、返回 200 就表示进程活着。
+      # 注意它**不检查存储是否可写** —— 所以 /health 里的向量数检查才是关键那个。
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # API：后端
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    environment:
+      FASHIONOPS_ENV: docker
+      FASHIONOPS_AUTH_REQUIRED: "true"
+
+      # 容器内用服务名，不是 127.0.0.1
+      FASHIONOPS_DB_HOST: mysql
+      FASHIONOPS_DB_PORT: "3306"
+      FASHIONOPS_DB_NAME: fashionops
+      FASHIONOPS_DB_USER: fashionops
+      FASHIONOPS_DB_PASSWORD: ${MYSQL_PASSWORD:?}
+      FASHIONOPS_REDIS_URL: redis://redis:6379/0
+      FASHIONOPS_QDRANT_URL: http://qdrant:6333
+
+      # ⚠ 必须显式设置。留空会被自动生成一个临时密钥并把所有人登出。
+      FASHIONOPS_JWT_SECRET: ${JWT_SECRET:?必须设置 JWT_SECRET，生成：python -c "import secrets;print(secrets.token_urlsafe(48))"}
+
+      # 模型 Key 从宿主的 .env.docker 透传，缺失时自动降级为 mock
+      FASHIONOPS_MODEL_PROVIDER: ${MODEL_PROVIDER:-mock}
+      FASHIONOPS_MODEL_API_KEY: ${MODEL_API_KEY:-}
+      FASHIONOPS_MODEL_NAME: ${MODEL_NAME:-glm-4-flash}
+      FASHIONOPS_EMBEDDING_MODEL: ${EMBEDDING_MODEL:-embedding-2}
+      FASHIONOPS_EMBEDDING_DIM: ${EMBEDDING_DIM:-1024}
+
+      # 容器内没有系统代理，也不需要绕过它 —— 显式清空
+      NO_PROXY: "*"
+    volumes:
+      # 产物（报表 xlsx）、本地对象存储、日志要落宿主机，
+      # 否则容器重建一次全没了，而"产物下载"是在界面上承诺过的功能。
+      - ./data:/app/data
+    ports:
+      - "127.0.0.1:8000:8000"
+
+  # ---------------------------------------------------------------------------
+  # Web：前端开发服务器
+  # ---------------------------------------------------------------------------
+  web:
+    image: node:22-alpine
+    restart: unless-stopped
+    depends_on:
+      - api
+    working_dir: /app
+    environment:
+      # ⚠ 必须指向服务名。容器里的 127.0.0.1 是它自己。
+      VITE_API_TARGET: http://api:8000
+      # 容器内挂载的文件系统在 Windows 上收不到 inotify 事件，热更新会失效，
+      # 所以轮询。代价是 CPU 占用高一些 —— 开发环境可以接受，
+      # 生产不该用这个容器（应该 `npm run build` 出静态文件交给 nginx）。
+      CHOKIDAR_USEPOLLING: "true"
+    volumes:
+      - ./frontend:/app
+      - web-node-modules:/app/node_modules
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+    ports:
+      - "127.0.0.1:5173:5173"
+
+volumes:
+  mysql-data:
+  redis-data:
+  qdrant-data:
+  web-node-modules:
