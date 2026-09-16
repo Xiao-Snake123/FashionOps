@@ -39,14 +39,23 @@ def _warn(text: str) -> None:
     print(f"⚠ {text}")
 
 
+def _tag(source: str) -> str:
+    """标出这个值是谁定的。
+
+    不展示来源的话，"规则优先、模型兜底"这个决定就没法验证效果 ——
+    看到一个意图分不出它来自哪一层，也就不知道该调规则还是该调 prompt。
+    """
+    return {"rule": "规则", "model": "模型"}.get(source, "?")
+
+
 def _print_outcome(outcome: Any) -> None:
     print()
     print("─" * 72)
     print(f"工单 {outcome.ticket_no}")
     print("─" * 72)
     print(f"  通道      : {outcome.lane}  （{outcome.lane_reason}）")
-    print(f"  意图      : {outcome.intent or '(未判出)'}")
-    print(f"  情绪      : {outcome.sentiment}")
+    print(f"  意图      : {outcome.intent or '(未判出)'}   [由{_tag(outcome.intent_source)}定]")
+    print(f"  情绪      : {outcome.sentiment}   [由{_tag(outcome.sentiment_source)}定]")
     print(f"  置信度    : {outcome.confidence:.2f}")
     print(f"  转人工    : {'是' if outcome.escalated else '否'}")
     if outcome.escalate_reason:
@@ -132,9 +141,11 @@ def cmd_handle_pending(args: Namespace) -> int:
             failed += 1
         tokens += outcome.tokens
         mark = "→人工" if outcome.escalated else "自动"
+        # 标出意图是谁定的：**这个决定的效果必须看得见**
+        tag = "规" if outcome.intent_source == "rule" else ("模" if outcome.intent_source == "model" else "空")
         print(
             f"  [{index}/{len(ticket_nos)}] {ticket_no}  "
-            f"{outcome.lane:<5} {outcome.intent or '未判出':<5} {mark}  "
+            f"{outcome.lane:<5} {outcome.intent or '未判出':<5}[{tag}] {mark}  "
             f"{outcome.confidence:.2f}  {outcome.duration_ms}ms"
         )
 

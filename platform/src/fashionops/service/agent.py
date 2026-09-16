@@ -251,6 +251,13 @@ class ServiceOutcome:
     cost: Decimal = Decimal("0")
     duration_ms: int = 0
     error: str = ""
+    #: 意图/情绪是**谁定的**：``rule`` 还是 ``model``。
+    #:
+    #: 存出来是因为"规则优先、模型兜底"这个决定的效果**必须看得见** ——
+    #: 只报一个准确率数字，看不出到底是哪一层在起作用，
+    #: 也就无法判断下次该调规则还是该调 prompt。
+    intent_source: str = ""
+    sentiment_source: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -259,6 +266,8 @@ class ServiceOutcome:
             "lane_reason": self.lane_reason,
             "intent": self.intent,
             "sentiment": self.sentiment,
+            "intent_source": self.intent_source,
+            "sentiment_source": self.sentiment_source,
             "escalated": self.escalated,
             "escalate_reason": self.escalate_reason,
             "reply_draft": self.reply_draft,
@@ -312,6 +321,9 @@ def handle_ticket(
         escalated=False,
         escalate_reason="",
         reply_draft="",
+        # 规则判出了就算规则定的（模型只能在不一致时提意见，不能改，见 _resolve_labels）
+        intent_source="rule" if tri.intent else "",
+        sentiment_source="rule" if tri.sentiment and tri.sentiment != "neutral" else "",
     )
 
     try:
@@ -415,9 +427,7 @@ def _run_agent_lane(
     if decision is None:
         raise ValueError(f"模型输出无法解析成 JSON：{result.content[:200]}")
 
-    # 意图不在允许表里就不采信 —— 模型自创一个意图词会让下游统计出现长尾
-    outcome.intent = decision.intent if decision.intent in ALLOWED_INTENTS else tri.intent
-    outcome.sentiment = decision.sentiment or tri.sentiment
+    _resolve_labels(outcome, tri, decision)
     outcome.reply_draft = decision.reply_draft.strip()
     outcome.cited_article_nos = [str(x) for x in decision.cited_article_nos]
     outcome.confidence = float(decision.confidence)
@@ -425,6 +435,61 @@ def _run_agent_lane(
         # 模型提议转人工 → 记下来，由复核环节合并进最终理由
         outcome.escalated = True
         outcome.escalate_reason = f"处理方建议人工：{decision.reason}"
+
+
+def _resolve_labels(outcome: ServiceOutcome, tri: Any, decision: ServiceDecision) -> None:
+    """定 intent / sentiment —— **规则优先、模型兜底**（架构决策，用户选定）。
+
+    ## 为什么规则优先
+
+    在同一批 60 条工单上实测：
+
+    | 谁判的 | 意图准确率 |
+    | --- | --- |
+    | 关键词规则 | **100%** |
+    | 模型（glm-4-flash） | 83.3% |
+
+    也就是说在这个任务上**模型不如规则**。"觉得 Agent 就该让模型多干活"是误解 ——
+    分类是个有确定答案的任务，而关键词规则在"客户说的是退货还是物流"这种
+    封闭词汇集上没理由输。
+
+    ## 但"规则优先"不等于"规则垄断"
+
+    规则判不出来（空意图 / 平票）时必须让模型接上。两个理由：
+
+    * 规则的关键词表是人维护的，**客户的说法会超出它**（"这个衣服我穿着不舒服"
+      既不命中"尺码"也不命中"退货"，但人一看就知道是退换货）
+    * 平票被刻意当作"不认识"处理（见 `rules.classify_intent`），
+      那正是要靠模型的地方
+
+    ## 情绪的处理不一样
+
+    规则的 ``neutral`` **不是一种判断，而是"没找到信号"** ——
+    它的判据是关键词命中数，一个负面词都没命中就只能给 neutral。
+    所以只有规则给出了**非 neutral** 的值（找到了证据）时才用规则的；
+    给 neutral 时让模型看一眼（它读整句话，比数关键词敏感）。
+    """
+    # ---- 意图 ----
+    if tri.intent:
+        outcome.intent = tri.intent
+        outcome.intent_source = "rule"
+    elif decision.intent in ALLOWED_INTENTS:
+        outcome.intent = decision.intent
+        outcome.intent_source = "model"
+    # 都判不出就留空：**不要编一个** —— 空值在页面上是"待人工归类"，
+    # 而一个编出来的意图会让统计里多出一批错的分类
+
+    # ---- 情绪 ----
+    rule_sentiment = tri.sentiment if tri.sentiment != "neutral" else ""
+    if rule_sentiment:
+        outcome.sentiment = rule_sentiment
+        outcome.sentiment_source = "rule"
+    elif decision.sentiment:
+        outcome.sentiment = decision.sentiment
+        outcome.sentiment_source = "model"
+    else:
+        outcome.sentiment = tri.sentiment
+        outcome.sentiment_source = "rule"
 
 
 def _parse_decision(content: str) -> ServiceDecision | None:
