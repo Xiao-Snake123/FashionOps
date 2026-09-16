@@ -1,9 +1,9 @@
 # =============================================================================
 # FashionOps 全栈本地编排
 # -----------------------------------------------------------------------------
-# ⚠⚠ **这个文件还没有在真实 Docker 上跑过。**
-#     本机 Docker CLI 不在 PATH 上，所以只做了静态检查。
-#     第一次跑之前请按下面「第一次跑之前检查这几项」逐条确认。
+# 状态：**已在本机 Docker Desktop 4.91.0（WSL2 后端，引擎 29.8.0）上实测**
+#        —— API 镜像能构建、全栈能起来、`/health` 三项依赖都通。
+#        但**没有在别的机器/CI 上验证过**，换环境请按下面逐条确认。
 #
 # 用法：
 #     cp .env.docker.example .env.docker      # 填密码和密钥
@@ -16,18 +16,31 @@
 #
 # ## 第一次跑之前检查这几项
 #
-# 1. **`uv.lock` 必须存在且是最新的**（Dockerfile 里 COPY 了它）。
-#      本机跑 `uv lock` 生成，然后提交进仓库。
+# 1. **`uv.lock` 和 `README.md` 必须存在**（Dockerfile 里 COPY 了它们）。
+#      `README.md` 看起来莫名其妙但**必须拷**：`pyproject.toml` 里有
+#      `readme = "README.md"`，hatchling 构建元数据时读不到就报
+#      `OSError: Readme file does not exist` —— 而这个错只在真正构建镜像时出现，
+#      本地 `uv sync` 完全正常。
 # 2. **`FASHIONOPS_JWT_SECRET` 必须显式设置**，不能留空。
 #      留空时后端会生成临时密钥并打 warning —— 容器重启后所有人被登出，
-#      而且 api 和其他进程各有一份不同的密钥。
+#      而且各个进程各有一份不同的密钥。
 # 3. **MySQL 的字符集必须是 utf8mb4**。中文数据用默认的 latin1 会变成乱码，
 #      而且**写入时不报错**（只是显示错），等发现时已经存了一堆乱码。
 #      下面的 command 已经显式加了 `--character-set-server=utf8mb4`。
 # 4. **前端容器的 `/api` 代理要指向服务名 `api` 而不是 `127.0.0.1`**。
-#      容器里的 127.0.0.1 是它自己，不是后端。见 web 服务的 VITE_API_TARGET。
-# 5. 首次启动 MySQL 初始化要 20~40 秒。api 服务有 depends_on + healthcheck，
-#      所以它会等 MySQL 就绪（但**不会**等建表 —— 建表要手动跑 `init`）。
+#      容器里的 127.0.0.1 是它自己。见 web 服务的 VITE_API_TARGET。
+# 5. **网络受限（DNS 污染）时要填 `BUILD_HTTP_PROXY` / `BUILD_HTTPS_PROXY`**。
+#      症状是构建时报 `failed to fetch oauth token ... dial tcp 157.240.x.x:443`
+#      （那个 IP 是错的）。原因和为什么不能用 shell 环境变量，见 api.build.args 的注释。
+# 6. **首次启动 MySQL 初始化要 20~40 秒**。api 有 depends_on + healthcheck 会等它
+#      —— 但**不会**等建表，建表要手动跑 `init`。
+# 7. **端口冲突**：本机已经装了 MySQL / Redis / Qdrant，它们占着
+#      3306 / 6379 / 6333。所以本文件**默认不把这三个容器映射到宿主端口**
+#      （容器之间用服务名互通，不需要宿主端口）。
+#      而 `api` 和 `web` 默认用 8000 / 5173 —— 这两个也常常被本地开发服务占着，
+#      在 `.env.docker` 里改 `API_PORT` / `WEB_PORT` 即可（或先停掉本地服务）。
+#      *为什么基础设施默认不映射*：让两个东西抢同一个端口，
+#      报错长得像“权限不足”（Windows 上尤其如此），排查方向会完全跑偏。
 # =============================================================================
 
 name: fashionops
@@ -52,10 +65,23 @@ services:
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:?必须设置 MYSQL_PASSWORD}
     volumes:
       - mysql-data:/var/lib/mysql
-    ports:
-      # 只绑回环：数据库不该暴露到局域网。
-      # 需要从别的机器连就显式改成 "3306:3306"，并且知道自己在做什么。
-      - "127.0.0.1:3306:3306"
+    # ----------------------------------------------------------------------
+    # **默认不把 MySQL 映射到宿主端口**，这是刻意的。
+    #
+    # 原因：本机已经装了 MySQL 并占用 127.0.0.1:3306（应用平时连的就是它）。
+    # 再映射一次会直接报
+    #     Error response from daemon: ports are not available:
+    #     listen tcp4 127.0.0.1:3306: bind: An attempt was made to access a
+    #     socket in a way forbidden by its access permissions.
+    # —— 而这个报错读起来像“权限问题”，实际只是端口被占。
+    #
+    # 容器之间用服务名 `mysql:3306` 互相访问，**根本不需要宿主端口**。
+    # 需要用 MySQL 客户端连进去看数据时，用这条命令：
+    #     docker compose exec mysql mysql -ufashionops -p fashionops
+    # 或者临时取消下面两行的注释（记得同时改端口，避开本机那个 MySQL）。
+    # ----------------------------------------------------------------------
+    # ports:
+    #   - "127.0.0.1:3307:3306"
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-p${MYSQL_ROOT_PASSWORD}"]
       interval: 10s
@@ -81,8 +107,10 @@ services:
       - allkeys-lru
     volumes:
       - redis-data:/data
-    ports:
-      - "127.0.0.1:6379:6379"
+    # 同上：本机已经有个 Redis 占着 6379，而容器之间用 `redis:6379` 就够了。
+    # 要进去看看：docker compose exec redis redis-cli
+    # ports:
+    #   - "127.0.0.1:6380:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -97,8 +125,10 @@ services:
     restart: unless-stopped
     volumes:
       - qdrant-data:/qdrant/storage
-    ports:
-      - "127.0.0.1:6333:6333"
+    # 同上：本机 Qdrant 占着 6333。要看 dashboard 的话临时取消注释
+    # （建议用一个不冲突的端口，因为 qdrant 的 dashboard 是绑在同一端口上的）。
+    # ports:
+    #   - "127.0.0.1:6334:6333"
     healthcheck:
       # Qdrant 的 /healthz 没有认证、返回 200 就表示进程活着。
       # 注意它**不检查存储是否可写** —— 所以 /health 里的向量数检查才是关键那个。
@@ -114,6 +144,33 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      # ----------------------------------------------------------------------
+      # 构建期代理。**这是本文件里最容易踩的一个坑，必须解释清楚。**
+      #
+      # BuildKit 解析基础镜像（`python:3.12-slim`）的元数据时，要在
+      # **容器/VM 里**做 DNS 解析和 HTTPS 请求。如果所在网络对 Docker Hub
+      # 的域名做了 DNS 污染（国内很常见），你会看到这样的报错：
+      #
+      #     failed to fetch oauth token: Post "https://auth.docker.io/token":
+      #     dial tcp 157.240.20.18:443: connectex: ... did not properly respond
+      #
+      # 关键线索是 **那个 IP 是错的**（157.240.x.x 是 Facebook 的段），
+      # 而且每次解析都不一样 —— 这是 DNS 污染，不是网络慢。
+      # 有意思的是 `docker pull` 反而能成功：dockerd 拉镜像走的是
+      # Docker Desktop 的内部代理中继，只有 BuildKit 的元数据解析是直连。
+      #
+      # 为什么不直接 `$env:HTTP_PROXY=...` 让 compose 自动透传：
+      # **宿主侧进程和构建容器需要的地址不一样**。
+      #   - 宿主上的 docker CLI 要 `http://127.0.0.1:7897`
+      #   - 构建容器里 `127.0.0.1` 是它自己，必须用 `http://host.docker.internal:7897`
+      # 用同一个值会让 CLI 那边报 `lookup host.docker.internal: no such host`。
+      #
+      # 所以这里用显式的 build args，值从 .env.docker 来，默认空
+      # （网络正常的环境不需要代理，留空就是对的）。
+      # ----------------------------------------------------------------------
+      args:
+        HTTP_PROXY: ${BUILD_HTTP_PROXY:-}
+        HTTPS_PROXY: ${BUILD_HTTPS_PROXY:-}
     restart: unless-stopped
     depends_on:
       mysql:
@@ -145,14 +202,30 @@ services:
       FASHIONOPS_EMBEDDING_MODEL: ${EMBEDDING_MODEL:-embedding-2}
       FASHIONOPS_EMBEDDING_DIM: ${EMBEDDING_DIM:-1024}
 
-      # 容器内没有系统代理，也不需要绕过它 —— 显式清空
-      NO_PROXY: "*"
+      # ----------------------------------------------------------------------
+      # 运行期代理。**不设 NO_PROXY 会让内部调用也走代理，那必然连不上。**
+      #
+      # 应用里 httpx 读的是标准环境变量（`trust_env=True`）。
+      # 如果只设了 HTTP_PROXY 而没设 NO_PROXY，那么访问
+      # `http://qdrant:6333` 也会被丢给代理 —— 而代理解析不了容器名，
+      # 表现是"数据库/向量库连接超时"，指向完全错误的方向。
+      #
+      # 服务名必须在这里列全：mysql / redis / qdrant / api / web。
+      # 应用侧 `net.py` 只负责补回环地址（那部分是给本地开发用的）。
+      # ----------------------------------------------------------------------
+      HTTP_PROXY: ${CONTAINER_HTTP_PROXY:-}
+      HTTPS_PROXY: ${CONTAINER_HTTP_PROXY:-}
+      NO_PROXY: localhost,127.0.0.1,::1,mysql,redis,qdrant,api,web
+      no_proxy: localhost,127.0.0.1,::1,mysql,redis,qdrant,api,web
     volumes:
       # 产物（报表 xlsx）、本地对象存储、日志要落宿主机，
       # 否则容器重建一次全没了，而"产物下载"是在界面上承诺过的功能。
       - ./data:/app/data
     ports:
-      - "127.0.0.1:8000:8000"
+      # 端口可通过 .env.docker 覆盖：本地开发服务往往已经占着 8000。
+      # 注意 `.env.docker` 里的变量名是 API_PORT（不带 FASHIONOPS_ 前缀），
+      # 因为它只在 compose 插值里用，不进应用配置。
+      - "127.0.0.1:${API_PORT:-8000}:8000"
 
   # ---------------------------------------------------------------------------
   # Web：前端开发服务器
@@ -175,7 +248,7 @@ services:
       - web-node-modules:/app/node_modules
     command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
     ports:
-      - "127.0.0.1:5173:5173"
+      - "127.0.0.1:${WEB_PORT:-5173}:5173"
 
 volumes:
   mysql-data:

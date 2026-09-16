@@ -1,9 +1,17 @@
 # =============================================================================
 # FashionOps API 镜像
 # -----------------------------------------------------------------------------
-# ⚠ **本文件与 docker-compose.yml 都还没有在真实 Docker 上跑过验证。**
-#    本机 Docker CLI 不在 PATH 上，所以只做了静态检查（语法、路径、依赖完整性）。
-#    第一次跑之前请先看 docker-compose.yml 顶部的「第一次跑之前检查这几项」。
+# 状态：**已实测**（Docker Desktop 4.91.0，WSL2 后端，引擎 29.8.0）。
+#       构建通过，容器内 `fashionops-db init` 建出 23 张表，`/health` 三项依赖
+#       （MySQL / Redis / Qdrant）全通，未带 token 访问业务接口返回 401。
+#       但没有在别的机器 / CI 上验证过，换环境请先看 docker-compose.yml 顶部的
+#       「第一次跑之前检查这几项」。
+#
+# 构建时最容易踩的两个坑（都真的踩过）：
+#   1. `README.md` 必须 COPY（见下面 COPY 那行的注释）。
+#   2. 网络受限（DNS 污染）时要传构建参数 HTTP_PROXY / HTTPS_PROXY，
+#      且值必须是 `host.docker.internal:7897` 而**不是** `127.0.0.1:7897`
+#      —— 构建容器里的 127.0.0.1 是它自己。见 docker-compose.yml 的 api.build.args。
 #
 # 用 uv 而不是 pip：
 #   uv 的 lock 文件能保证镜像里装的依赖和开发机完全一致，
@@ -28,7 +36,13 @@ WORKDIR /app
 
 # ---- 依赖层（单独一层，改代码时不用重装依赖）----
 # 先只拷 pyproject/lock：只要这两份没变，这一层命中缓存
-COPY pyproject.toml uv.lock ./
+#
+# **README.md 必须一起拷**：`pyproject.toml` 里有 `readme = "README.md"`，
+# 而 hatchling 在构建元数据时会去读这个文件 —— 读不到就
+# `OSError: Readme file does not exist: README.md`。
+# 这个错误**只有真正构建镜像时才会出现**（本地 `uv sync` 不受影响，
+# 因为文件就在那儿），所以它是典型的"第一次跑 Docker 才炸"的一类问题。
+COPY pyproject.toml uv.lock README.md ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --all-extras --no-install-project --no-dev
 
