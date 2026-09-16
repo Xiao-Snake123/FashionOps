@@ -40,7 +40,7 @@ AGENT_SCOPES: dict[str, frozenset[str]] = {
     # 对话 Agent。它是个"什么都能问一点"的角色，所以读侧权限给全；
     # 但 `mail:send` 也在这里声明 —— 因为对话里确实要能起草并发送邮件。
     # 发信不会因此变得危险：**对话层会在执行前拦住并要求人工确认**
-    # （见 `chat/tools.needs_approval`）。权限回答"有没有资格"，
+    # （见 `fashionops.approval.policy.needs_approval`）。权限回答"有没有资格"，
     # 审批回答"这一次人同意了吗"，两者都要有。
     "chat": frozenset(
         {
@@ -48,6 +48,18 @@ AGENT_SCOPES: dict[str, frozenset[str]] = {
             Scope.ECOM_READ,
             Scope.AD_READ,
             Scope.KB_READ,
+            Scope.ASSET_WRITE,
+            Scope.MAIL_SEND,
+        }
+    ),
+    # 任务 Agent（新架构里**唯一**的执行者，见 docs/12-AI协作交接.md T3/T4）。
+    # 它要覆盖三类 todo 的工具需求：选品（ERP 读 + 打分）、分析（ERP 读 +
+    # 出报表）、通知（发信）。真正执行某一步时，工具目录还会按当前 todo
+    # 的 kind 再裁剪一次 —— 这里给的是它**可能**需要的全集。
+    "task": frozenset(
+        {
+            Scope.ERP_READ,
+            Scope.ECOM_READ,
             Scope.ASSET_WRITE,
             Scope.MAIL_SEND,
         }
@@ -62,13 +74,16 @@ def register_all_tools(registry: ToolRegistry | None = None) -> ToolRegistry:
     测试里传一个新建的，避免和别的测试互相污染。
     """
     from fashionops.gateway.registry import registry as default_registry
-    from fashionops.tools import erp, kb, mail, report
+    from fashionops.tools import business, erp, kb, mail, report
 
     target = registry if registry is not None else default_registry
     erp.register(target)
     report.register(target)
     mail.register(target)
     kb.register(target)
+    # 业务工具（原专用 Agent 的代码部分）：依赖上面先注册好的基础工具模块，
+    # 所以放最后。顺序在这里是有意义的，别随手挪。
+    business.register(target)
     return target
 
 

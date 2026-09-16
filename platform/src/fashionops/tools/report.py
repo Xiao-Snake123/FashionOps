@@ -140,6 +140,93 @@ def _register_asset(
         return asset.asset_no
 
 
+def export_excel_core(
+    filename: str,
+    title: str,
+    subtitle: str | None = None,
+    sheets: list[dict[str, Any]] | None = None,
+    produced_by: str = "analytics",
+    task_id: int | None = None,
+    product_id: int | None = None,
+) -> dict[str, Any]:
+    """``report.export_excel`` 的实现体。
+
+    单独抽成模块级函数而不是留在 ``register()`` 闭包里，
+    是因为业务工具（``tools/business.py`` 的
+    ``analytics.render_business_report``）要在自己的 handler 里
+    **直接复用**这套"渲染 → 落盘 → 登记 assets"的管线 ——
+    工具 handler 拿不到网关，只能走函数调用。
+    """
+    specs = [SheetSpec.model_validate(s) for s in (sheets or [])]
+
+    truncated: list[dict[str, Any]] = []
+    render_sheets: list[Sheet] = []
+    for spec in specs:
+        rows = spec.rows
+        if len(rows) > MAX_ROWS_PER_SHEET:
+            truncated.append(
+                {
+                    "sheet": spec.name,
+                    "kept": MAX_ROWS_PER_SHEET,
+                    "dropped": len(rows) - MAX_ROWS_PER_SHEET,
+                }
+            )
+            rows = rows[:MAX_ROWS_PER_SHEET]
+        render_sheets.append(
+            Sheet(
+                name=spec.name,
+                columns=[
+                    Column(
+                        key=c.key,
+                        title=c.title,
+                        number_format=c.number_format,
+                        align=c.align,
+                    )
+                    for c in spec.columns
+                ],
+                rows=list(rows),
+            )
+        )
+
+    payload = build_workbook(render_sheets, title=title, subtitle=subtitle)
+    if len(payload) > MAX_REPORT_BYTES:
+        raise ValueError(
+            f"报表体积 {len(payload) / 1024 / 1024:.1f}MB 超过 "
+            f"{MAX_REPORT_BYTES // 1024 // 1024}MB 上限，请减少行数或拆分多份"
+        )
+
+    safe_name = _safe_filename(filename)
+    key = _storage_key(safe_name)
+    stored = get_storage().save(
+        key,
+        payload,
+        mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+    asset_no = _register_asset(
+        filename=safe_name,
+        key=stored.key,
+        size=stored.size_bytes,
+        mime=stored.mime_type or "application/octet-stream",
+        task_id=task_id,
+        product_id=product_id,
+        generator=produced_by,
+    )
+
+    return {
+        "asset_no": asset_no,
+        "filename": safe_name,
+        "storage_key": stored.key,
+        "size_bytes": stored.size_bytes,
+        "sha256": stored.sha256,
+        "url": get_storage().url_for(stored.key),
+        "sheet_names": [s.name for s in render_sheets],
+        "row_counts": {s.name: len(s.rows) for s in render_sheets},
+        # 截断了就一定要说 —— 静默截断会让人以为看的是全量数据
+        "truncated": truncated,
+    }
+
+
 def register(registry: ToolRegistry) -> None:
     @registry.tool(
         name="report.export_excel",
@@ -166,71 +253,12 @@ def register(registry: ToolRegistry) -> None:
         task_id: int | None = None,
         product_id: int | None = None,
     ) -> dict[str, Any]:
-        specs = [SheetSpec.model_validate(s) for s in (sheets or [])]
-
-        truncated: list[dict[str, Any]] = []
-        render_sheets: list[Sheet] = []
-        for spec in specs:
-            rows = spec.rows
-            if len(rows) > MAX_ROWS_PER_SHEET:
-                truncated.append(
-                    {
-                        "sheet": spec.name,
-                        "kept": MAX_ROWS_PER_SHEET,
-                        "dropped": len(rows) - MAX_ROWS_PER_SHEET,
-                    }
-                )
-                rows = rows[:MAX_ROWS_PER_SHEET]
-            render_sheets.append(
-                Sheet(
-                    name=spec.name,
-                    columns=[
-                        Column(
-                            key=c.key,
-                            title=c.title,
-                            number_format=c.number_format,
-                            align=c.align,
-                        )
-                        for c in spec.columns
-                    ],
-                    rows=list(rows),
-                )
-            )
-
-        payload = build_workbook(render_sheets, title=title, subtitle=subtitle)
-        if len(payload) > MAX_REPORT_BYTES:
-            raise ValueError(
-                f"报表体积 {len(payload) / 1024 / 1024:.1f}MB 超过 "
-                f"{MAX_REPORT_BYTES // 1024 // 1024}MB 上限，请减少行数或拆分多份"
-            )
-
-        safe_name = _safe_filename(filename)
-        key = _storage_key(safe_name)
-        stored = get_storage().save(
-            key,
-            payload,
-            mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-
-        asset_no = _register_asset(
-            filename=safe_name,
-            key=stored.key,
-            size=stored.size_bytes,
-            mime=stored.mime_type or "application/octet-stream",
+        return export_excel_core(
+            filename=filename,
+            title=title,
+            subtitle=subtitle,
+            sheets=sheets,
+            produced_by=produced_by,
             task_id=task_id,
             product_id=product_id,
-            generator=produced_by,
         )
-
-        return {
-            "asset_no": asset_no,
-            "filename": safe_name,
-            "storage_key": stored.key,
-            "size_bytes": stored.size_bytes,
-            "sha256": stored.sha256,
-            "url": get_storage().url_for(stored.key),
-            "sheet_names": [s.name for s in render_sheets],
-            "row_counts": {s.name: len(s.rows) for s in render_sheets},
-            # 截断了就一定要说 —— 静默截断会让人以为看的是全量数据
-            "truncated": truncated,
-        }
