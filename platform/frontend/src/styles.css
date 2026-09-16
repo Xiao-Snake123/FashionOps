@@ -1,15 +1,51 @@
+/*
+ * 设计 token —— 浅色近单色。
+ *
+ * 参照 ChatGPT 的那套语言，核心就三条：
+ *
+ * 1. **整页只有黑白灰**，彩色只用在"语义必须区分"的地方（状态徽标、错误）。
+ *    颜色一多就会有"仪表盘 / AI 生成"的味道，这是"AI 感"最大的来源之一。
+ * 2. **弱边框强留白**。原来到处是 1px 边框 + 底色，看起来像配置面板；
+ *    改成用留白分组，分隔线只留发丝级。
+ * 3. **强调色是黑，不是蓝**。主按钮黑底白字，选中项浅灰底深色字。
+ *    蓝底白字是后台管理系统的典型长相。
+ */
 :root {
-  --bg: #0f1420;
-  --panel: #171e2e;
-  --panel-2: #1e2739;
-  --border: #2a3548;
-  --text: #e6ecf5;
-  --text-dim: #8b9ab3;
-  --accent: #4d8cf5;
-  --ok: #35c07a;
-  --warn: #e8b23a;
-  --danger: #ef5f6b;
-  --radius: 10px;
+  color-scheme: light;
+
+  --bg: #ffffff;
+  --sidebar: #f9f9f9;
+  --panel: #ffffff;
+  --panel-2: #f7f7f8; /* hover 底色 */
+  --panel-3: #ececec; /* 选中/更实的次级底色 */
+
+  --border: #e8e8e8; /* 发丝级分隔线：够看清就行，不要重 */
+  --border-strong: #d9d9d9;
+
+  --text: #0d0d0d;
+  --text-soft: #5d5d5d;
+  --text-dim: #8f8f8f;
+
+  /* 强调色 = 黑。主按钮、选中态、进度条都走它 */
+  --accent: #0d0d0d;
+  --accent-ink: #ffffff;
+  /* 蓝色只留给链接。链接是唯一"颜色能帮上忙"的地方 */
+  --link: #0b57d0;
+
+  /* 语义色：降饱和度。原色在浅底上会刺眼，而且一刺眼就像 AI 生成的图标 */
+  --ok: #16794c;
+  --warn: #8a6100;
+  --danger: #bc3b2f;
+  --danger-bg: #fdf3f2;
+  --warn-bg: #fdf8ec;
+  --ok-bg: #f1f8f3;
+
+  --radius: 12px;
+  --radius-lg: 26px; /* 输入框那种大圆角 */
+  --content-max: 880px; /* 内容列宽 → 超宽屏上居中限宽 */
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 18px rgba(0, 0, 0, 0.08);
 }
 
 * {
@@ -20,9 +56,28 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: -apple-system, 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
+  font-family: -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
   font-size: 14px;
   line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 滚动条也调淡一点。默认的深色滚动条在浅色页面上很跳 */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.14);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.24);
+  background-clip: content-box;
 }
 
 code,
@@ -38,24 +93,26 @@ code,
 }
 
 .sidebar {
-  width: 232px;
-  flex: 0 0 232px;
-  background: var(--panel);
+  width: 248px;
+  flex: 0 0 248px;
+  background: var(--sidebar);
   border-right: 1px solid var(--border);
-  padding: 20px 14px;
+  padding: 16px 12px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 
 .brand {
-  padding: 0 8px 18px;
+  padding: 0 10px 14px;
 }
 
 .brand h1 {
   font-size: 15px;
+  font-weight: 600;
   margin: 0;
   line-height: 1.4;
+  letter-spacing: -0.01em;
 }
 
 .brand small {
@@ -67,49 +124,78 @@ code,
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 9px 12px;
+  gap: 8px;
+  padding: 8px 10px;
   border-radius: 8px;
-  color: var(--text-dim);
+  color: var(--text-soft);
   text-decoration: none;
-  transition: background 0.12s, color 0.12s;
+  font-size: 13.5px;
+  transition: background 0.1s, color 0.1s;
 }
 
 .nav-link:hover {
-  background: var(--panel-2);
+  background: var(--panel-3);
   color: var(--text);
 }
 
+/*
+ * 选中态用**浅灰底 + 深色字**，不用蓝底白字。
+ *
+ * 蓝底白字是"后台管理系统"的典型长相 —— 而且侧栏上同时出现
+ * 蓝色选中块 + 红色角标 + 多种图标色，整页就散了。
+ * ChatGPT 的选中项只是比周围深一点的灰。这一处改了，
+ * 整页的观感会明显不同。
+ */
 .nav-link.active {
-  background: var(--accent);
-  color: #fff;
+  background: var(--panel-3);
+  color: var(--text);
+  font-weight: 500;
 }
 
 .nav-badge {
-  background: var(--danger);
-  color: #fff;
-  border-radius: 9px;
-  padding: 0 7px;
+  background: var(--text);
+  color: var(--accent-ink);
+  border-radius: 999px;
+  padding: 0 6px;
   font-size: 11px;
   line-height: 17px;
   min-width: 18px;
   text-align: center;
+  font-weight: 500;
 }
 
 .content {
   flex: 1;
-  padding: 26px 30px 60px;
   min-width: 0;
+  padding: 32px 40px 80px;
+}
+
+/*
+ * 内容列居中限宽。
+ *
+ * 铺满超宽屏是"AI 感"的另一大来源：行太长、卡片被拉得很散，
+ * 读起来像配置面板而不是产品。
+ *
+ * 对话页除外 —— 它自己的两栏布局要占满宽度，内部再限宽。
+ */
+.content > *:not(.chat-page) {
+  max-width: var(--content-max);
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .page-title {
-  margin: 0 0 4px;
-  font-size: 20px;
+  margin: 0 0 6px;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
 }
 
 .page-desc {
-  margin: 0 0 22px;
+  margin: 0 0 26px;
   color: var(--text-dim);
-  font-size: 13px;
+  font-size: 13.5px;
+  line-height: 1.6;
 }
 
 /* ---------- 卡片与栅格 ---------- */
@@ -129,8 +215,8 @@ code,
 .card {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 16px 18px;
+  border-radius: 14px;
+  padding: 18px 20px;
 }
 
 .card h3 {
@@ -182,8 +268,8 @@ th {
 }
 
 td {
-  padding: 9px 12px;
-  border-bottom: 1px solid rgba(42, 53, 72, 0.55);
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--border);
   vertical-align: middle;
 }
 
@@ -196,38 +282,41 @@ tr.clickable {
 }
 
 /* ---------- 徽标 ---------- */
+/*
+ * 徽标：**去掉了彩色边框**，只留平色底 + 彩色字。
+ *
+ * 原来一个徽标同时给三种颜色信号（底、边框、字），红黄绿紫一起出现
+ * 的时候整张表像看板。平底 + 彩色字就够了，而且安静很多。
+ */
 .badge {
   display: inline-block;
   padding: 1.5px 8px;
   border-radius: 999px;
   font-size: 11.5px;
   line-height: 18px;
-  border: 1px solid transparent;
   white-space: nowrap;
+  background: var(--panel-3);
+  color: var(--text-soft);
 }
 
 .badge.ok {
-  background: rgba(53, 192, 122, 0.14);
+  background: var(--ok-bg);
   color: var(--ok);
-  border-color: rgba(53, 192, 122, 0.3);
 }
 
 .badge.warn {
-  background: rgba(232, 178, 58, 0.14);
+  background: var(--warn-bg);
   color: var(--warn);
-  border-color: rgba(232, 178, 58, 0.3);
 }
 
 .badge.danger {
-  background: rgba(239, 95, 107, 0.14);
+  background: var(--danger-bg);
   color: var(--danger);
-  border-color: rgba(239, 95, 107, 0.3);
 }
 
 .badge.dim {
-  background: rgba(139, 154, 179, 0.12);
+  background: var(--panel-3);
   color: var(--text-dim);
-  border-color: rgba(139, 154, 179, 0.25);
 }
 
 /* ---------- 进度条 ---------- */
@@ -266,32 +355,94 @@ tr.clickable {
 
 select,
 input[type='text'] {
-  background: var(--panel-2);
-  border: 1px solid var(--border);
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
   color: var(--text);
-  border-radius: 7px;
-  padding: 6px 10px;
+  border-radius: 9px;
+  padding: 7px 11px;
   font-size: 13px;
+  font-family: inherit;
   outline: none;
 }
 
+/* 聚焦只加深边框，不加蓝色光晕 —— 蓝色光晕是"控件库默认值"的味道 */
 select:focus,
 input[type='text']:focus {
-  border-color: var(--accent);
+  border-color: var(--text-dim);
 }
 
-.btn {
-  background: var(--panel-2);
-  border: 1px solid var(--border);
+/*
+ * 按钮 —— 全页**唯一一套**。
+ *
+ * 之前存在两套：`.btn`（Tasks/TaskDetail 在用）和 `.button`（Chat/Tickets/
+ * Login/App 在用）。而 `.button` 只在 `.login-card` 和 `.sidebar-footer`
+ * 里有作用域定义，**外层从来没有全局定义** —— 所以对话页和工单页的按钮
+ * 一直是浏览器默认样式，跟旁边的按钮长得不一样。
+ *
+ * 现在统一成 `基础类 + 变体`，`.btn` 保留为别名（老页面不用改）。
+ * 主按钮黑底白字，其余白底发丝边框 —— 整页只有主操作是"重"的。
+ */
+.btn,
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
   color: var(--text);
-  border-radius: 7px;
-  padding: 6px 13px;
+  border-radius: 9px;
+  padding: 7px 14px;
   font-size: 13px;
+  font-family: inherit;
+  line-height: 1.4;
   cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
 }
 
-.btn:hover {
+.btn:hover:not(:disabled),
+.button:hover:not(:disabled) {
+  background: var(--panel-2);
+}
+
+.btn.primary,
+.button.primary {
+  background: var(--accent);
   border-color: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 500;
+}
+
+.btn.primary:hover:not(:disabled),
+.button.primary:hover:not(:disabled) {
+  background: #262626;
+  border-color: #262626;
+}
+
+.btn.danger,
+.button.danger {
+  background: var(--panel);
+  border-color: var(--border-strong);
+  color: var(--danger);
+}
+
+.btn.danger:hover:not(:disabled),
+.button.danger:hover:not(:disabled) {
+  background: var(--danger-bg);
+  border-color: var(--danger);
+}
+
+.btn.small,
+.button.small {
+  padding: 4px 10px;
+  font-size: 12.5px;
+  border-radius: 8px;
+}
+
+.btn:disabled,
+.button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .muted {
@@ -299,9 +450,9 @@ input[type='text']:focus {
 }
 
 .error-box {
-  background: rgba(239, 95, 107, 0.1);
-  border: 1px solid rgba(239, 95, 107, 0.35);
-  color: #ffb6bc;
+  background: var(--danger-bg);
+  border: 1px solid rgba(188, 59, 47, 0.28);
+  color: var(--danger);
   border-radius: var(--radius);
   padding: 12px 16px;
   margin-bottom: 16px;
@@ -331,8 +482,8 @@ input[type='text']:focus {
 
 /* ---------- React Flow 节点 ---------- */
 .dag-node {
-  background: var(--panel-2);
-  border: 1.5px solid var(--border);
+  background: var(--panel);
+  border: 1.5px solid var(--border-strong);
   border-radius: 9px;
   padding: 9px 13px;
   min-width: 128px;
@@ -352,8 +503,8 @@ input[type='text']:focus {
 }
 
 .dag-node.running {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(77, 140, 245, 0.18);
+  border-color: var(--text);
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.07);
 }
 
 .dag-node.failed {
@@ -393,8 +544,8 @@ input[type='text']:focus {
 .event-row {
   display: flex;
   gap: 10px;
-  padding: 6px 4px;
-  border-bottom: 1px solid rgba(42, 53, 72, 0.5);
+  padding: 7px 4px;
+  border-bottom: 1px solid var(--border);
 }
 
 .event-seq {
@@ -419,10 +570,10 @@ textarea {
   width: 100%;
   min-height: 78px;
   resize: vertical;
-  background: var(--panel-2);
-  border: 1px solid var(--border);
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
   color: var(--text);
-  border-radius: 7px;
+  border-radius: 9px;
   padding: 9px 11px;
   font-size: 13px;
   font-family: inherit;
@@ -431,7 +582,7 @@ textarea {
 }
 
 textarea:focus {
-  border-color: var(--accent);
+  border-color: var(--text-dim);
 }
 
 textarea:disabled {
@@ -449,43 +600,27 @@ textarea:disabled {
 /* 示例需求：点一下就填进去，省得用户想不出该怎么问 */
 .prompt-chip {
   display: inline-block;
-  background: var(--panel-2);
-  border: 1px solid var(--border);
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
   border-radius: 999px;
-  padding: 3px 11px;
-  font-size: 12px;
-  color: var(--text-dim);
+  padding: 4px 12px;
+  font-size: 12.5px;
+  color: var(--text-soft);
   cursor: pointer;
   margin: 0 6px 6px 0;
+  transition: background 0.12s;
 }
 
 .prompt-chip:hover {
-  border-color: var(--accent);
+  background: var(--panel-2);
   color: var(--text);
 }
 
-/* ---------- 按钮变体 ---------- */
-.btn.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-  font-weight: 500;
-}
-
-.btn.primary:hover:not(:disabled) {
-  filter: brightness(1.1);
-}
-
-.btn.danger {
-  background: rgba(239, 95, 107, 0.14);
-  border-color: rgba(239, 95, 107, 0.4);
-  color: #ffb6bc;
-}
-
-.btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
+/*
+ * 按钮变体已合并到上面的 `.btn, .button` 一节。
+ * 原来这里还有 `.btn.primary` / `.btn.danger` / `.btn:disabled`，
+ * 分成三处定义同一个按钮的相貌，很容易改漏一处。
+ */
 
 /* ---------- 审批横幅 ---------- */
 /*
@@ -495,20 +630,20 @@ textarea:disabled {
  */
 .banner {
   border-radius: var(--radius);
-  padding: 14px 18px;
-  margin-bottom: 16px;
-  border: 1px solid rgba(232, 178, 58, 0.4);
-  background: rgba(232, 178, 58, 0.08);
+  padding: 16px 20px;
+  margin-bottom: 18px;
+  border: 1px solid rgba(138, 97, 0, 0.28);
+  background: var(--warn-bg);
 }
 
 .banner.danger {
-  border-color: rgba(239, 95, 107, 0.4);
-  background: rgba(239, 95, 107, 0.08);
+  border-color: rgba(188, 59, 47, 0.28);
+  background: var(--danger-bg);
 }
 
 .banner.ok {
-  border-color: rgba(53, 192, 122, 0.35);
-  background: rgba(53, 192, 122, 0.07);
+  border-color: rgba(22, 121, 76, 0.24);
+  background: var(--ok-bg);
 }
 
 .banner h3 {
@@ -551,8 +686,8 @@ textarea:disabled {
   gap: 10px;
   background: var(--panel-2);
   border: 1px solid var(--border);
-  border-radius: 7px;
-  padding: 8px 12px;
+  border-radius: 9px;
+  padding: 9px 12px;
   font-size: 13px;
 }
 
@@ -574,9 +709,9 @@ textarea:disabled {
 }
 
 .bar-track {
-  background: var(--panel-2);
+  background: var(--panel-3);
   border-radius: 999px;
-  height: 16px;
+  height: 14px;
   overflow: hidden;
 }
 

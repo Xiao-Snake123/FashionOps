@@ -9,8 +9,8 @@
 
 .chat-page {
   display: grid;
-  grid-template-columns: 240px 1fr;
-  gap: 16px;
+  grid-template-columns: 248px 1fr;
+  gap: 20px;
   /* 撑满视口减去顶部留白。用 dvh 而不是 vh：移动端浏览器地址栏
      收起/展开会改变可视高度，vh 会让输入框被挡住 */
   height: calc(100dvh - var(--chat-top-gap, 96px));
@@ -18,11 +18,16 @@
 }
 
 /* ---- 会话列表 ---- */
+/* 做成一块浅灰面板（像 ChatGPT 的左栅），而不是一条带右边框的分栏。
+   有边框的分栏看起来是两个并列的表格区域 */
 .chat-list {
   display: flex;
   flex-direction: column;
   gap: 10px;
   min-height: 0;
+  background: var(--sidebar);
+  border-radius: 14px;
+  padding: 12px;
 }
 
 .chat-list-items {
@@ -37,27 +42,31 @@
   display: block;
   width: 100%;
   text-align: left;
-  padding: 8px 10px;
+  padding: 9px 10px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 9px;
   background: transparent;
-  color: inherit;
+  color: var(--text-soft);
   cursor: pointer;
   font: inherit;
+  transition: background 0.12s, color 0.12s;
 }
 
 .chat-list-item:hover {
-  background: rgba(127, 127, 127, 0.08);
+  background: rgba(0, 0, 0, 0.045);
+  color: var(--text);
 }
 
+/* 选中项只用深浅差，不用蓝色底 + 蓝色边框 ——
+   一个列表里到处都是蓝色块的时候，眼睛不知道该看哪 */
 .chat-list-item.active {
-  background: rgba(64, 120, 255, 0.12);
-  border-color: rgba(64, 120, 255, 0.35);
+  background: rgba(0, 0, 0, 0.07);
+  color: var(--text);
 }
 
 .chat-list-title {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 13.5px;
+  font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -65,46 +74,47 @@
 
 .chat-list-meta {
   font-size: 11px;
-  opacity: 0.6;
+  color: var(--text-dim);
   margin-top: 2px;
 }
 
 /* ---- 主区 ---- */
+/* 主区不再包一个带边框的卡片 —— 消息直接在白底上。
+   两条竖线（列表边框 + 主区边框）叠在一起会很重 */
 .chat-main {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border: 1px solid rgba(127, 127, 127, 0.2);
-  border-radius: 12px;
-  overflow: hidden;
 }
 
 .chat-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 16px;
-  border-bottom: 1px solid rgba(127, 127, 127, 0.18);
+  gap: 12px;
+  padding: 0 8px 12px;
+  border-bottom: 1px solid var(--border);
 }
 
 .chat-head h2 {
   margin: 0;
   font-size: 15px;
+  font-weight: 600;
 }
 
 .chat-head-sub {
-  font-size: 11px;
-  opacity: 0.6;
+  font-size: 11.5px;
+  color: var(--text-dim);
   margin-top: 2px;
 }
 
 .chat-scroll {
   flex: 1;
   overflow-y: auto;
-  padding: 16px;
+  padding: 26px 8px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 24px;
   min-height: 0;
 }
 
@@ -113,7 +123,10 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-width: 100%;
+  /* 消息列居中限宽。对话正文超宽之后很难跟行 */
+  width: 100%;
+  max-width: var(--content-max);
+  margin: 0 auto;
 }
 
 .chat-row.user {
@@ -125,30 +138,43 @@
 }
 
 .bubble {
-  padding: 9px 13px;
-  border-radius: 12px;
   /* pre-wrap 而不是渲染 markdown：这样换行和缩进原样保留，
      而不用为了少一个依赖去引一个 markdown 渲染器 */
   white-space: pre-wrap;
   word-break: break-word;
-  line-height: 1.6;
-  font-size: 14px;
-  max-width: min(760px, 88%);
+  line-height: 1.7;
+  font-size: 14.5px;
 }
 
+/* 用户消息：小气泡，右对齐。行高比助手消息紧，看着更像"一句话" */
 .bubble.user {
-  background: rgba(64, 120, 255, 0.14);
-  border: 1px solid rgba(64, 120, 255, 0.28);
+  background: #eaf0fb;
+  border-radius: 18px;
+  padding: 10px 15px;
+  line-height: 1.6;
+  max-width: min(560px, 82%);
 }
 
+/*
+ * 助手消息：**没有气泡**。
+ *
+ * 这是整页最要紧的一处改动。参考图里助手的回复就是在白底上的普通段落，
+ * 和正文一个长相；而"每条消息都套一个带边框的圆角框"是聊天机器人控件
+ * 的默认长相 —— 一页里十几个框，整页就被切碎了，这是"AI 感"最大的来源。
+ *
+ * 助手用留白跟前一条隔开（.chat-scroll 的 gap 已经给足了）。
+ */
 .bubble.assistant {
-  background: rgba(127, 127, 127, 0.09);
-  border: 1px solid rgba(127, 127, 127, 0.16);
+  padding: 0;
+  background: none;
+  border: none;
+  max-width: 100%;
+  color: var(--text);
 }
 
 .bubble.thinking {
-  opacity: 0.55;
-  font-style: italic;
+  color: var(--text-dim);
+  font-size: 13.5px;
 }
 
 /* 流式光标：一条竖线在闪。没有它用户看不出"还在生成"还是"卡住了" */
@@ -177,15 +203,19 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+  width: 100%;
 }
 
+/* 工具调用是"过程"，不是"结果"。做成淡淡的灰块缩在边上，
+   不要跟助手正文抢注意力 */
 .tool-chip {
-  border: 1px solid rgba(127, 127, 127, 0.2);
-  border-radius: 8px;
-  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 6px 11px;
   font-size: 12px;
-  background: rgba(127, 127, 127, 0.05);
-  max-width: min(760px, 88%);
+  background: var(--panel-2);
+  color: var(--text-soft);
+  max-width: min(680px, 88%);
 }
 
 .tool-chip summary {
@@ -206,7 +236,7 @@
 
 .tool-chip.failed,
 .tool-chip.failed summary .tool-chip-state {
-  color: #c0392b;
+  color: var(--danger);
 }
 
 .tool-chip-name {
@@ -215,27 +245,28 @@
 }
 
 .tool-chip-state {
-  opacity: 0.65;
+  color: var(--text-dim);
   margin-left: auto;
 }
 
 .tool-chip-body {
   margin-top: 8px;
-  border-top: 1px dashed rgba(127, 127, 127, 0.25);
-  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
 }
 
 .tool-chip-label {
   font-size: 11px;
-  opacity: 0.6;
-  margin-bottom: 2px;
+  color: var(--text-dim);
+  margin-bottom: 4px;
 }
 
 .tool-chip-body pre {
   margin: 0 0 8px;
-  padding: 6px 8px;
-  background: rgba(0, 0, 0, 0.05);
-  border-radius: 6px;
+  padding: 8px 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
   font-size: 11px;
   max-height: 220px;
   overflow: auto;
@@ -244,33 +275,36 @@
 }
 
 /* ---- 审批卡片 ---- */
+/* 全页唯一允许"跳一下"的元素 —— 它确实在等用户点。
+   但只用淡色底 + 细边，不用粗彩色边框（粗边看起来像警告弹窗） */
 .approval-card {
-  border: 1px solid rgba(230, 160, 30, 0.5);
-  background: rgba(230, 160, 30, 0.08);
-  border-radius: 10px;
-  padding: 10px 12px;
-  max-width: min(760px, 92%);
+  border: 1px solid rgba(138, 97, 0, 0.26);
+  background: var(--warn-bg);
+  border-radius: 14px;
+  padding: 14px 16px;
+  max-width: min(680px, 92%);
 }
 
 .approval-head {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 
 .approval-badge {
   font-size: 11px;
-  font-weight: 700;
-  padding: 2px 7px;
+  font-weight: 600;
+  padding: 2px 9px;
   border-radius: 999px;
-  background: rgba(230, 160, 30, 0.25);
+  background: rgba(138, 97, 0, 0.13);
+  color: var(--warn);
 }
 
 .approval-tool {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
-  opacity: 0.8;
+  color: var(--text-dim);
 }
 
 /* 摘要保留换行 —— 它是给人读的，挤成一行会很难扫 */
@@ -290,29 +324,30 @@
 
 .approval-done {
   font-size: 12px;
-  opacity: 0.55;
-  font-style: italic;
+  color: var(--text-dim);
 }
 
 /* ---- 任务卡片 ---- */
 .task-card {
   display: block;
-  border: 1px solid rgba(64, 120, 255, 0.35);
-  background: rgba(64, 120, 255, 0.08);
-  border-radius: 10px;
-  padding: 9px 12px;
+  border: 1px solid var(--border-strong);
+  background: var(--panel);
+  border-radius: 12px;
+  padding: 11px 14px;
   text-decoration: none;
   color: inherit;
   max-width: min(420px, 92%);
+  transition: background 0.12s;
 }
 
 .task-card:hover {
-  background: rgba(64, 120, 255, 0.14);
+  background: var(--panel-2);
 }
 
 .task-card-title {
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
+  color: var(--text-dim);
 }
 
 .task-card-no {
@@ -323,24 +358,32 @@
 
 .task-card-sub {
   font-size: 11px;
-  opacity: 0.65;
+  color: var(--text-dim);
 }
 
-/* ---- 空态 ---- */
+/* ---- 空态（欢迎屏）----
+   参考图里首次进入就是一屏居中大标题 + 一句话 + 几个建议，
+   而不是一行灰字。大字标题是整页唯一的大字，它把视觉重心
+   从"控件"挪到"你想问什么" */
 .chat-empty {
   margin: auto;
   text-align: center;
-  max-width: 560px;
+  max-width: 620px;
+  padding: 0 16px;
 }
 
 .chat-empty h3 {
-  margin: 0 0 6px;
+  margin: 0 0 10px;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
 }
 
 .chat-empty p {
-  font-size: 13px;
-  opacity: 0.65;
-  margin: 0 0 14px;
+  font-size: 14px;
+  color: var(--text-dim);
+  margin: 0 0 24px;
+  line-height: 1.6;
 }
 
 .chat-samples {
@@ -352,7 +395,7 @@
 
 .chat-hint {
   margin: auto;
-  opacity: 0.6;
+  color: var(--text-dim);
   font-size: 13px;
 }
 
@@ -362,32 +405,47 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin: 0 16px;
-  padding: 7px 11px;
-  border-radius: 8px;
-  border: 1px solid rgba(192, 57, 43, 0.4);
-  background: rgba(192, 57, 43, 0.1);
+  margin: 0 8px;
+  padding: 9px 13px;
+  border-radius: 10px;
+  border: 1px solid rgba(188, 59, 47, 0.26);
+  background: var(--danger-bg);
+  color: var(--danger);
   font-size: 13px;
 }
 
-/* ---- 输入区 ---- */
+/* ---- 输入区 ----
+   *
+   * 做成"浮起的大圆角盒子"。
+   *
+   * 参考图里输入框是整页最突出的一个控件：圆角很大、四周留白足、
+   * 有很淡的投影。原来它是贴底的方框 + 一条顶部分隔线，
+   * 看起来像表格底部的工具条。
+   */
 .chat-composer {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   align-items: flex-end;
-  padding: 12px 16px;
-  border-top: 1px solid rgba(127, 127, 127, 0.18);
+  width: calc(100% - 16px);
+  max-width: var(--content-max);
+  margin: 10px auto 4px;
+  padding: 12px 12px 12px 18px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: var(--shadow-md);
 }
 
 .chat-composer textarea {
   flex: 1;
   resize: none;
   font: inherit;
-  font-size: 14px;
-  line-height: 1.5;
-  padding: 9px 11px;
-  border-radius: 10px;
-  border: 1px solid rgba(127, 127, 127, 0.3);
+  font-size: 14.5px;
+  line-height: 1.6;
+  padding: 6px 2px;
+  /* 边框挪到外层盒子上，textarea 自己不要边框，
+     否则会出现"线里还有线"的双框 */
+  border: none;
   background: transparent;
   color: inherit;
   max-height: 160px;
@@ -395,7 +453,11 @@
 
 .chat-composer textarea:focus {
   outline: none;
-  border-color: rgba(64, 120, 255, 0.6);
+}
+
+.chat-composer .button {
+  border-radius: 999px;
+  padding: 8px 16px;
 }
 
 .button.block {

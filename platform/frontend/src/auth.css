@@ -7,14 +7,20 @@
    =========================================================================== */
 
 /* ---------- 登录页 ---------- */
+/*
+ * 登录页背景去掉原来的蓝色径向渐变。
+ *
+ * 那是深色主题下为了“不让整页是死黑”而加的光；换成浅色底之后，
+ * 蓝光晕会变成一层脏蓝色，而且是最典型的那种“AI 生成的落地页”长相。
+ * 浅色下靠留白就够了。
+ */
 .login-page {
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: radial-gradient(circle at 50% 0%, rgba(79, 124, 255, 0.14), transparent 60%),
-    var(--bg);
+  background: var(--bg);
 }
 
 .login-card {
@@ -22,19 +28,21 @@
   max-width: 400px;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 30px 28px 24px;
+  border-radius: 16px;
+  padding: 34px 30px 26px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.36);
+  gap: 15px;
+  box-shadow: var(--shadow-md);
 }
 
 .login-card h1 {
-  font-size: 17px;
+  font-size: 20px;
+  font-weight: 600;
   margin: 0;
-  line-height: 1.45;
+  line-height: 1.4;
   text-align: center;
+  letter-spacing: -0.01em;
 }
 
 .login-sub {
@@ -56,9 +64,9 @@
 
 .login-card .field input {
   padding: 10px 12px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--panel-2);
+  border-radius: 9px;
+  border: 1px solid var(--border-strong);
+  background: var(--panel);
   color: var(--text);
   font-size: 14px;
   font-family: inherit;
@@ -67,14 +75,14 @@
 
 .login-card .field input:focus {
   outline: none;
-  border-color: var(--accent);
+  border-color: var(--text-dim);
 }
 
 .login-card .button {
   padding: 11px 14px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--panel-2);
+  border-radius: 10px;
+  border: 1px solid var(--border-strong);
+  background: var(--panel);
   color: var(--text);
   font-size: 14px;
   font-family: inherit;
@@ -85,12 +93,15 @@
 .login-card .button.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
-  font-weight: 600;
+  color: var(--accent-ink);
+  font-weight: 500;
 }
 
+/* 原来用 filter: brightness(1.08) 做悬停 —— 在纯黑底上亮度提 8% 看不出来，
+   而且 filter 会让文字跟着一起失真。直接指定色值 */
 .login-card .button.primary:hover:not(:disabled) {
-  filter: brightness(1.08);
+  background: #262626;
+  border-color: #262626;
 }
 
 .login-card .button:disabled {
