@@ -56,13 +56,9 @@ import threading
 from collections.abc import Iterator
 from typing import Any
 
+from fashionops.approval.policy import describe_preview, needs_approval
 from fashionops.chat import store
-from fashionops.chat.tools import (
-    TASK_SUBMIT,
-    build_catalog,
-    describe_preview,
-    needs_approval,
-)
+from fashionops.chat.tools import TASK_SUBMIT, build_catalog
 from fashionops.db import session_scope
 from fashionops.db.models_chat import MSG_ROLE_ASSISTANT, MSG_ROLE_TOOL, MSG_ROLE_USER
 from fashionops.gateway.core import CallContext, ToolGateway
