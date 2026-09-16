@@ -60,6 +60,7 @@ AGENT_SCOPES: dict[str, frozenset[str]] = {
         {
             Scope.ERP_READ,
             Scope.ECOM_READ,
+            Scope.KB_READ,
             Scope.ASSET_WRITE,
             Scope.MAIL_SEND,
         }

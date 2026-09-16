@@ -42,7 +42,20 @@ MAIL_SEND = "mail.send"
 #:
 #: 这是一个**例外名单**，不是"写工具名单"。
 #: 新增写工具时，什么都不用做就会自动进入确认流程 —— 这是刻意的。
-APPROVAL_EXEMPT: frozenset[str] = frozenset({"task.submit"})
+#:
+#: 两个报表工具在名单里，也是按"做完能不能撤销"判的：
+#: 它们只往**自己的**素材表和本地存储写一个文件，重跑得到同样的结果
+#: （``idempotent=True``），文件可以删、可以重新生成，**没有任何对外可见的
+#: 副作用**。把它拦下来，只会让"选品 + 出报表"这种纯内部任务也停下来等人 ——
+#: 人一天要点十几次"同意"，真正的红线（发信）就被淹没在点击里了。
+#: 相对的，``mail.send`` 永远在闸口后面：邮件出去了就收不回来。
+APPROVAL_EXEMPT: frozenset[str] = frozenset(
+    {
+        "task.submit",
+        "report.export_excel",
+        "analytics.render_business_report",
+    }
+)
 
 
 def needs_approval(tool_name: str) -> bool:
