@@ -169,6 +169,19 @@ class TicketOut(ORMBase):
     escalate_reason: str | None = None
     created_at: datetime
 
+    # ---- 客服 Agent 的产出（2026-09-16 补）----
+    # 这些字段表里一直有，只是原来没对外暴露。但**它们才是工单页要给人看的东西**：
+    # 光看"意图=退换货、情绪=angry、转人工"只能知道结论，
+    # 看不到"Agent 打算怎么回""依据是哪几篇"—— 而那正是人来判断能不能放行的依据。
+    content: str | None = None
+    resolution: str | None = None
+    confidence: float | None = None
+    cited_article_nos: list[str] | None = None
+    #: Agent 最近一次处理时间（空 = 没被 Agent 处理过）
+    agent_handled_at: datetime | None = None
+    #: 走的是哪条路：fast（代码快车道，0 次模型调用）/ agent（工具循环）
+    agent_lane: str | None = None
+
 
 class AdCampaignOut(ORMBase):
     id: int

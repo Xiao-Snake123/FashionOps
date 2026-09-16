@@ -208,7 +208,53 @@ export interface Ticket {
   escalated: boolean
   escalate_reason: string | null
   created_at: string
+  // ---- 客服 Agent 的产出 ----
+  content?: string | null
+  resolution?: string | null
+  confidence?: number | null
+  cited_article_nos?: string[] | null
+  agent_handled_at?: string | null
+  agent_lane?: string | null
 }
+
+/** 一条工单的处理结果（SSE 事件里带的 `outcome`）。 */
+export interface TicketOutcome {
+  ticket_no: string
+  lane: string
+  lane_reason: string
+  intent: string
+  sentiment: string
+  /** 意图/情绪是谁定的：`rule` 或 `model`。**这个必须显示** ——
+   *  看不到来源就分不清该调规则还是该调 prompt */
+  intent_source: string
+  sentiment_source: string
+  escalated: boolean
+  escalate_reason: string
+  reply_draft: string
+  cited_article_nos: string[]
+  confidence: number
+  steps: number
+  tool_calls: number
+  tokens: number
+  cost: number
+  duration_ms: number
+  error: string
+}
+
+export interface TicketStats {
+  total: number
+  fast_lane: number
+  agent_lane: number
+  escalated: number
+  failed: number
+  tokens: number
+}
+
+export type TicketEvent =
+  | { type: 'start'; total: number; tickets?: string[] }
+  | { type: 'ticket'; index?: number; total?: number; outcome: TicketOutcome }
+  | { type: 'done'; stats: TicketStats }
+  | { type: 'error'; detail: string }
 
 export interface Campaign {
   id: number
@@ -559,23 +605,23 @@ export type ChatEvent =
   | { type: 'error'; detail: string }
 
 /**
- * 走 fetch 读 SSE 流。
+ * 走 fetch 读 SSE 流 —— **通用版**，对话和工单处理共用。
  *
  * ## 为什么不用原生 EventSource
  *
  * `EventSource` 只能发 GET，也不能带自定义请求头 —— 为了传令牌只能塞进
- * 查询串，而查询串会进访问日志、浏览器历史和 Referer。对话这边用 fetch
- * 就能正常带 `Authorization`，代价只是自己解析 SSE 帧（几行 split）。
+ * 查询串，而查询串会进访问日志、浏览器历史和 Referer。用 fetch 就能正常带
+ * `Authorization`，代价只是自己解析 SSE 帧（几行 split）。
  *
  * ## 401 要自己处理
  *
  * 因为它没走 `request()` 那条带自动续期的路径（那条会 `await` 完整响应体，
  * 而这里要的是流）。所以这里手工做一次"刷新后重试"，行为保持一致。
  */
-async function openChatStream(
+async function postSse<T>(
   path: string,
   body: unknown,
-  onEvent: (event: ChatEvent) => void,
+  onEvent: (event: T) => void,
   signal?: AbortSignal,
 ): Promise<void> {
   const send = async (): Promise<Response> => {
@@ -627,7 +673,7 @@ async function openChatStream(
     for (const line of raw.split('\n')) {
       if (!line.startsWith('data: ')) continue
       try {
-        onEvent(JSON.parse(line.slice(6)) as ChatEvent)
+        onEvent(JSON.parse(line.slice(6)) as T)
       } catch {
         /* 半截 JSON：丢掉，不要因为一个坏帧把整条流打断 */
       }
@@ -759,7 +805,7 @@ export const api = {
     onEvent: (event: ChatEvent) => void,
     signal?: AbortSignal,
   ) =>
-    openChatStream(
+    postSse<ChatEvent>(
       `/api/v1/conversations/${encodeURIComponent(conversationNo)}/messages`,
       { content },
       onEvent,
@@ -775,10 +821,27 @@ export const api = {
     onEvent: (event: ChatEvent) => void,
     signal?: AbortSignal,
   ) =>
-    openChatStream(
+    postSse<ChatEvent>(
       `/api/v1/conversations/${encodeURIComponent(conversationNo)}/approvals/${encodeURIComponent(approvalNo)}`,
       { approved, reason },
       onEvent,
       signal,
     ),
+
+  // ---- 客服处理 ----
+  /** 处理一条工单（两层：代码快车道 + Agent 兜底），流式推进度。 */
+  handleTicket: (ticketNo: string, onEvent: (event: TicketEvent) => void, signal?: AbortSignal) =>
+    postSse<TicketEvent>(
+      `/api/v1/service/tickets/${encodeURIComponent(ticketNo)}/handle`,
+      {},
+      onEvent,
+      signal,
+    ),
+
+  /** 批量处理。`all=false` 时只碰没处理过的 —— 重跑会覆盖上一轮判断。 */
+  handleTicketsBatch: (
+    body: { limit: number; all: boolean },
+    onEvent: (event: TicketEvent) => void,
+    signal?: AbortSignal,
+  ) => postSse<TicketEvent>('/api/v1/service/tickets/handle-pending', body, onEvent, signal),
 }

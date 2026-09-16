@@ -12,6 +12,8 @@ import './auth.css'
 // 对话页的样式。它里面有 .tool-chip / .bubble 这类只在对话页用的规则，
 // 放最后避免被前面的通用规则盖掉
 import './chat.css'
+// 客服工单页的样式（判定来源标签、草稿框、选中行）。同样放最后
+import './service.css'
 import App from './App'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
