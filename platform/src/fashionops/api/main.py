@@ -25,6 +25,7 @@ from fashionops.api.routers import (
     auth_router,
     business_router,
     chat_router,
+    service_router,
     system_router,
     tasks_router,
 )
@@ -75,6 +76,7 @@ def create_app() -> FastAPI:
     app.include_router(business_router)
     app.include_router(tasks_router)
     app.include_router(chat_router)
+    app.include_router(service_router)
 
     # ------------------------------------------------------------------
     # 请求日志：分配 request_id 并绑定到上下文，记录耗时，慢请求打 warning

@@ -55,6 +55,11 @@ PERM_TASK_CANCEL: Final = "task:cancel"
 #: 所以给了 `chat:use` 不等于给了对外发声的能力。
 PERM_CHAT_USE: Final = "chat:use"
 
+#: 处理客服工单（跑两层客服流程）。
+#: 它是一个**写操作** —— 会把判断写回工单（覆盖 intent/sentiment/escalated）。
+#: 所以不能只给只读角色：`viewer` / `analyst` 看得到工单，但不能重跑它的判断。
+PERM_TICKET_HANDLE: Final = "ticket:handle"
+
 # ---- 业务数据（与工具网关的 Scope 同名同义）----
 PERM_ERP_READ: Final = "erp:read"
 PERM_ERP_WRITE: Final = "erp:write"
@@ -101,6 +106,12 @@ PERMISSIONS: Final[tuple[PermissionDef, ...]] = (
         "使用对话助手",
         "task",
         "开对话、提问、确认对话里的写操作闸口",
+    ),
+    PermissionDef(
+        PERM_TICKET_HANDLE,
+        "处理客服工单",
+        "task",
+        "跑客服 Agent（会**覆盖**工单的意图/情绪/是否转人工判断）",
     ),
     PermissionDef(PERM_ERP_READ, "读取商品与订单", "data", "查询商品、库存、销量"),
     PermissionDef(PERM_ERP_WRITE, "写入商品与订单", "data", "改商品信息、库存"),
@@ -168,6 +179,7 @@ ROLE_PRESETS: Final[tuple[RoleDef, ...]] = (
                 PERM_TASK_APPROVE,
                 PERM_TASK_CANCEL,
                 PERM_CHAT_USE,
+                PERM_TICKET_HANDLE,
                 PERM_ASSET_WRITE,
                 PERM_MAIL_SEND,
             }
@@ -176,8 +188,10 @@ ROLE_PRESETS: Final[tuple[RoleDef, ...]] = (
     RoleDef(
         ROLE_OPERATOR,
         "运营专员",
-        "能发起任务、生成报表、用对话助手，**不能审批、不能对外发信**",
-        frozenset(_READONLY | {PERM_TASK_SUBMIT, PERM_CHAT_USE, PERM_ASSET_WRITE}),
+        "能发起任务、生成报表、用对话助手、处理客服工单，**不能审批、不能对外发信**",
+        frozenset(
+            _READONLY | {PERM_TASK_SUBMIT, PERM_CHAT_USE, PERM_TICKET_HANDLE, PERM_ASSET_WRITE}
+        ),
     ),
     RoleDef(
         ROLE_ANALYST,

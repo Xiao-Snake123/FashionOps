@@ -95,6 +95,7 @@ fashionops-db = "fashionops.db.cli:main"
 fashionops-config = "fashionops.config_cli:main"
 fashionops-kb = "fashionops.kb.cli:main"
 fashionops-user = "fashionops.security.cli:main"
+fashionops-ticket = "fashionops.service.cli:main"
 
 [build-system]
 requires = ["hatchling"]

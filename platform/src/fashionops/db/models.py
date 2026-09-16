@@ -421,6 +421,24 @@ class Ticket(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
+    # ---- 客服 Agent 的处理痕迹（2026-09-16 新增）----
+    #: 客服 Agent 最近一次处理这条工单的时间。**空 = 没被 Agent 处理过。**
+    #:
+    #: 为什么必须有这一列：seed 是把这张表当**已处理的历史工单**灌的 ——
+    #: `intent` / `sentiment` / `escalated` / `resolution` / `confidence` /
+    #: `cited_article_nos` / `first_response_seconds` **全都是 seed 填的**，
+    #: 没有任何一列能区分"这是历史结果"还是"Agent 刚跑出来的"。
+    #:
+    #: 后果很实际：评测会拿没处理过的工单去比自己（它身上还是 seed 的标注），
+    #: 于是准确率虚报成 100%。实测就踩到了 —— 只处理了 9 条，
+    #: 却报出"已处理 58/60、意图准确率 100%"。
+    agent_handled_at: Mapped[datetime | None] = mapped_column(
+        DateTime, index=True, comment="客服 Agent 最近一次处理时间，空=没处理过"
+    )
+    #: 走的是哪条路：``fast``（代码快车道，0 次模型调用）/ ``agent``（工具循环）。
+    #: 存它是为了能算"快车道占比"—— 那是这套两层架构唯一的核心指标。
+    agent_lane: Mapped[str | None] = mapped_column(String(16))
+
 
 # ===========================================================================
 # 9. 任务

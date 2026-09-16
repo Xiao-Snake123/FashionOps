@@ -1,0 +1,606 @@
+{
+  "note": "seed 灌入的工单标注。escalated 里含 35% 随机成分，所以它只适合看意图/情绪准确率，转人工要看漏转而不是一致率。",
+  "count": 60,
+  "items": [
+    {
+      "ticket_no": "TK2608220044",
+      "subject": "优惠券怎么用不了",
+      "content": "领了店铺 50 元券，结算时显示不满足使用条件。",
+      "intent": "支付",
+      "sentiment": "negative",
+      "priority": "normal",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2608240031",
+      "subject": "催发货",
+      "content": "下单两天了还没发货，说好 48 小时的。",
+      "intent": "催发货",
+      "sentiment": "negative",
+      "priority": "normal",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2608250002",
+      "subject": "要投诉客服",
+      "content": "上一个客服说 24 小时回复，结果两天了没人理我，我要投诉！",
+      "intent": "质量投诉",
+      "sentiment": "angry",
+      "priority": "urgent",
+      "escalated": true,
+      "escalate_reason": "客户明确提出投诉，触发转人工规则"
+    },
+    {
+      "ticket_no": "TK2608250019",
+      "subject": "尺码换大一号",
+      "content": "M 码有点紧，想换成 L 码，怎么操作？",
+      "intent": "退换货",
+      "sentiment": "neutral",
+      "priority": "normal",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2608250038",
+      "subject": "发票怎么开",
+      "content": "公司采购需要开增值税普通发票，怎么弄？",
+      "intent": "发票",
+      "sentiment": "neutral",
+      "priority": "low",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2608250045",
+      "subject": "物流三天没动",
+      "content": "发货三天了物流一直停在杭州转运中心，什么时候能到？",
+      "intent": "物流查询",
+      "sentiment": "negative",
+      "priority": "normal",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2608250054",
+      "subject": "优惠券怎么用不了",
+      "content": "领了店铺 50 元券，结算时显示不满足使用条件。",
+      "intent": "支付",
+      "sentiment": "negative",
+      "priority": "normal",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2608260013",
+      "subject": "尺码换大一号",
+      "content": "M 码有点紧，想换成 L 码，怎么操作？",
+      "intent": "退换货",
+      "sentiment": "neutral",
+      "priority": "normal",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2608260029",
+      "subject": "尺码换大一号",
+      "content": "M 码有点紧，想换成 L 码，怎么操作？",
+      "intent": "退换货",
+      "sentiment": "neutral",
+      "priority": "normal",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2608260039",
+      "subject": "面料是纯羊毛吗",
+      "content": "详情页写着羊毛混纺，具体含毛量是多少？",
+      "intent": "尺码咨询",
+      "sentiment": "neutral",
+      "priority": "low",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2608260055",
+      "subject": "面料是纯羊毛吗",
+      "content": "详情页写着羊毛混纺，具体含毛量是多少？",
+      "intent": "尺码咨询",
+      "sentiment": "neutral",
+      "priority": "low",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2608270001",
+      "subject": "洗了一次就掉色",
+      "content": "按说明冷水手洗的，结果整盆水都是红的，还染到别的衣服了，这个损失谁赔？",
+      "intent": "质量投诉",
+      "sentiment": "angry",
+      "priority": "urgent",
+      "escalated": true,
+      "escalate_reason": "客户明确提出投诉，触发转人工规则"
+    },
+    {
+      "ticket_no": "TK2608270017",
+      "subject": "优惠券怎么用不了",
+      "content": "领了店铺 50 元券，结算时显示不满足使用条件。",
+      "intent": "支付",
+      "sentiment": "negative",
+      "priority": "normal",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2608270035",
+      "subject": "催发货",
+      "content": "下单两天了还没发货，说好 48 小时的。",
+      "intent": "催发货",
+      "sentiment": "negative",
+      "priority": "normal",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2608270047",
+      "subject": "尺码选不准，想问下推荐",
+      "content": "我身高 163 体重 55kg，平时穿 M，这件连衣裙建议选什么码？",
+      "intent": "尺码咨询",
+      "sentiment": "neutral",
+      "priority": "normal",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2608280028",
+      "subject": "申请退货",
+      "content": "收到货了，颜色和图片差太多，想退货。",
+      "intent": "退换货",
+      "sentiment": "negative",
+      "priority": "normal",
+      "escalated": true,
+      "escalate_reason": "客户明确提出投诉，触发转人工规则"
+    },
+    {
+      "ticket_no": "TK2608280042",
+      "subject": "尺码换大一号",
+      "content": "M 码有点紧，想换成 L 码，怎么操作？",
+      "intent": "退换货",
+      "sentiment": "neutral",
+      "priority": "normal",
+      "escalated": true,
+      "escalate_reason": "涉及金额纠纷超过 200 元，超出 Agent 自主处理额度"
+    },
+    {
+      "ticket_no": "TK2608280057",
+      "subject": "尺码换大一号",
+      "content": "M 码有点紧，想换成 L 码，怎么操作？",
+      "intent": "退换货",
+      "sentiment": "neutral",
+      "priority": "normal",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2608290004",
+      "subject": "衣服有破洞",
+      "content": "刚拆开就发现袖子接缝处有个洞，这质量也太差了，必须给个说法！",
+      "intent": "质量投诉",
+      "sentiment": "angry",
+      "priority": "high",
+      "escalated": true,
+      "escalate_reason": "客户明确提出投诉，触发转人工规则"
+    },
+    {
+      "ticket_no": "TK2608290023",
+      "subject": "尺码选不准，想问下推荐",
+      "content": "我身高 163 体重 55kg，平时穿 M，这件连衣裙建议选什么码？",
+      "intent": "尺码咨询",
+      "sentiment": "neutral",
+      "priority": "normal",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2608300016",
+      "subject": "面料是纯羊毛吗",
+      "content": "详情页写着羊毛混纺，具体含毛量是多少？",
+      "intent": "尺码咨询",
+      "sentiment": "neutral",
+      "priority": "low",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2608300037",
+      "subject": "发票怎么开",
+      "content": "公司采购需要开增值税普通发票，怎么弄？",
+      "intent": "发票",
+      "sentiment": "neutral",
+      "priority": "low",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2608300060",
+      "subject": "优惠券怎么用不了",
+      "content": "领了店铺 50 元券，结算时显示不满足使用条件。",
+      "intent": "支付",
+      "sentiment": "negative",
+      "priority": "normal",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2608310033",
+      "subject": "发票怎么开",
+      "content": "公司采购需要开增值税普通发票，怎么弄？",
+      "intent": "发票",
+      "sentiment": "neutral",
+      "priority": "low",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2608310040",
+      "subject": "优惠券怎么用不了",
+      "content": "领了店铺 50 元券，结算时显示不满足使用条件。",
+      "intent": "支付",
+      "sentiment": "negative",
+      "priority": "normal",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2608310051",
+      "subject": "发票怎么开",
+      "content": "公司采购需要开增值税普通发票，怎么弄？",
+      "intent": "发票",
+      "sentiment": "neutral",
+      "priority": "low",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2608310052",
+      "subject": "尺码换大一号",
+      "content": "M 码有点紧，想换成 L 码，怎么操作？",
+      "intent": "退换货",
+      "sentiment": "neutral",
+      "priority": "normal",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2609010010",
+      "subject": "洗了一次就掉色",
+      "content": "按说明冷水手洗的，结果整盆水都是红的，还染到别的衣服了，这个损失谁赔？",
+      "intent": "质量投诉",
+      "sentiment": "angry",
+      "priority": "urgent",
+      "escalated": true,
+      "escalate_reason": "客户情绪激动，多次表达不满，建议人工介入"
+    },
+    {
+      "ticket_no": "TK2609010048",
+      "subject": "发票怎么开",
+      "content": "公司采购需要开增值税普通发票，怎么弄？",
+      "intent": "发票",
+      "sentiment": "neutral",
+      "priority": "low",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2609010050",
+      "subject": "优惠券怎么用不了",
+      "content": "领了店铺 50 元券，结算时显示不满足使用条件。",
+      "intent": "支付",
+      "sentiment": "negative",
+      "priority": "normal",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2609020022",
+      "subject": "发票怎么开",
+      "content": "公司采购需要开增值税普通发票，怎么弄？",
+      "intent": "发票",
+      "sentiment": "neutral",
+      "priority": "low",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2609020024",
+      "subject": "催发货",
+      "content": "下单两天了还没发货，说好 48 小时的。",
+      "intent": "催发货",
+      "sentiment": "negative",
+      "priority": "normal",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2609020036",
+      "subject": "催发货",
+      "content": "下单两天了还没发货，说好 48 小时的。",
+      "intent": "催发货",
+      "sentiment": "negative",
+      "priority": "normal",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2609020049",
+      "subject": "包裹破损",
+      "content": "快递盒被压扁了，里面的衣服有折痕，虽然能穿但很不爽。",
+      "intent": "物流查询",
+      "sentiment": "negative",
+      "priority": "normal",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2609030009",
+      "subject": "洗了一次就掉色",
+      "content": "按说明冷水手洗的，结果整盆水都是红的，还染到别的衣服了，这个损失谁赔？",
+      "intent": "质量投诉",
+      "sentiment": "angry",
+      "priority": "urgent",
+      "escalated": true,
+      "escalate_reason": "客户明确提出投诉，触发转人工规则"
+    },
+    {
+      "ticket_no": "TK2609040056",
+      "subject": "催发货",
+      "content": "下单两天了还没发货，说好 48 小时的。",
+      "intent": "催发货",
+      "sentiment": "negative",
+      "priority": "normal",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2609040058",
+      "subject": "发票怎么开",
+      "content": "公司采购需要开增值税普通发票，怎么弄？",
+      "intent": "发票",
+      "sentiment": "neutral",
+      "priority": "low",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2609040059",
+      "subject": "发票怎么开",
+      "content": "公司采购需要开增值税普通发票，怎么弄？",
+      "intent": "发票",
+      "sentiment": "neutral",
+      "priority": "low",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2609050006",
+      "subject": "洗了一次就掉色",
+      "content": "按说明冷水手洗的，结果整盆水都是红的，还染到别的衣服了，这个损失谁赔？",
+      "intent": "质量投诉",
+      "sentiment": "angry",
+      "priority": "urgent",
+      "escalated": true,
+      "escalate_reason": "涉及金额纠纷超过 200 元，超出 Agent 自主处理额度"
+    },
+    {
+      "ticket_no": "TK2609060014",
+      "subject": "尺码选不准，想问下推荐",
+      "content": "我身高 163 体重 55kg，平时穿 M，这件连衣裙建议选什么码？",
+      "intent": "尺码咨询",
+      "sentiment": "neutral",
+      "priority": "normal",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2609060021",
+      "subject": "包裹破损",
+      "content": "快递盒被压扁了，里面的衣服有折痕，虽然能穿但很不爽。",
+      "intent": "物流查询",
+      "sentiment": "negative",
+      "priority": "normal",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2609060025",
+      "subject": "催发货",
+      "content": "下单两天了还没发货，说好 48 小时的。",
+      "intent": "催发货",
+      "sentiment": "negative",
+      "priority": "normal",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2609060030",
+      "subject": "尺码选不准，想问下推荐",
+      "content": "我身高 163 体重 55kg，平时穿 M，这件连衣裙建议选什么码？",
+      "intent": "尺码咨询",
+      "sentiment": "neutral",
+      "priority": "normal",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2609060034",
+      "subject": "包裹破损",
+      "content": "快递盒被压扁了，里面的衣服有折痕，虽然能穿但很不爽。",
+      "intent": "物流查询",
+      "sentiment": "negative",
+      "priority": "normal",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2609070005",
+      "subject": "洗了一次就掉色",
+      "content": "按说明冷水手洗的，结果整盆水都是红的，还染到别的衣服了，这个损失谁赔？",
+      "intent": "质量投诉",
+      "sentiment": "angry",
+      "priority": "urgent",
+      "escalated": true,
+      "escalate_reason": "涉及金额纠纷超过 200 元，超出 Agent 自主处理额度"
+    },
+    {
+      "ticket_no": "TK2609070012",
+      "subject": "要投诉客服",
+      "content": "上一个客服说 24 小时回复，结果两天了没人理我，我要投诉！",
+      "intent": "质量投诉",
+      "sentiment": "angry",
+      "priority": "urgent",
+      "escalated": true,
+      "escalate_reason": "客户明确提出投诉，触发转人工规则"
+    },
+    {
+      "ticket_no": "TK2609070032",
+      "subject": "包裹破损",
+      "content": "快递盒被压扁了，里面的衣服有折痕，虽然能穿但很不爽。",
+      "intent": "物流查询",
+      "sentiment": "negative",
+      "priority": "normal",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2609070043",
+      "subject": "申请退货",
+      "content": "收到货了，颜色和图片差太多，想退货。",
+      "intent": "退换货",
+      "sentiment": "negative",
+      "priority": "normal",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2609070053",
+      "subject": "催发货",
+      "content": "下单两天了还没发货，说好 48 小时的。",
+      "intent": "催发货",
+      "sentiment": "negative",
+      "priority": "normal",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2609080003",
+      "subject": "衣服有破洞",
+      "content": "刚拆开就发现袖子接缝处有个洞，这质量也太差了，必须给个说法！",
+      "intent": "质量投诉",
+      "sentiment": "angry",
+      "priority": "high",
+      "escalated": true,
+      "escalate_reason": "客户情绪激动，多次表达不满，建议人工介入"
+    },
+    {
+      "ticket_no": "TK2609080027",
+      "subject": "发票怎么开",
+      "content": "公司采购需要开增值税普通发票，怎么弄？",
+      "intent": "发票",
+      "sentiment": "neutral",
+      "priority": "low",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2609080041",
+      "subject": "包裹破损",
+      "content": "快递盒被压扁了，里面的衣服有折痕，虽然能穿但很不爽。",
+      "intent": "物流查询",
+      "sentiment": "negative",
+      "priority": "normal",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2609080046",
+      "subject": "面料是纯羊毛吗",
+      "content": "详情页写着羊毛混纺，具体含毛量是多少？",
+      "intent": "尺码咨询",
+      "sentiment": "neutral",
+      "priority": "low",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2609090008",
+      "subject": "洗了一次就掉色",
+      "content": "按说明冷水手洗的，结果整盆水都是红的，还染到别的衣服了，这个损失谁赔？",
+      "intent": "质量投诉",
+      "sentiment": "angry",
+      "priority": "urgent",
+      "escalated": true,
+      "escalate_reason": "涉及金额纠纷超过 200 元，超出 Agent 自主处理额度"
+    },
+    {
+      "ticket_no": "TK2609090015",
+      "subject": "尺码选不准，想问下推荐",
+      "content": "我身高 163 体重 55kg，平时穿 M，这件连衣裙建议选什么码？",
+      "intent": "尺码咨询",
+      "sentiment": "neutral",
+      "priority": "normal",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2609100018",
+      "subject": "尺码换大一号",
+      "content": "M 码有点紧，想换成 L 码，怎么操作？",
+      "intent": "退换货",
+      "sentiment": "neutral",
+      "priority": "normal",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2609100020",
+      "subject": "尺码选不准，想问下推荐",
+      "content": "我身高 163 体重 55kg，平时穿 M，这件连衣裙建议选什么码？",
+      "intent": "尺码咨询",
+      "sentiment": "neutral",
+      "priority": "normal",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2609100026",
+      "subject": "优惠券怎么用不了",
+      "content": "领了店铺 50 元券，结算时显示不满足使用条件。",
+      "intent": "支付",
+      "sentiment": "negative",
+      "priority": "normal",
+      "escalated": false,
+      "escalate_reason": null
+    },
+    {
+      "ticket_no": "TK2609110007",
+      "subject": "洗了一次就掉色",
+      "content": "按说明冷水手洗的，结果整盆水都是红的，还染到别的衣服了，这个损失谁赔？",
+      "intent": "质量投诉",
+      "sentiment": "angry",
+      "priority": "urgent",
+      "escalated": true,
+      "escalate_reason": "涉及金额纠纷超过 200 元，超出 Agent 自主处理额度"
+    },
+    {
+      "ticket_no": "TK2609110011",
+      "subject": "衣服有破洞",
+      "content": "刚拆开就发现袖子接缝处有个洞，这质量也太差了，必须给个说法！",
+      "intent": "质量投诉",
+      "sentiment": "angry",
+      "priority": "high",
+      "escalated": true,
+      "escalate_reason": "客户明确提出投诉，触发转人工规则"
+    }
+  ]
+}
