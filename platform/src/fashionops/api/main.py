@@ -24,6 +24,7 @@ from fashionops import __version__
 from fashionops.api.routers import (
     auth_router,
     business_router,
+    chat_router,
     system_router,
     tasks_router,
 )
@@ -73,6 +74,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(business_router)
     app.include_router(tasks_router)
+    app.include_router(chat_router)
 
     # ------------------------------------------------------------------
     # 请求日志：分配 request_id 并绑定到上下文，记录耗时，慢请求打 warning
@@ -228,6 +230,19 @@ def _sync_identity_and_warn(settings, existing_tables: set[str]) -> None:  # noq
             )
         if stats["roles"]["created"]:
             logger.info("已创建 %d 个内置角色", stats["roles"]["created"])
+
+        # 角色预设的缺口：新加的权限码不会自动进到已有角色里
+        # （理由见 `permissions.sync_roles` 的 docstring）。
+        # **必须报出来**：不报的话表现是"升级后新功能对所有人 403"，
+        # 而报错长得很像"角色配错了"，排查方向会跑到角色表上去。
+        role_gap = stats["roles"].get("missing") or {}
+        if role_gap:
+            logger.warning("=" * 78)
+            logger.warning("**内置角色缺少代码里预设的权限，新功能可能对所有人 403。**")
+            for code, perms in role_gap.items():
+                logger.warning("   %s 缺少：%s", code, ", ".join(perms))
+            logger.warning("   补上：.venv\\Scripts\\fashionops-user.exe sync --apply-presets")
+            logger.warning("=" * 78)
 
         if created_admin is not None:
             logger.info("已按配置创建初始管理员 %s", created_admin.username)

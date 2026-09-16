@@ -46,10 +46,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
-import threading
 import time
-import uuid
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -58,8 +55,17 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from fashionops.agents.execution import (
+    TaskBusyError,
+    build_runner,
+    claim,
+    enqueue_resume,
+    is_running,
+    release,
+    submit,
+)
 from fashionops.api.schemas import Page, TaskDetailOut, TaskEventOut, TaskOut
-from fashionops.db import get_db, session_scope
+from fashionops.db import get_db
 from fashionops.db.models import Task
 from fashionops.security.deps import (
     StreamPrincipal,
@@ -76,15 +82,6 @@ from fashionops.security.service import Principal, effective_scopes
 logger = logging.getLogger("fashionops.api.tasks")
 
 router = APIRouter(prefix="/api/v1/tasks", tags=["tasks"])
-
-#: 后台任务线程池。刻意开小：等模型是 IO 密集型，
-#: 但并发太多会同时打满模型配额和内存，反而更慢。
-_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="task")
-
-#: 正在跑的任务号。防止同一任务被并发提交两次 ——
-#: 同一个 thread_id 上跑两个图会让 checkpoint 状态互相覆盖。
-_RUNNING: set[str] = set()
-_RUNNING_LOCK = threading.Lock()
 
 #: SSE 轮询间隔。任务量级是"几十秒一次状态变化"，0.4 秒足够灵敏又不吵。
 _SSE_POLL_S = 0.4
@@ -139,55 +136,6 @@ class TaskActionResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# 组装 runner
-# ---------------------------------------------------------------------------
-def build_runner(
-    task_no: str,
-    *,
-    task_id: int | None = None,
-    scopes: frozenset[str] | None = None,
-) -> Any:
-    """组装一个能跑图并记账的 TaskRunner。抽成函数是为了让测试能直接调。
-
-    ``scopes`` 是**用户权限 ∩ Agent 权限集**的结果（见模块 docstring）。
-    传 ``None`` 时退回 Agent 的完整权限集 —— 这是给脚本/演示用的路径，
-    **HTTP 入口必须传**，否则权限传导就断了。
-    """
-    from fashionops.agents.checkpoint import get_checkpointer
-    from fashionops.agents.recorder import TaskRecorder
-    from fashionops.agents.runner import TaskRunner
-    from fashionops.agents.state import RunContext
-    from fashionops.config import get_settings
-    from fashionops.gateway import (
-        ToolGateway,
-        get_circuit_breaker,
-        get_rate_limiter,
-        registry,
-    )
-    from fashionops.llm import get_model_client
-    from fashionops.tools import AGENT_SCOPES, register_all_tools
-
-    # 注册表是进程级单例，重复注册会抛异常，所以先判空
-    if not len(registry):
-        register_all_tools(registry)
-
-    settings = get_settings()
-    gateway = ToolGateway(
-        registry,
-        rate_limiter=get_rate_limiter(settings.cache_backend),
-        breaker=get_circuit_breaker(settings.cache_backend),
-    )
-    ctx = RunContext(
-        gateway=gateway,
-        model=get_model_client(settings),
-        actor=f"orchestrator:{task_no}",
-        scopes=AGENT_SCOPES["orchestrator"] if scopes is None else scopes,
-        task_id=task_id,
-    )
-    return TaskRunner(ctx, recorder=TaskRecorder(), checkpointer=get_checkpointer(settings))
-
-
-# ---------------------------------------------------------------------------
 # 提交 / 确认
 # ---------------------------------------------------------------------------
 @router.post(
@@ -203,118 +151,51 @@ def submit_task(
 ) -> TaskActionResponse:
     from fashionops.tools import AGENT_SCOPES
 
-    task_no = payload.task_no or _new_task_no()
-    _claim(task_no)
+    # 用户权限向下传导：Agent 只能用"提交人本来就有的"权限。
+    # 这个交集是**唯一真实的越权防线**，不能省。
+    granted = effective_scopes(principal, AGENT_SCOPES["orchestrator"])
+
     try:
-        # **先落库再返回**，不能交给后台线程去做。
-        #
-        # 之前这里是直接 submit 到线程池就 return，结果前端拿到 task_no 立刻
-        # 去 GET 详情 —— 而那一行还没插进去，于是 404。表现是刚提交完就跳到一个
-        # "请求失败：404" 的死页面，而且因为首次加载失败、SSE 也没挂上，
-        # 等任务真跑起来后页面**永远不会自己恢复**。
-        #
-        # 用 curl 手工测的时候看不出来：人打完命令再敲第二条中间隔着好几秒，
-        # 刚好够后台线程把行写进去。
-        _create_task_row(
-            task_no,
+        task_no = submit(
             user_request=payload.user_request,
             task_type=payload.task_type,
             # **提交人来自令牌，不来自请求体**。用请求体里的值等于让调用方
             # 自己声明"我是谁"，审计就完全失去意义了。
             created_by=principal.username,
             created_by_id=principal.user_id,
+            scopes=granted,
+            task_no=payload.task_no,
         )
+    except TaskBusyError as exc:
+        # 领域异常 → HTTP 语义的翻译在这里做。
+        # execution 那一层不知道 HTTP 是什么，它也不能知道。
+        raise HTTPException(
+            status_code=409,
+            detail=f"任务 {exc.task_no} 正在执行中，请等它跑完或换一个任务号",
+        ) from exc
 
-        # 用户权限向下传导：Agent 只能用"提交人本来就有的"权限
-        granted = effective_scopes(principal, AGENT_SCOPES["orchestrator"])
+    record_audit(
+        session,
+        principal=principal,
+        action="task.submit",
+        resource=f"/api/v1/tasks/{task_no}",
+        detail={
+            "task_no": task_no,
+            "task_type": payload.task_type,
+            "request": payload.user_request[:500],
+            # 把交集结果记进审计：出了越权争议时，
+            # "当时他有哪些权限"和"Agent 实际拿到了哪些"都要能回答
+            "granted_scopes": sorted(granted),
+            "via": "http",
+        },
+        request=request,
+    )
 
-        record_audit(
-            session,
-            principal=principal,
-            action="task.submit",
-            resource=f"/api/v1/tasks/{task_no}",
-            detail={
-                "task_no": task_no,
-                "task_type": payload.task_type,
-                "request": payload.user_request[:500],
-                # 把交集结果记进审计：出了越权争议时，
-                # "当时他有哪些权限"和"Agent 实际拿到了哪些"都要能回答
-                "granted_scopes": sorted(granted),
-            },
-            request=request,
-        )
-
-        _EXECUTOR.submit(
-            _run_guarded,
-            task_no,
-            payload.user_request,
-            payload.task_type,
-            principal.username,
-            granted,
-        )
-    except Exception:
-        _release(task_no)
-        raise
     return TaskActionResponse(
         task_no=task_no,
         status="pending",
         message="任务已受理。订阅 GET /api/v1/tasks/{task_no}/stream 看实时进度",
     )
-
-
-def _create_task_row(
-    task_no: str,
-    *,
-    user_request: str,
-    task_type: str,
-    created_by: str,
-    created_by_id: int | None = None,
-) -> int | None:
-    """插入 ``tasks`` 行（``pending``），返回它的 id。
-
-    状态给 ``pending`` 而不是 ``running``：后台线程还没真的开跑，
-    标成 running 会让"有线程在跑"和"只是排着队"两件事在界面上分不出来。
-    ``pending`` 也在 ``_RUNNING_STATES`` 里，所以前端照样会挂 SSE 等它。
-    """
-    from fashionops.db.base import utcnow
-
-    with session_scope() as session:
-        existing = session.scalar(select(Task).where(Task.task_no == task_no))
-        if existing is not None:
-            # 重跑同一个 task_no：把上一轮的终态清干净，否则界面会先显示旧结果
-            existing.status = "pending"
-            existing.progress = 0
-            existing.result = None
-            existing.error_message = None
-            existing.approval_payload = None
-            existing.finished_at = None
-            existing.started_at = utcnow()
-            # 重跑换人时也要把提交人改掉，否则审计里是上一个人的名字
-            existing.created_by = created_by
-            existing.created_by_id = created_by_id
-            # 上一轮的审批结果必须清掉。不清的话，这一轮的审计里会带着
-            # 上一位审批人的名字 —— 而这一轮的决策者可能完全是另一个人，
-            # “谁批准了这封邮件”就答错了。**审计里答错比没有更危险。**
-            existing.approved_by = None
-            existing.approved_by_id = None
-            existing.approved_at = None
-            existing.approval_reason = None
-            return existing.id
-        task = Task(
-            task_no=task_no,
-            title=user_request[:120] or task_no,
-            user_request=user_request,
-            task_type=task_type,
-            status="pending",
-            progress=0,
-            thread_id=task_no,
-            created_by=created_by,
-            created_by_id=created_by_id,
-            started_at=utcnow(),
-        )
-        session.add(task)
-        session.flush()
-        return task.id
 
 
 @router.post(
@@ -373,7 +254,14 @@ def approve_task(
             ),
         )
 
-    _claim(task_no)
+    try:
+        claim(task_no)
+    except TaskBusyError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=f"任务 {exc.task_no} 正在执行中，请等它跑完再确认",
+        ) from exc
+
     try:
         from fashionops.db.base import utcnow
 
@@ -403,11 +291,10 @@ def approve_task(
             request=request,
         )
     except Exception:
-        _release(task_no)
+        release(task_no)
         raise
 
-    _EXECUTOR.submit(
-        _resume_guarded,
+    enqueue_resume(
         task_no,
         {"approved": payload.approved, "by": principal.username, "reason": payload.reason},
     )
@@ -465,7 +352,7 @@ def get_task(
     detail = TaskDetailOut.model_validate(task)
     # 这两个是**进程内**状态，不在库里，得手工补 ——
     # status 落库有延迟，光看它会以为任务还在跑
-    detail.is_running = task_no in _RUNNING
+    detail.is_running = is_running(task_no)
     detail.is_pending = task.status in _RUNNING_STATES
     return detail
 
@@ -585,92 +472,11 @@ def _event_source(task_no: str, cursor: int) -> Any:
 
 
 # ---------------------------------------------------------------------------
-# 后台执行（异常必须在这里兜住）
-# ---------------------------------------------------------------------------
-def _run_guarded(
-    task_no: str,
-    user_request: str,
-    task_type: str,
-    created_by: str,
-    scopes: frozenset[str] | None = None,
-) -> None:
-    """后台线程里跑任务。
-
-    **异常必须在这里兜住。** 线程里抛出去的异常没人接，
-    表现是"任务永远停在 running"而日志里什么都没有 —— 最难查的一类问题。
-
-    ``scopes`` 必须从请求线程传进来，不能在这里重新算 ——
-    后台线程里没有请求上下文（拿不到 Principal）。
-    这也意味着**审批通过后的续跑用的是提交时的权限快照**，
-    而不是审批时的权限：如果提交人的权限被中途撤销，续跑仍用旧快照。
-    这个窗口是任务的生命周期（分钟级），并且审计里记了当时的 granted_scopes，
-    对当前场景可以接受；要彻底解决得把权限随任务持久化并在续跑时重新求交。
-    """
-    runner = None
-    try:
-        runner = build_runner(task_no, scopes=scopes)
-        runner.submit(
-            task_no=task_no,
-            user_request=user_request,
-            task_type=task_type,
-            created_by=created_by,
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("任务 %s 执行失败", task_no)
-        _mark_failed(task_no, runner, exc)
-    finally:
-        _release(task_no)
-
-
-def _resume_guarded(task_no: str, decision: dict[str, Any]) -> None:
-    runner = None
-    try:
-        runner = build_runner(task_no)
-        runner.resume(task_no=task_no, decision=decision)
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("任务 %s 恢复失败", task_no)
-        _mark_failed(task_no, runner, exc)
-    finally:
-        _release(task_no)
-
-
-def _mark_failed(task_no: str, runner: Any, exc: Exception) -> None:
-    """尽力把失败状态写进去。写不进去也至少要留下日志。"""
-    try:
-        from fashionops.agents.recorder import TaskRecorder
-
-        recorder = runner.recorder if runner is not None else TaskRecorder()
-        recorder.finish(
-            task_no=task_no, status="failed", error_message=f"{type(exc).__name__}: {exc}"
-        )
-    except Exception:  # noqa: BLE001
-        logger.exception("任务 %s 的失败状态也没能写进数据库", task_no)
-
-
-# ---------------------------------------------------------------------------
-def _claim(task_no: str) -> None:
-    with _RUNNING_LOCK:
-        if task_no in _RUNNING:
-            raise HTTPException(
-                status_code=409,
-                detail=f"任务 {task_no} 正在执行中，请等它跑完或换一个任务号",
-            )
-        _RUNNING.add(task_no)
-
-
-def _release(task_no: str) -> None:
-    with _RUNNING_LOCK:
-        _RUNNING.discard(task_no)
-
-
-def _new_task_no() -> str:
-    from fashionops.db.base import utcnow
-
-    return f"T{utcnow():%y%m%d%H%M%S}{uuid.uuid4().hex[:4].upper()}"
-
-
 def _iso(value: Any) -> str | None:
     return value.isoformat() if value else None
 
 
+#: `build_runner` 对外保留出口 —— 测试和脚本一直从这里拿它。
+#: 实现已经搬到 `agents/execution.py`：对话 Agent 也需要提交任务，
+#: 而业务逻辑不应该反向依赖 HTTP 层。
 __all__ = ["build_runner", "router"]

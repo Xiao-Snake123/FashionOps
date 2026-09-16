@@ -9,6 +9,9 @@ import './styles.css'
 // 认证相关样式放最后：它里面有 .login-card .button 这类会覆盖通用按钮样式的规则，
 // 必须在 styles.css 之后加载才生效
 import './auth.css'
+// 对话页的样式。它里面有 .tool-chip / .bubble 这类只在对话页用的规则，
+// 放最后避免被前面的通用规则盖掉
+import './chat.css'
 import App from './App'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

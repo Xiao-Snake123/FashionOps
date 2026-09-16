@@ -108,6 +108,48 @@ class ModelResponse(BaseModel):
         return bool(self.tool_calls)
 
 
+class StreamChunkKind(StrEnum):
+    CONTENT = "content"
+    TOOL_CALL = "tool_call"
+    DONE = "done"
+
+
+class StreamChunk(BaseModel):
+    """流式响应的一小片。
+
+    ## 为什么 ``tool_call`` 是**完整的一个**，而不是碎片
+
+    OpenAI 兼容接口的 ``tool_calls`` 是**分片**下发的：第一片带 ``id`` 和
+    ``function.name``，后面几片各带 ``arguments`` 字符串的一段。
+
+        {"index":0,"id":"call_1","function":{"name":"erp__query","arguments":"{\\"sk"}}
+        {"index":0,"function":{"arguments":"u_codes\\":[\\"A"}}
+        {"index":0,"function":{"arguments":"1\\"]}"}}
+
+    这是**线格式的细节**，不该泄漏给上层 —— 让每个调用方自己去拼碎片，
+    就是把这一个坑复制 N 份，而且拼错了的表现是"参数解析失败"，
+    很难定位到是拼接逻辑的问题。所以 ``stream()`` 内部把它拼好，
+    对外只发完整的一个 :class:`ToolCall`。
+
+    ``content`` 则相反：它天然就是增量的，逐片透传（前端要的就是逐字效果）。
+
+    ## 为什么最后一定要有一个 ``DONE``
+
+    因为它携带**拼装完成的** :class:`ModelResponse`。
+    有了它，流式和非流式就只差"响应是怎么拿到的"，
+    后面的控制流（判断有没有工具调用、记账、写库）**完全一样** ——
+    不需要为流式再写一套逻辑。
+    """
+
+    kind: StreamChunkKind
+    #: 仅 kind=content 时有值：本次新增的文本
+    text: str = ""
+    #: 仅 kind=tool_call 时有值：一个**完整**的工具调用
+    tool_call: ToolCall | None = None
+    #: 仅 kind=done 时有值：和 complete() 返回的同一种对象
+    response: ModelResponse | None = None
+
+
 class ModelError(Exception):
     """模型调用失败。
 

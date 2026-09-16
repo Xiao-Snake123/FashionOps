@@ -51,7 +51,10 @@ export default function Login() {
       const pair: TokenPair = await api.login(username.trim(), password)
       saveSession(pair)
       // 用 replace：登录后按浏览器后退不该回到登录页
-      navigate('/dashboard', { replace: true })
+      //
+      // 落点是**对话页**而不是看板：用户登录后想干的第一件事通常是
+      // 说一句话（"最近退货是不是变多了？"），而不是先看一堆图表。
+      navigate('/chat', { replace: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : '登录失败')
     } finally {

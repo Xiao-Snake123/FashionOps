@@ -48,6 +48,13 @@ PERM_TASK_SUBMIT: Final = "task:submit"
 PERM_TASK_APPROVE: Final = "task:approve"
 PERM_TASK_CANCEL: Final = "task:cancel"
 
+#: 用对话式 Agent（建会话、发消息、确认闸口）。
+#: 它跟 `task:*` 分开是有意的：对话能直接提问并拿到数据，
+#: 和"提交一个任务"是两种不同的能力，将来可能只给一部分人开。
+#: 但发信这类写动作仍然由 `mail:send` 和对话内的闸口双重拦住，
+#: 所以给了 `chat:use` 不等于给了对外发声的能力。
+PERM_CHAT_USE: Final = "chat:use"
+
 # ---- 业务数据（与工具网关的 Scope 同名同义）----
 PERM_ERP_READ: Final = "erp:read"
 PERM_ERP_WRITE: Final = "erp:write"
@@ -89,6 +96,12 @@ PERMISSIONS: Final[tuple[PermissionDef, ...]] = (
         "批准/驳回停在人工闸口的任务。**批准会真的触发对外动作（发邮件、上下架）**",
     ),
     PermissionDef(PERM_TASK_CANCEL, "取消任务", "task", "取消正在跑的任务"),
+    PermissionDef(
+        PERM_CHAT_USE,
+        "使用对话助手",
+        "task",
+        "开对话、提问、确认对话里的写操作闸口",
+    ),
     PermissionDef(PERM_ERP_READ, "读取商品与订单", "data", "查询商品、库存、销量"),
     PermissionDef(PERM_ERP_WRITE, "写入商品与订单", "data", "改商品信息、库存"),
     PermissionDef(PERM_ECOM_READ, "读取平台数据", "data", "查询电商平台侧数据"),
@@ -154,6 +167,7 @@ ROLE_PRESETS: Final[tuple[RoleDef, ...]] = (
                 PERM_TASK_SUBMIT,
                 PERM_TASK_APPROVE,
                 PERM_TASK_CANCEL,
+                PERM_CHAT_USE,
                 PERM_ASSET_WRITE,
                 PERM_MAIL_SEND,
             }
@@ -162,14 +176,14 @@ ROLE_PRESETS: Final[tuple[RoleDef, ...]] = (
     RoleDef(
         ROLE_OPERATOR,
         "运营专员",
-        "能发起任务、生成报表，**不能审批、不能对外发信**",
-        frozenset(_READONLY | {PERM_TASK_SUBMIT, PERM_ASSET_WRITE}),
+        "能发起任务、生成报表、用对话助手，**不能审批、不能对外发信**",
+        frozenset(_READONLY | {PERM_TASK_SUBMIT, PERM_CHAT_USE, PERM_ASSET_WRITE}),
     ),
     RoleDef(
         ROLE_ANALYST,
         "数据分析",
-        "能发起任务并导出报表，不能审批",
-        frozenset(_READONLY | {PERM_TASK_SUBMIT, PERM_ASSET_WRITE}),
+        "能发起任务并导出报表、用对话助手，不能审批",
+        frozenset(_READONLY | {PERM_TASK_SUBMIT, PERM_CHAT_USE, PERM_ASSET_WRITE}),
     ),
     RoleDef(
         ROLE_VIEWER,
@@ -248,11 +262,22 @@ def sync_roles(session: Session) -> dict[str, int]:
     为什么不在每次同步时重写授权：运维在界面上给"运营主管"多加了一项权限，
     下次发版跑一遍同步就被抹掉了 —— 这种"代码悄悄改数据"的行为会让运维
     再也不敢用界面改配置。**内置角色的默认值只在出生时生效。**
+
+    ## 但这个决定有一个必须知道的副作用
+
+    新加一个权限码（比如 `chat:use`）时，**已存在的角色不会自动拿到它** ——
+    表现是升级之后新功能对所有人都是 403，而报错长得很像"角色配错了"，
+    排查方向会跑到角色表上去。
+
+    处理方式是**把缺口报出来**（返回里的 ``missing``），而不是默默补上：
+    补上就回到了"代码改数据"；不报出来就是静默失效。
+    真要补，用 :func:`apply_role_presets` —— 那是一个**显式**动作。
     """
     # 先把权限码查出来（需要实体，不能只拿 code）
     perm_by_code = {p.code: p for p in session.scalars(select(Permission))}
     created = 0
     granted = 0
+    missing: dict[str, list[str]] = {}
 
     for preset in ROLE_PRESETS:
         row = session.scalar(select(Role).where(Role.code == preset.code))
@@ -261,6 +286,10 @@ def sync_roles(session: Session) -> dict[str, int]:
             if (row.name, row.description) != (preset.name, preset.description):
                 row.name = preset.name
                 row.description = preset.description
+            # 但要把"预设里有、库里没有"的差集报出来（见 docstring）
+            gap = preset.permissions - set(row.permission_codes())
+            if gap:
+                missing[preset.code] = sorted(gap)
             continue
 
         row = Role(
@@ -283,7 +312,42 @@ def sync_roles(session: Session) -> dict[str, int]:
             granted += 1
 
     session.flush()
-    return {"created": created, "granted": granted}
+    return {"created": created, "granted": granted, "missing": missing}
+
+
+def apply_role_presets(session: Session) -> dict[str, int]:
+    """把内置角色的预设授权**补充**到已有角色上（**只加不删**）。
+
+    ## 什么时候用
+
+    升级后新加的权限码没进到已有角色里（`sync_roles` 不会自动补），
+    新功能因此对所有人 403。这时候跑一次这个。
+
+    ## 为什么不删
+
+    删权限会让"某个人昨天还能做的事今天做不了"—— 而那种问题
+    在出事前**没人会发现**。加权限最坏是"多点了一次确认"，
+    删权限最坏是"业务停摆"。代价不对等，所以只加不删。
+    """
+    perm_by_code = {p.code: p for p in session.scalars(select(Permission))}
+    added = 0
+    touched: set[str] = set()
+
+    for preset in ROLE_PRESETS:
+        row = session.scalar(select(Role).where(Role.code == preset.code))
+        if row is None:
+            continue
+        gap = preset.permissions - set(row.permission_codes())
+        for code in sorted(gap):
+            perm = perm_by_code.get(code)
+            if perm is None:
+                continue
+            session.add(RolePermission(role_id=row.id, permission_id=perm.id))
+            added += 1
+            touched.add(preset.code)
+
+    session.flush()
+    return {"added": added, "roles": len(touched)}
 
 
 def sync_identity(session: Session) -> dict[str, dict[str, int]]:

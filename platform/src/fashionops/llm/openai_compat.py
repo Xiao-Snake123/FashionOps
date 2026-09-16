@@ -29,21 +29,35 @@ DeepSeek、通义千问、智谱 GLM、以及 OpenAI 本身都提供 OpenAI 兼�
 
 from __future__ import annotations
 
+import contextlib
 import json
 import time
+from collections.abc import Iterator
 from typing import Any
 
 from pydantic import BaseModel
 
-from fashionops.llm.pricing import estimate_cost
+from fashionops.llm.pricing import approx_tokens_text, estimate_cost
 from fashionops.llm.types import (
     FinishReason,
     Message,
     ModelError,
     ModelResponse,
+    StreamChunk,
+    StreamChunkKind,
     ToolCall,
     Usage,
 )
+
+#: 上游的 ``finish_reason`` → 我们自己的枚举。
+#: 抽成模块级常量是因为 ``complete`` 和 ``stream`` 两条路径都要用 ——
+#: 分开写迟早会出现"整块调用认它、流式不认它"这种飘移。
+_FINISH_MAP: dict[str, FinishReason] = {
+    "stop": FinishReason.STOP,
+    "length": FinishReason.LENGTH,
+    "tool_calls": FinishReason.TOOL_CALLS,
+    "content_filter": FinishReason.CONTENT_FILTER,
+}
 
 
 class OpenAICompatClient:
@@ -105,6 +119,157 @@ class OpenAICompatClient:
         latency_ms = int((time.perf_counter() - started) * 1000)
         return self._parse(raw, used_model, latency_ms)
 
+    def stream(
+        self,
+        messages: list[Message],
+        *,
+        tools: list[dict[str, Any]] | None = None,
+        response_schema: type[BaseModel] | None = None,
+        temperature: float | None = None,
+        model: str | None = None,
+        **kwargs: Any,
+    ) -> Iterator[StreamChunk]:
+        """流式调用。逐片吐 ``content``，工具调用拼完整后再吐。
+
+        ## 为什么不传 ``stream_options.include_usage``
+
+        那个参数能在最后一个 chunk 里带回准确的 ``usage``，看起来正是我们要的。
+        但**它不是所有 OpenAI 兼容厂商都支持**：在支持的厂商上它是锦上添花，
+        在不支持的厂商上它会直接把整个请求 400 掉 ——
+        也就是说，为了让成本统计"精确到 token"，赌上了整条对话链路能不能用。
+
+        所以这里的选择是：``usage`` 有就读（不少厂商默认会给），
+        没有就用 :func:`approx_tokens_text` 估一个量级正确的数字。
+        **成本归因的精度不值得拿可用性去换。**
+
+        ## 工具调用的分片拼接
+
+        流式下 ``tool_calls`` 是按 ``index`` 分组、交叉到达的：
+
+            {"index":0,"id":"call_1","function":{"name":"erp__query","arguments":"{\"sk"}}
+            {"index":1,"id":"call_2","function":{"name":"kb__search","arguments":"{\"q"}}
+            {"index":0,"function":{"arguments":"u_codes\":[\"A"}}
+
+        **必须按 index 分组累积**。不分组的话，一轮里同时发起两个工具调用时，
+        两个工具的参数会被拼到一起 —— 而报错现场是"JSON 解析失败"，
+        排查方向很容易跑到"模型输出不稳定"上去。
+        """
+        used_model = model or self.model
+        payload: dict[str, Any] = {
+            "model": used_model,
+            "messages": [_to_openai_message(m) for m in messages],
+            "stream": True,
+        }
+        if temperature is not None:
+            payload["temperature"] = temperature
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
+        if response_schema is not None:
+            payload["response_format"] = {"type": "json_object"}
+
+        started = time.perf_counter()
+        try:
+            stream = self._client.chat.completions.create(**payload, **kwargs)
+        except Exception as exc:  # noqa: BLE001
+            raise _classify(exc) from exc
+
+        content_parts: list[str] = []
+        #: index -> 该工具调用的分片累积
+        pending: dict[int, dict[str, str]] = {}
+        finish_raw = ""
+        usage = Usage()
+
+        try:
+            for chunk in stream:
+                raw_usage = getattr(chunk, "usage", None)
+                if raw_usage is not None:
+                    usage = Usage(
+                        prompt_tokens=getattr(raw_usage, "prompt_tokens", 0) or 0,
+                        completion_tokens=getattr(raw_usage, "completion_tokens", 0) or 0,
+                        total_tokens=getattr(raw_usage, "total_tokens", 0) or 0,
+                    )
+
+                choices = getattr(chunk, "choices", None) or []
+                if not choices:
+                    continue
+                choice = choices[0]
+                if getattr(choice, "finish_reason", None):
+                    finish_raw = str(choice.finish_reason)
+
+                delta = getattr(choice, "delta", None)
+                if delta is None:
+                    continue
+
+                text = getattr(delta, "content", None)
+                if text:
+                    content_parts.append(text)
+                    yield StreamChunk(kind=StreamChunkKind.CONTENT, text=text)
+
+                for call in getattr(delta, "tool_calls", None) or []:
+                    index = getattr(call, "index", 0)
+                    slot = pending.setdefault(
+                        index if index is not None else 0, {"id": "", "name": "", "args": ""}
+                    )
+                    if getattr(call, "id", None):
+                        slot["id"] = call.id
+                    function = getattr(call, "function", None)
+                    if function is not None:
+                        if getattr(function, "name", None):
+                            slot["name"] = function.name
+                        if getattr(function, "arguments", None):
+                            slot["args"] += function.arguments
+        except Exception as exc:  # noqa: BLE001
+            # 中途断流也要翻译成 ModelError：上层可能已经收到半段内容，
+            # 它需要知道"这次是失败的"，才能把消息标成不完整
+            raise _classify(exc) from exc
+        finally:
+            # 提前退出（前端断开、上层抛异常）时把 HTTP 连接关掉，
+            # 否则连接会一直挂到超时，把连接池占满
+            with contextlib.suppress(Exception):
+                stream.close()
+
+        tool_calls: list[ToolCall] = []
+        for index in sorted(pending):
+            slot = pending[index]
+            raw_args = slot["args"] or "{}"
+            try:
+                arguments = json.loads(raw_args)
+            except json.JSONDecodeError:
+                arguments = {}
+            tool_calls.append(
+                ToolCall(
+                    id=slot["id"] or f"call_{index}",
+                    name=slot["name"],
+                    arguments=arguments,
+                    raw_arguments=raw_args if not arguments else None,
+                )
+            )
+            yield StreamChunk(kind=StreamChunkKind.TOOL_CALL, tool_call=tool_calls[-1])
+
+        content = "".join(content_parts)
+        if usage.total_tokens == 0:
+            # 厂商没给 usage：prompt 拿整段消息估，completion 拿输出文本估。
+            # 比真实值有偏差，但成本归因只需要量级对 —— 而且比"一个人读不到
+            # 成本数字、干脆不做成本统计"要好得多。
+            usage = Usage(
+                prompt_tokens=approx_tokens_text(" ".join(m.content for m in messages)),
+                completion_tokens=approx_tokens_text(content),
+            )
+            usage.total_tokens = usage.prompt_tokens + usage.completion_tokens
+
+        response = ModelResponse(
+            content=content,
+            tool_calls=tool_calls,
+            usage=usage,
+            cost=estimate_cost(used_model, usage.prompt_tokens, usage.completion_tokens),
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            model=used_model,
+            provider=self.provider,
+            finish_reason=_FINISH_MAP.get(finish_raw, FinishReason.STOP),
+        )
+        yield StreamChunk(kind=StreamChunkKind.DONE, response=response)
+
     # ------------------------------------------------------------------
     @staticmethod
     def _parse(raw: Any, model: str, latency_ms: int) -> ModelResponse:
@@ -147,12 +312,9 @@ class OpenAICompatClient:
         if usage.total_tokens == 0:
             usage.total_tokens = usage.prompt_tokens + usage.completion_tokens
 
-        finish = {
-            "stop": FinishReason.STOP,
-            "length": FinishReason.LENGTH,
-            "tool_calls": FinishReason.TOOL_CALLS,
-            "content_filter": FinishReason.CONTENT_FILTER,
-        }.get(str(getattr(choice, "finish_reason", "") or ""), FinishReason.STOP)
+        finish = _FINISH_MAP.get(
+            str(getattr(choice, "finish_reason", "") or ""), FinishReason.STOP
+        )
 
         return ModelResponse(
             content=message.content or "",

@@ -70,3 +70,27 @@ def estimate_cost(model: str, prompt_tokens: int, completion_tokens: int) -> Dec
         + Decimal(completion_tokens) * out / _PER_MILLION
     )
     return cost.quantize(Decimal("0.000001"))
+
+
+def approx_tokens_text(text: str) -> int:
+    """粗略估一段文本的 token 数。
+
+    ## 什么时候需要它
+
+    真实分词要装 tiktoken 并按模型选编码。绝大多数时候不需要 —— 接口会
+    直接返回准确的 ``usage``。**但流式响应是例外**：OpenAI 兼容接口里
+    ``usage`` 不是所有厂商都会在最后一个 chunk 带上（有的要显式请求
+    ``stream_options.include_usage``，而那个参数本身也不是每家都支持，
+    传了反而可能被 400 拒掉）。
+
+    所以流式路径上先读真实 ``usage``，读不到才退回这个估算。
+    宁可要一个量级正确的数字，也不要为了让统计"精确"去赌一个可能
+    让整条流式链路直接报错的参数。
+
+    中文大致 1 字 ≈ 1 token，英文 4 字符 ≈ 1 token。
+    """
+    if not text:
+        return 0
+    chinese = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
+    other = len(text) - chinese
+    return chinese + max(1, other // 4) if other else chinese

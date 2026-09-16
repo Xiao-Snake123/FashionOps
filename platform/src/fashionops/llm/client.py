@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any, Protocol, TypeVar
@@ -34,7 +35,15 @@ from pydantic import BaseModel, ValidationError
 
 from fashionops.config import Settings, get_settings
 from fashionops.llm.mock import MockModelClient
-from fashionops.llm.types import Message, ModelError, ModelResponse, ToolCall, Usage
+from fashionops.llm.types import (
+    Message,
+    ModelError,
+    ModelResponse,
+    StreamChunk,
+    StreamChunkKind,
+    ToolCall,
+    Usage,
+)
 
 logger = logging.getLogger("fashionops.llm")
 
@@ -60,6 +69,27 @@ class ModelClient(Protocol):
         model: str | None = None,
         **kwargs: Any,
     ) -> ModelResponse: ...
+
+    def stream(
+        self,
+        messages: list[Message],
+        *,
+        tools: list[dict[str, Any]] | None = None,
+        response_schema: type[BaseModel] | None = None,
+        temperature: float | None = None,
+        model: str | None = None,
+        **kwargs: Any,
+    ) -> Iterator[StreamChunk]:
+        """流式版本。
+
+        **契约的关键一条**：最后**必须**产出一个 ``kind=done`` 的分片，
+        里面带着拼装完整的 :class:`ModelResponse`。
+
+        这条约定让上层只需要关心"响应是怎么拿到的"，
+        后面的控制流（有没有工具调用、怎么记账、怎么写库）
+        **和 ``complete()`` 完全一样** —— 不需要为流式再写一套分支。
+        """
+        ...
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +295,15 @@ class ToolLoopResult:
     tool_calls: list[ToolCall]
     responses: list[ModelResponse]
     finished: bool
+    #: 循环因为**需要人工介入**而停下（见 :class:`ToolLoopPaused`）。
+    #: 和 ``finished=False``（步数用尽）是两件事：那个是"没跑完"，
+    #: 这个是"按设计停下来了，等人"。
+    paused: bool = False
+    paused_reason: str = ""
+    paused_payload: dict[str, Any] = field(default_factory=dict)
+    #: 挂起时**还没执行**的那个工具调用。人工确认后要从它继续，
+    #: 所以必须带出来 —— 不带的话恢复时只能靠猜是哪一次调用。
+    pending_tool_call: ToolCall | None = None
 
     @property
     def total_usage(self) -> Usage:
@@ -282,6 +321,27 @@ class ToolLoopResult:
         return sum(r.latency_ms for r in self.responses)
 
 
+class ToolLoopPaused(Exception):
+    """工具执行需要人工介入 —— 循环在这里停下，等确认后再继续。
+
+    ## 为什么用异常，而不是让 tool_runner 返回一个特殊值
+
+    让 ``tool_runner`` 返回 ``{"ok": False, "pending_approval": ...}`` 也能走通，
+    但那个结构会被**回喂给模型**：模型看到"工具失败"就会去想办法绕过去 ——
+    换个参数重试、换个工具、或者跟用户解释"这个操作失败了"。
+    而实际上什么都没失败，只是在等人点确认。
+
+    异常是控制流，不会混进数据流。``raise`` 之后就不必再担心
+    它被当成内容传给模型，也不用在 prompt 里写一段"看到 pending_approval
+    请不要重试"来打补丁。
+    """
+
+    def __init__(self, reason: str, payload: dict[str, Any] | None = None) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.payload = payload or {}
+
+
 def run_tool_loop(
     client: ModelClient,
     messages: list[Message],
@@ -291,6 +351,10 @@ def run_tool_loop(
     max_steps: int = 8,
     model: str | None = None,
     temperature: float | None = None,
+    stream: bool = False,
+    on_token: Callable[[str], None] | None = None,
+    on_tool_call: Callable[[ToolCall], None] | None = None,
+    on_tool_result: Callable[[ToolCall, dict[str, Any]], None] | None = None,
 ) -> ToolLoopResult:
     """跑「模型要求调工具 → 执行 → 把结果回喂」这个循环。
 
@@ -298,9 +362,24 @@ def run_tool_loop(
     由调用方决定返回什么给模型看 —— 通常是 ``ToolResult.to_dict()``，
     这样模型能看到 ``ok/error.hint``，从而自己决定是重试还是换方案。
 
+    ``tool_runner`` 也可以 ``raise ToolLoopPaused`` 来要求人工确认：
+    循环会带着 ``pending_tool_call`` 返回，由上层决定怎么问人。
+    **注意这种情况下结果不会被回喂给模型** —— 理由见 :class:`ToolLoopPaused`。
+
     ``max_steps`` 是硬性上限。**工具循环必须有上限**：
     模型有可能在两个工具之间来回跳，或者反复重试同一个失败的工具，
     没有上限就是拿 token 打水漂。
+
+    ## 流式只改"响应怎么拿到"，不改控制流
+
+    ``stream=True`` 时改用 ``client.stream()``，并通过 ``on_token``
+    逐片回调文本。**除此之外循环逻辑一字未改** ——
+    因为 ``stream()`` 的契约保证最后会给出和 ``complete()`` 同一种
+    ``ModelResponse``。
+
+    这一点是刻意设计的：如果流式和非流式各写一套循环，两者的行为迟早会漂移
+    （比如"流式路径忘了记账"或者"非流式路径没触发 on_tool_result"），
+    而这种差异只在某一条路径上出现，测试很容易漏。
     """
     working = list(messages)
     responses: list[ModelResponse] = []
@@ -309,8 +388,15 @@ def run_tool_loop(
 
     while steps < max_steps:
         steps += 1
-        response = client.complete(
-            working, tools=tools, model=model, temperature=temperature
+        response = _obtain_response(
+            client,
+            working,
+            tools=tools,
+            model=model,
+            temperature=temperature,
+            stream=stream,
+            on_token=on_token,
+            on_tool_call=on_tool_call,
         )
         responses.append(response)
 
@@ -326,9 +412,21 @@ def run_tool_loop(
 
         working.append(Message.assistant(response.content, tool_calls=response.tool_calls))
         for call in response.tool_calls:
-            executed.append(call)
             try:
                 payload = tool_runner(call.name, call.arguments)
+            except ToolLoopPaused as paused:
+                return ToolLoopResult(
+                    content=response.content,
+                    messages=working,
+                    steps=steps,
+                    tool_calls=executed,
+                    responses=responses,
+                    finished=False,
+                    paused=True,
+                    paused_reason=paused.reason,
+                    paused_payload=paused.payload,
+                    pending_tool_call=call,
+                )
             except Exception as exc:  # noqa: BLE001
                 # 工具执行抛异常也要喂回给模型，让它知道发生了什么并改策略。
                 # 直接往上抛会把"一次工具失败"升级成"整个任务失败"。
@@ -336,6 +434,11 @@ def run_tool_loop(
                 payload = {"ok": False, "error": {"code": "TOOL_EXECUTION_FAILED",
                                                   "message": str(exc)}}
 
+            # 只有**真的执行了**才记进 executed。
+            # 挂起的那次没执行，记进去会让审计说"调用过这个工具"—— 而它没被调用。
+            executed.append(call)
+            if on_tool_result is not None:
+                on_tool_result(call, payload)
             working.append(
                 Message.tool(
                     tool_call_id=call.id,
@@ -353,6 +456,45 @@ def run_tool_loop(
         responses=responses,
         finished=False,
     )
+
+
+def _obtain_response(
+    client: ModelClient,
+    messages: list[Message],
+    *,
+    tools: list[dict[str, Any]],
+    model: str | None,
+    temperature: float | None,
+    stream: bool,
+    on_token: Callable[[str], None] | None,
+    on_tool_call: Callable[[ToolCall], None] | None,
+) -> ModelResponse:
+    """拿一次响应 —— 整块或流式，对调用方是同一件事。"""
+    if not stream:
+        response = client.complete(messages, tools=tools, model=model, temperature=temperature)
+        # 非流式也回调一次：让调用方不必为两种模式各写一套"把文本显示出去"的逻辑。
+        # 少了这一句就会出现"切换 stream 开关后前端不显示内容"这种莫名其妙的 bug
+        if on_token is not None and response.content:
+            on_token(response.content)
+        return response
+
+    response: ModelResponse | None = None
+    for chunk in client.stream(messages, tools=tools, model=model, temperature=temperature):
+        if chunk.kind is StreamChunkKind.CONTENT:
+            if on_token is not None and chunk.text:
+                on_token(chunk.text)
+        elif chunk.kind is StreamChunkKind.TOOL_CALL and chunk.tool_call is not None:
+            if on_tool_call is not None:
+                on_tool_call(chunk.tool_call)
+        elif chunk.kind is StreamChunkKind.DONE:
+            response = chunk.response
+
+    if response is None:
+        # 客户端违反了"最后必须有 done 分片"的契约。
+        # **不静默返回空内容** —— 那会让上层把空字符串当成模型的回答写进历史，
+        # 用户看到一条空消息、日志里一条报错都没有，是最难查的一类问题。
+        raise ModelError("流式响应缺少结束分片（done），无法确定本次结果")
+    return response
 
 
 # ---------------------------------------------------------------------------

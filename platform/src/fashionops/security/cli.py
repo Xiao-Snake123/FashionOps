@@ -419,13 +419,22 @@ def cmd_roles(args: Namespace) -> int:
 
 
 def cmd_sync(args: Namespace) -> int:
-    from fashionops.security.permissions import sync_identity
+    from fashionops.security.permissions import apply_role_presets, sync_identity
 
     with session_scope() as session:
         stats = sync_identity(session)
-        _audit(session, action="identity.sync", target="permissions+roles", detail=stats)
         perms = stats["permissions"]
         roles = stats["roles"]
+
+        if getattr(args, "apply_presets", False):
+            filled = apply_role_presets(session)
+            _ok(
+                f"已把预设授权补到已有角色：新增 {filled['added']} 条，涉及 {filled['roles']} 个角色"
+            )
+            roles = dict(roles)
+            roles["missing"] = {}
+
+        _audit(session, action="identity.sync", target="permissions+roles", detail=stats)
         _ok(
             f"权限同步完成：新增 {perms['created']} / 更新 {perms['updated']} / 移除 {perms['removed']}"
         )
@@ -434,6 +443,14 @@ def cmd_sync(args: Namespace) -> int:
             _warn(
                 f"有 {perms['removed']} 个权限码在代码里已不存在，已从库中删除。"
                 "如果这是误删，说明代码里的 PERMISSIONS 少了东西"
+            )
+        gap = roles.get("missing") or {}
+        if gap:
+            for code, perms_gap in gap.items():
+                _warn(f"内置角色 {code} 缺少代码里预设的权限：{', '.join(perms_gap)}")
+            _warn(
+                "新加的权限码不会自动进到已有角色里（避免代码改数据）。"
+                "要补上：fashionops-user sync --apply-presets（只加不删）"
             )
     return 0
 
@@ -502,7 +519,16 @@ def build_parser() -> ArgumentParser:
     p.set_defaults(func=cmd_kick)
 
     sub.add_parser("roles", help="列出角色及其权限").set_defaults(func=cmd_roles)
-    sub.add_parser("sync", help="把代码里的权限码/内置角色同步进库").set_defaults(func=cmd_sync)
+    p = sub.add_parser("sync", help="把代码里的权限码/内置角色同步进库")
+    p.add_argument(
+        "--apply-presets",
+        action="store_true",
+        help=(
+            "把代码里的角色预设授权**补充**到已有角色上（只加不删）。"
+            "升级后新加的权限码需要跑一次这个才生效"
+        ),
+    )
+    p.set_defaults(func=cmd_sync)
 
     return parser
 

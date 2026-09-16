@@ -48,6 +48,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fashionops.db.base import Base, utcnow
 
+# 对话模型。和下面身份模型同样的理由：不 import 就等于"这些表不存在"。
+from fashionops.db.models_chat import ChatApproval, ChatMessage, Conversation
+
 # 身份模型。**必须在这里 import**：`ALL_MODELS` 和 Alembic 的 autogenerate
 # 都只看 `Base.metadata`，而 metadata 是导入时填充的 ——
 # 不导入就等于"这些表不存在"。
@@ -829,8 +832,14 @@ ALL_MODELS: tuple[type[Base], ...] = (
     AdCampaign,
     EmailMessage,
     AuditLog,
+    # ---- 对话域（models_chat.py）----
+    # 排在最后：`chat_approvals` 指向 `chat_messages`，
+    # 所以父表（会话 → 消息 → 审批）必须按这个顺序建、倒着删。
+    Conversation,
+    ChatMessage,
+    ChatApproval,
 )
-"""23 张表：8 张身份表 + 15 张业务表，顺序即依赖顺序（父表在前）。"""
+"""26 张表：8 张身份表 + 15 张业务表 + 3 张对话表，顺序即依赖顺序（父表在前）。"""
 
 __all__ = [
     "ALL_MODELS",
@@ -840,7 +849,10 @@ __all__ = [
     "Asset",
     "AuditLog",
     "BIMetric",
+    "ChatApproval",
+    "ChatMessage",
     "Competitor",
+    "Conversation",
     "EmailMessage",
     "ExternalIdentity",
     "Inventory",

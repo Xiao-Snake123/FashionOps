@@ -23,6 +23,7 @@ from fashionops.llm.client import (
     ModelClient,
     ModelRouter,
     StructuredResult,
+    ToolLoopPaused,
     ToolLoopResult,
     extract_json,
     get_model_client,
@@ -31,12 +32,14 @@ from fashionops.llm.client import (
     structured_call,
 )
 from fashionops.llm.mock import MockModelClient, MockReply, build_instance, fake_instance
-from fashionops.llm.pricing import PRICES, estimate_cost, price_of
+from fashionops.llm.pricing import PRICES, approx_tokens_text, estimate_cost, price_of
 from fashionops.llm.types import (
     FinishReason,
     Message,
     ModelError,
     ModelResponse,
+    StreamChunk,
+    StreamChunkKind,
     ToolCall,
     Usage,
 )
@@ -52,10 +55,14 @@ __all__ = [
     "ModelError",
     "ModelResponse",
     "ModelRouter",
+    "StreamChunk",
+    "StreamChunkKind",
     "StructuredResult",
     "ToolCall",
+    "ToolLoopPaused",
     "ToolLoopResult",
     "Usage",
+    "approx_tokens_text",
     "build_instance",
     "estimate_cost",
     "extract_json",

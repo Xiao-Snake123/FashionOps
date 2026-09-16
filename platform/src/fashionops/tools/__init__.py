@@ -37,6 +37,21 @@ AGENT_SCOPES: dict[str, frozenset[str]] = {
     "service": frozenset({Scope.ERP_READ, Scope.KB_READ, Scope.MAIL_SEND}),
     "creative": frozenset({Scope.ECOM_READ, Scope.ASSET_WRITE}),
     "video": frozenset({Scope.ECOM_READ, Scope.ASSET_WRITE}),
+    # 对话 Agent。它是个"什么都能问一点"的角色，所以读侧权限给全；
+    # 但 `mail:send` 也在这里声明 —— 因为对话里确实要能起草并发送邮件。
+    # 发信不会因此变得危险：**对话层会在执行前拦住并要求人工确认**
+    # （见 `chat/tools.needs_approval`）。权限回答"有没有资格"，
+    # 审批回答"这一次人同意了吗"，两者都要有。
+    "chat": frozenset(
+        {
+            Scope.ERP_READ,
+            Scope.ECOM_READ,
+            Scope.AD_READ,
+            Scope.KB_READ,
+            Scope.ASSET_WRITE,
+            Scope.MAIL_SEND,
+        }
+    ),
 }
 
 

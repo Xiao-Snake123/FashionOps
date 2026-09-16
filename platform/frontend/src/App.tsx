@@ -18,6 +18,7 @@ import Products from './pages/Products'
 import Tickets from './pages/Tickets'
 import Campaigns from './pages/Campaigns'
 import Emails from './pages/Emails'
+import Chat from './pages/Chat'
 import Login from './pages/Login'
 
 type SessionState = 'checking' | 'anonymous' | 'authenticated'
@@ -129,7 +130,7 @@ export default function App() {
 
   if (location.pathname === '/login') {
     // 已登录还去登录页就直接送回去，免得"登录后按后退又回到登录页"
-    return session === 'authenticated' ? <Navigate to="/dashboard" replace /> : <Login />
+    return session === 'authenticated' ? <Navigate to="/chat" replace /> : <Login />
   }
 
   if (session === 'checking') {
@@ -157,6 +158,13 @@ export default function App() {
           <small>FashionOps · 阶段 0</small>
         </div>
 
+        {/* 对话放在第一位 —— 它是现在的主入口：用户先说话，Agent 再决定
+            是直接回答还是转成一个任务。其余页面是“看结果/看数据”的地方。 */}
+        {hasPermission(user, 'chat:use') && (
+          <NavLink to="/chat" className="nav-link">
+            <span>对话助手</span>
+          </NavLink>
+        )}
         <NavLink to="/dashboard" className="nav-link">
           <span>数据看板</span>
         </NavLink>
@@ -226,7 +234,10 @@ export default function App() {
           </div>
         )}
         <Routes>
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          {/* 默认落地页是对话：用户想干的第一件事通常是“说一句话”，
+              而不是先看一堆图表。看板仍然在，只是不再是入口。 */}
+          <Route path="/" element={<Navigate to="/chat" replace />} />
+          <Route path="/chat" element={<Chat />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/tasks" element={<Tasks />} />
           <Route path="/tasks/:taskNo" element={<TaskDetail />} />
@@ -234,8 +245,8 @@ export default function App() {
           <Route path="/campaigns" element={<Campaigns />} />
           <Route path="/emails" element={<Emails />} />
           <Route path="/products" element={<Products />} />
-          {/* 兜底：未知路径回看板，而不是显示一片空白 */}
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          {/* 兜底：未知路径回首页，而不是显示一片空白 */}
+          <Route path="*" element={<Navigate to="/chat" replace />} />
         </Routes>
       </main>
     </div>

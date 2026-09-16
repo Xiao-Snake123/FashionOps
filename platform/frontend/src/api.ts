@@ -483,6 +483,171 @@ export interface TaskActionResponse {
   message: string
 }
 
+// ===========================================================================
+// 对话
+// ===========================================================================
+export interface Conversation {
+  conversation_no: string
+  title: string
+  status: string
+  username: string
+  model: string
+  message_count: number
+  llm_calls: number
+  tool_calls: number
+  total_tokens: number
+  total_cost: number
+  last_message_at: string | null
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface ChatMessage {
+  id: number
+  seq: number
+  role: 'user' | 'assistant' | 'tool' | 'system'
+  content: string
+  tool_call_id: string | null
+  tool_name: string | null
+  tool_arguments: Record<string, unknown> | null
+  tool_result: Record<string, unknown> | null
+  tool_ok: boolean | null
+  tool_duration_ms: number | null
+  task_no: string | null
+  model: string | null
+  prompt_tokens: number
+  completion_tokens: number
+  cost: number
+  latency_ms: number | null
+  finish_reason: string | null
+  interrupted: boolean
+  created_at: string | null
+}
+
+export interface ChatApproval {
+  id: number
+  approval_no: string
+  conversation_id: number
+  message_id: number | null
+  tool_call_id: string
+  tool_name: string
+  tool_arguments: Record<string, unknown> | null
+  preview: string
+  reason: string
+  status: string
+  decided_by: string | null
+  decided_at: string | null
+  decision_reason: string | null
+  execution_result: Record<string, unknown> | null
+  created_at: string | null
+}
+
+/**
+ * 对话事件。**用同一个 `type` 字段区分**，不给每种类型注册一个监听器 ——
+ * 后端新增一种事件时前端不会静默漏掉（它至少会进 default 分支）。
+ */
+export type ChatEvent =
+  | { type: 'message'; message: ChatMessage }
+  | { type: 'token'; text: string }
+  | { type: 'tool_call'; name: string; arguments: Record<string, unknown> }
+  | { type: 'tool_result'; name: string; ok: boolean; message: ChatMessage }
+  | { type: 'task_created'; task_no: string }
+  | { type: 'approval_required'; approval: ChatApproval }
+  | { type: 'approval_decided'; approval_no: string; approved: boolean; tool: string; ok: boolean }
+  | { type: 'done'; status: string; steps?: number }
+  | { type: 'ping' }
+  | { type: 'error'; detail: string }
+
+/**
+ * 走 fetch 读 SSE 流。
+ *
+ * ## 为什么不用原生 EventSource
+ *
+ * `EventSource` 只能发 GET，也不能带自定义请求头 —— 为了传令牌只能塞进
+ * 查询串，而查询串会进访问日志、浏览器历史和 Referer。对话这边用 fetch
+ * 就能正常带 `Authorization`，代价只是自己解析 SSE 帧（几行 split）。
+ *
+ * ## 401 要自己处理
+ *
+ * 因为它没走 `request()` 那条带自动续期的路径（那条会 `await` 完整响应体，
+ * 而这里要的是流）。所以这里手工做一次"刷新后重试"，行为保持一致。
+ */
+async function openChatStream(
+  path: string,
+  body: unknown,
+  onEvent: (event: ChatEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const send = async (): Promise<Response> => {
+    const headers = new Headers({ 'Content-Type': 'application/json' })
+    const token = currentAccessToken()
+    if (token) headers.set('Authorization', `Bearer ${token}`)
+    return fetch(path, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal,
+    })
+  }
+
+  let response = await send()
+  if (response.status === 401) {
+    const refreshed = await refreshSession()
+    if (!refreshed) {
+      expireSession()
+      throw new ApiError('登录已过期，请重新登录', 401, null)
+    }
+    response = await send()
+  }
+
+  if (!response.ok) {
+    let payload: unknown
+    const text = await response.text()
+    try {
+      payload = text ? JSON.parse(text) : undefined
+    } catch {
+      payload = text
+    }
+    if (response.status === 401) expireSession()
+    throw new ApiError(
+      extractMessage(payload, `请求失败：${response.status} ${response.statusText}`),
+      response.status,
+      payload,
+    )
+  }
+  if (!response.body) throw new ApiError('响应没有可读的流', response.status, null)
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  // SSE 用空行分隔帧。中间件可能把 `\n` 改写成 `\r\n`，所以先归一化 ——
+  // 不归一化的话 `indexOf('\n\n')` 永远不命中，表现是"一个字都不显示"。
+  const flush = (raw: string): void => {
+    for (const line of raw.split('\n')) {
+      if (!line.startsWith('data: ')) continue
+      try {
+        onEvent(JSON.parse(line.slice(6)) as ChatEvent)
+      } catch {
+        /* 半截 JSON：丢掉，不要因为一个坏帧把整条流打断 */
+      }
+    }
+  }
+
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n')
+    let index = buffer.indexOf('\n\n')
+    while (index >= 0) {
+      flush(buffer.slice(0, index))
+      buffer = buffer.slice(index + 2)
+      index = buffer.indexOf('\n\n')
+    }
+  }
+  if (buffer.trim()) flush(buffer)
+}
+
 export const api = {
   health: () => request<Health>('/health'),
   summary: () => request<Summary>('/api/v1/summary'),
@@ -571,4 +736,49 @@ export const api = {
     request<DailyMetric[]>(`/api/v1/metrics/daily${qs(p)}`),
 
   lowStock: (threshold = 5) => request<LowStockItem[]>(`/api/v1/inventory/low-stock${qs({ threshold })}`),
+
+  // ---- 对话 ----
+  conversations: (p: { limit?: number } = {}) =>
+    request<{ items: Conversation[]; total: number }>(`/api/v1/conversations${qs(p)}`),
+  createConversation: (title?: string) =>
+    request<{ conversation: Conversation }>('/api/v1/conversations', {
+      method: 'POST',
+      body: JSON.stringify({ title: title ?? null }),
+    }),
+  conversation: (conversationNo: string) =>
+    request<{
+      conversation: Conversation
+      messages: ChatMessage[]
+      pending_approvals: ChatApproval[]
+    }>(`/api/v1/conversations/${encodeURIComponent(conversationNo)}`),
+
+  /** 发一条消息，流式接收 Agent 的回答。 */
+  sendChatMessage: (
+    conversationNo: string,
+    content: string,
+    onEvent: (event: ChatEvent) => void,
+    signal?: AbortSignal,
+  ) =>
+    openChatStream(
+      `/api/v1/conversations/${encodeURIComponent(conversationNo)}/messages`,
+      { content },
+      onEvent,
+      signal,
+    ),
+
+  /** 确认/驳回对话里的写操作，并流式接收后续回答。 */
+  decideChatApproval: (
+    conversationNo: string,
+    approvalNo: string,
+    approved: boolean,
+    reason: string,
+    onEvent: (event: ChatEvent) => void,
+    signal?: AbortSignal,
+  ) =>
+    openChatStream(
+      `/api/v1/conversations/${encodeURIComponent(conversationNo)}/approvals/${encodeURIComponent(approvalNo)}`,
+      { approved, reason },
+      onEvent,
+      signal,
+    ),
 }

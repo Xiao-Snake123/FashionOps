@@ -37,6 +37,7 @@ import json
 import random
 import time
 import types
+from collections.abc import Iterator
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from enum import Enum
@@ -45,11 +46,13 @@ from typing import Any, Literal, Union, get_args, get_origin
 from pydantic import BaseModel, Field
 from pydantic_core import PydanticUndefined
 
-from fashionops.llm.pricing import estimate_cost
+from fashionops.llm.pricing import approx_tokens_text, estimate_cost
 from fashionops.llm.types import (
     FinishReason,
     Message,
     ModelResponse,
+    StreamChunk,
+    StreamChunkKind,
     ToolCall,
     Usage,
 )
@@ -374,6 +377,78 @@ class MockModelClient:
         **_: Any,
     ) -> ModelResponse:
         started = time.perf_counter()
+        response = self._compose(
+            messages, tools=tools, response_schema=response_schema, model=model
+        )
+
+        # 真的睡一下。虽然是假的，但让调用方感受到"模型是有延迟的"，
+        # 才能暴露出并发、超时、进度反馈这些只在真实延迟下才出现的问题。
+        self._sleep_remaining(started)
+        response.latency_ms = int((time.perf_counter() - started) * 1000)
+        return response
+
+    def stream(
+        self,
+        messages: list[Message],
+        *,
+        tools: list[dict[str, Any]] | None = None,
+        response_schema: type[BaseModel] | None = None,
+        temperature: float | None = None,  # noqa: ARG002 - 保持签名一致
+        model: str | None = None,
+        **_: Any,
+    ) -> Iterator[StreamChunk]:
+        """流式版本。
+
+        ## 为什么是"先算出完整回复、再切片"，而不是边生成边吐
+
+        mock 的价值在于**让下游代码在零成本下真的跑起来**。如果这里另写
+        一套生成逻辑，mock 的流式和整块返回就会走出两份不同的内容 ——
+        测试里验证的是 A、真模型跑的是 B，mock 就从"提前发现问题"
+        变成了"掩盖问题"。
+
+        所以内容只有一份来源（``_compose``），流式只是把它切成小片
+        并让延时分摊开。这样前端能拿到真实的逐字效果，
+        而内容的正确性由同一份逻辑保证。
+        """
+        started = time.perf_counter()
+        response = self._compose(
+            messages, tools=tools, response_schema=response_schema, model=model
+        )
+
+        # 工具调用不切片：它是一次性的结构体，切片没有意义，
+        # 切了反而会让上游的"参数齐了没"判断变复杂。
+        # 真实模型那边的分片是**线格式强加的**，这里没必要自找麻烦。
+        for call in response.tool_calls:
+            yield StreamChunk(kind=StreamChunkKind.TOOL_CALL, tool_call=call)
+
+        pieces = _split_for_stream(response.content)
+        # 把模拟延时**分摊到每一片**上：否则前几片瞬间到达、最后一片才卡住，
+        # 看起来不像打字机，而且掩盖了"流式比整块早看到内容"这个真正的好处
+        per_piece = (self.latency_ms / 1000) / len(pieces) if pieces else 0.0
+        for piece in pieces:
+            if per_piece > 0:
+                time.sleep(per_piece)
+            yield StreamChunk(kind=StreamChunkKind.CONTENT, text=piece)
+
+        self._sleep_remaining(started)
+        response.latency_ms = int((time.perf_counter() - started) * 1000)
+        yield StreamChunk(kind=StreamChunkKind.DONE, response=response)
+
+    # ---- 内部 ----
+    def _compose(
+        self,
+        messages: list[Message],
+        *,
+        tools: list[dict[str, Any]] | None,
+        response_schema: type[BaseModel] | None,
+        model: str | None,
+    ) -> ModelResponse:
+        """算出这一轮的回复。**不带延时**。
+
+        拆出来是因为 complete 和 stream 的等待方式不同：
+        整块返回是一次性等，流式要把等待分摊到每一片之间。
+        而"回复内容"这件事两者必须完全一致。
+        """
         self.calls.append(messages)
         used_model = model or self.model
 
@@ -397,30 +472,30 @@ class MockModelClient:
             tool_calls = []
 
         prompt_tokens = _approx_tokens(messages)
-        completion_tokens = _approx_tokens_text(content) + 20 * len(tool_calls)
+        completion_tokens = approx_tokens_text(content) + 20 * len(tool_calls)
         usage = Usage(
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=prompt_tokens + completion_tokens,
         )
 
-        # 真的睡一下。虽然是假的，但让调用方感受到"模型是有延迟的"，
-        # 才能暴露出并发、超时、进度反馈这些只在真实延迟下才出现的问题。
-        elapsed_target = self.latency_ms / 1000
-        actual = time.perf_counter() - started
-        if actual < elapsed_target:
-            time.sleep(elapsed_target - actual)
-
         return ModelResponse(
             content=content,
             tool_calls=tool_calls,
             usage=usage,
             cost=estimate_cost(used_model, prompt_tokens, completion_tokens),
-            latency_ms=int((time.perf_counter() - started) * 1000),
+            latency_ms=0,
             model=used_model,
             provider=self.provider,
             finish_reason=FinishReason.TOOL_CALLS if tool_calls else FinishReason.STOP,
         )
+
+    def _sleep_remaining(self, started: float) -> None:
+        """补足到 ``latency_ms``。已经超了就立刻返回，不倒扣。"""
+        elapsed_target = self.latency_ms / 1000
+        actual = time.perf_counter() - started
+        if actual < elapsed_target:
+            time.sleep(elapsed_target - actual)
 
     def _pick_tool(self, tools: list[dict[str, Any]], messages: list[Message]) -> ToolCall:
         """挑一个工具来"调用"。
@@ -489,21 +564,20 @@ def _default_for(json_schema: dict[str, Any]) -> Any:
 
 
 def _approx_tokens(messages: list[Message]) -> int:
-    return sum(_approx_tokens_text(m.content) for m in messages) + 4 * len(messages)
+    return sum(approx_tokens_text(m.content) for m in messages) + 4 * len(messages)
 
 
-def _approx_tokens_text(text: str) -> int:
-    """粗略估 token 数。
+#: 流式切片长度。约 6 个字符一片 —— 太短会让前端每片都触发一次重渲染，
+#: 太长就看不出逐字效果。
+_STREAM_PIECE_CHARS = 6
 
-    真实分词要装 tiktoken 并按模型选编码，这里只要一个量级正确的数字 ——
-    mock 场景下成本怎么算都是 0，没必要在这上面花时间。
-    中文大致 1 字 ≈ 1 token，英文 4 字符 ≈ 1 token。
-    """
+
+def _split_for_stream(text: str) -> list[str]:
+    """把一段文本切成流式小片。"""
     if not text:
-        return 0
-    chinese = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
-    other = len(text) - chinese
-    return chinese + max(1, other // 4)
+        return []
+    size = _STREAM_PIECE_CHARS
+    return [text[i : i + size] for i in range(0, len(text), size)]
 
 
 def dumps_for_prompt(obj: Any) -> str:
