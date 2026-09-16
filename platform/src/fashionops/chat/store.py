@@ -33,7 +33,7 @@ from fashionops.db.models_chat import (
     MSG_ROLE_ASSISTANT,
     MSG_ROLE_TOOL,
     MSG_ROLE_USER,
-    ChatApproval,
+    Approval,
     ChatMessage,
     Conversation,
 )
@@ -348,7 +348,7 @@ def create_approval(
     reason: str = "",
 ) -> dict:
     with session_scope() as session:
-        row = ChatApproval(
+        row = Approval(
             approval_no=new_approval_no(),
             conversation_id=conversation_id,
             message_id=message_id,
@@ -363,11 +363,15 @@ def create_approval(
         return serialize_approval(row)
 
 
-def serialize_approval(row: ChatApproval) -> dict:
+def serialize_approval(row: Approval) -> dict:
     return {
         "id": row.id,
         "approval_no": row.approval_no,
         "conversation_id": row.conversation_id,
+        #: 任务侧的闸口会把归属写在这里，对话侧为 None。
+        #: 带上它，前端一个组件就能同时渲染两边。
+        "task_no": row.task_no,
+        "todo_seq": row.todo_seq,
         "message_id": row.message_id,
         "tool_call_id": row.tool_call_id,
         "tool_name": row.tool_name,
@@ -383,21 +387,21 @@ def serialize_approval(row: ChatApproval) -> dict:
     }
 
 
-def pending_for_conversation(session: Session, conversation_id: int) -> list[ChatApproval]:
+def pending_for_conversation(session: Session, conversation_id: int) -> list[Approval]:
     return list(
         session.scalars(
-            select(ChatApproval)
+            select(Approval)
             .where(
-                ChatApproval.conversation_id == conversation_id,
-                ChatApproval.status == "pending",
+                Approval.conversation_id == conversation_id,
+                Approval.status == "pending",
             )
-            .order_by(ChatApproval.id)
+            .order_by(Approval.id)
         )
     )
 
 
-def get_approval(session: Session, approval_no: str) -> ChatApproval | None:
-    return session.scalar(select(ChatApproval).where(ChatApproval.approval_no == approval_no))
+def get_approval(session: Session, approval_no: str) -> Approval | None:
+    return session.scalar(select(Approval).where(Approval.approval_no == approval_no))
 
 
 __all__ = [

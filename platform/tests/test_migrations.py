@@ -18,6 +18,7 @@ upgrade → 表齐全 → downgrade → 表清空 → 再 upgrade → 还能起�
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -240,19 +241,47 @@ def _migration_files() -> list[Path]:
     return files
 
 
+#: 从 ``batch_alter_table('X')`` 里抽出表名
+_BATCH_TABLE_RE = re.compile(r"batch_alter_table\(\s*['\"]([A-Za-z0-9_]+)['\"]")
+#: 从 ``op.drop_table('X')`` 里抽出表名
+_DROP_TABLE_RE = re.compile(r"op\.drop_table\(\s*['\"]([A-Za-z0-9_]+)['\"]")
+
+
 def _find_redundant_index_drops(src: str) -> list[tuple[int, str]]:
     """找出「删表前多余的 drop_index」的行号与内容。
 
-    判定方式：一个 ``batch_op.drop_index(...)`` 之后 10 行内出现 ``op.drop_table(...)``
-    就认为是多余的 —— 因为 DROP TABLE 会把该表上的索引和外键一起删掉。
+    判定：一个 ``drop_index`` 之后 10 行内出现 ``drop_table``，
+    **并且两者说的是同一张表**，才算多余 —— 因为 DROP TABLE 会把
+    该表上的索引和外键一起删掉。
+
+    ## 为什么必须比对表名
+
+    只看"后面 10 行里有没有 drop_table"会**误报**：一个 downgrade 里完全
+    可能"删掉 A 表上的一个索引"+"删掉 B 表"，这两件事毫无关系，前者是必要的。
+
+    真踩过的例子：一次迁移里加了 ``task_todos`` 表，**同时**给
+    ``chat_approvals`` 加了两个索引和两列。downgrade 里既要删那两个索引
+    （合法，表还在），又要删 ``task_todos``（合法，DROP TABLE 带走自己的索引）——
+    被只管"距离"的旧版本判成 2 处违规。
+
+    **检查器误报比没有检查器更糟**：一旦有人开始看到告警就"改代码绕过它"，
+    它就再也拦不住真问题了。
+
+    表名从**外层缩进块**取，不从索引名前缀猜 —— 索引名不一定以表名开头
+    （本项目里 ``chat_approvals`` 表上的索引叫 ``ix_chat_approval_task``）。
     """
     lines = src.splitlines()
     offenders: list[tuple[int, str]] = []
+    current_table: str | None = None
     for i, line in enumerate(lines):
+        batch = _BATCH_TABLE_RE.search(line)
+        if batch:
+            current_table = batch.group(1)
         if "batch_op.drop_index(" not in line:
             continue
         window = "\n".join(lines[i : i + 10])
-        if "op.drop_table(" in window:
+        # 只有"删的正是那张马上要被删的表"的索引，才是多余的
+        if current_table and current_table in _DROP_TABLE_RE.findall(window):
             offenders.append((i + 1, line.strip()))
     return offenders
 
@@ -286,6 +315,20 @@ def test_the_offender_detector_actually_detects():
     # 反例 2：drop_index 和 drop_table 离得很远（>10 行），不该被当成一对
     far = "batch_op.drop_index('ix_x')\n" + "\n" * 12 + "op.drop_table('x')\n"
     assert not _find_redundant_index_drops(far), "误报了：距离过远的调用不该被关联"
+
+    # 反例 3：**删 A 表的索引 + 删 B 表**，两者无关，不该被拦。
+    # 这条是补上"只看距离"那个版本的误报 —— 真实迁移里就这么误报过。
+    cross = (
+        "def downgrade() -> None:\n"
+        "    with op.batch_alter_table('chat_approvals', schema=None) as batch_op:\n"
+        "        batch_op.drop_index('ix_chat_approval_task')\n"
+        "        batch_op.drop_column('task_no')\n"
+        "\n"
+        "    op.drop_table('task_todos')\n"
+    )
+    assert not _find_redundant_index_drops(cross), (
+        "误报了：删 A 表的索引和删 B 表是两件无关的事"
+    )
 
 
 @pytest.mark.parametrize("path", _migration_files(), ids=lambda p: p.name)

@@ -49,7 +49,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from fashionops.db.base import Base, utcnow
 
 # 对话模型。和下面身份模型同样的理由：不 import 就等于"这些表不存在"。
-from fashionops.db.models_chat import ChatApproval, ChatMessage, Conversation
+# `Approval` 虽然叫对话模块里的类，但它**对话和任务共用**，见 models_chat.py。
+from fashionops.db.models_chat import Approval, ChatMessage, Conversation
 
 # 身份模型。**必须在这里 import**：`ALL_MODELS` 和 Alembic 的 autogenerate
 # 都只看 `Base.metadata`，而 metadata 是导入时填充的 ——
@@ -520,7 +521,103 @@ class Task(Base):
 
 
 # ===========================================================================
-# 10. 任务事件流
+# 10. 任务待办（todo）
+# ===========================================================================
+TODO_STATUS_PENDING = "pending"
+TODO_STATUS_RUNNING = "running"
+TODO_STATUS_DONE = "done"
+#: 卡在人工闸口。**不是失败** —— 它只是在等人点一下，
+#: 和 failed 混在一起的话，界面上会把"等你确认"显示成"出错了"。
+TODO_STATUS_WAITING = "waiting_approval"
+TODO_STATUS_FAILED = "failed"
+#: 上游失败被跳过的。和 failed 分开记：一个是"我错了"，一个是"轮不到我"。
+TODO_STATUS_SKIPPED = "skipped"
+
+
+class TaskTodo(Base):
+    """任务里的一步。**有序列表，不是 DAG。**
+
+    ## 为什么从 DAG 改成线性列表
+
+    原来任务用 ``tasks.dag`` 表达计划：每个 Agent 一个节点，``depends_on``
+    连边，跑的时候由 hub 节点按拓扑选下一个该跑谁。那套机器的代价是：
+
+    * 图是**静态构建**的，一个 Agent 只能有一个节点，所以规划校验里
+      必须禁止 ``duplicate_agent`` —— "同一个 Agent 干两件不同的事"表达不了
+    * 有依赖就要做**传递阻断**（上游失败 → 下游全跳过，不能拿残缺输入接着算），
+      这段传播逻辑本身就是一类 bug 的来源
+    * 最关键：**表达力用不上**。真实需求就是"选品 → 出报表 → 发邮件"
+      一条线，没有分支也没有汇合
+
+    换成有序列表：第 n 步做完就做第 n+1 步。少掉的是用不上的表达力，
+    换来的是"计划长什么样"和"现在跑到哪了"一眼看完 ——
+    这正是任务详情页要回答的两个问题。
+
+    ## 谁写这个列表：**代码**，不是模型
+
+    见 ``agents/workplan.py``。原来让模型规划，实测两个问题：
+
+    1. 固定花 20 秒 / 约 2000 tokens（每次任务都要付，哪怕只问库存）
+    2. 用户说"挑 5 款适合上新的秋季连衣裙"，它**自己加了一步"把结果发邮件"**，
+       于是跑完选品就停下来问人要不要发邮件 —— 用户从来没要过
+
+    改成代码按关键词判。代价是"认不出来的组合就不拆"，但这正是这个项目的
+    原则：**判据放代码**（可审计、可回归、可解释）。认不出来时退化成单步任务，
+    而不是编一步出来。
+    """
+
+    __tablename__ = "task_todos"
+    __table_args__ = (
+        UniqueConstraint("task_id", "seq", name="uq_task_todo_seq"),
+        # "现在有几个任务卡在某一步" —— 运维看板要查
+        Index("ix_task_todos_status", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), index=True)
+    seq: Mapped[int] = mapped_column(Integer, comment="任务内第几步，从 1 开始")
+
+    #: 这一步要达成什么，一句人话。**既给用户看、也喂给模型**，
+    #: 所以不能写成 "run_selection_node" 这种内部名
+    goal: Mapped[str] = mapped_column(String(500))
+    #: 这一步属于哪类工作：selection / analytics / notification。
+    #: **不是"谁来执行"**（只有一个 Agent），而是"它需要哪些工具能力" ——
+    #: 工具目录按这个字段裁剪，免得选品那步看到发邮件的工具。
+    kind: Mapped[str] = mapped_column(String(32), default="generic")
+
+    status: Mapped[str] = mapped_column(String(32), default=TODO_STATUS_PENDING)
+
+    # ---- 执行留痕 ----
+    #: 模型为这一步实际调过的工具（去重后的名字）。
+    #: 存列表而不是单值：算出一个结论往往要查好几次 ERP。
+    tool_names: Mapped[list | None] = mapped_column(JSON)
+    #: 这一步的结论，一两句人话。给人看，也作为下一步的输入。
+    result_summary: Mapped[str | None] = mapped_column(Text)
+    #: 这一步产出的文件（assets 编号）。任务级产物由这些汇总而来。
+    artifact_nos: Mapped[list | None] = mapped_column(JSON)
+    error: Mapped[str | None] = mapped_column(Text)
+
+    #: 卡在人工闸口时指向 ``approvals.approval_no``。
+    #: 有了它才能回答"是哪一步在等人"和"那次批准最后执行成什么了"。
+    approval_no: Mapped[str | None] = mapped_column(String(64), index=True)
+
+    # ---- 计量（任务级数字由这些累加而来）----
+    #: 按步记账而不是只在任务上记总数，理由和 approvals 一样：
+    #: 只在最后写总数的话，**中途停下来的任务会显示 0** —— 这个坑踩过。
+    llm_calls: Mapped[int] = mapped_column(Integer, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    total_cost: Mapped[Decimal] = mapped_column(COST, default=Decimal("0"))
+
+    started_at: Mapped[datetime | None] = mapped_column(DateTime)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime)
+    duration_ms: Mapped[int | None] = mapped_column(Integer)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+# ===========================================================================
+# 11. 任务事件流
 # ===========================================================================
 class TaskEvent(Base):
     """任务事件流 —— DAG 节点状态流转记录。
@@ -556,7 +653,7 @@ class TaskEvent(Base):
 
 
 # ===========================================================================
-# 11. Agent 运行记录
+# 12. Agent 运行记录
 # ===========================================================================
 class AgentRun(Base):
     """单次 Agent 执行记录。
@@ -603,7 +700,7 @@ class AgentRun(Base):
 
 
 # ===========================================================================
-# 12. 素材
+# 13. 素材
 # ===========================================================================
 class Asset(Base):
     """素材：生成图、生成视频、Excel 报表。
@@ -654,7 +751,7 @@ class Asset(Base):
 
 
 # ===========================================================================
-# 13. 广告投放
+# 14. 广告投放
 # ===========================================================================
 class AdCampaign(Base):
     """广告投放计划。
@@ -709,7 +806,7 @@ class AdCampaign(Base):
 
 
 # ===========================================================================
-# 14. 邮件记录
+# 15. 邮件记录
 # ===========================================================================
 class EmailMessage(Base):
     """邮件收发记录。
@@ -767,7 +864,7 @@ class EmailMessage(Base):
 
 
 # ===========================================================================
-# 15. 审计日志
+# 16. 审计日志
 # ===========================================================================
 class AuditLog(Base):
     """工具网关审计日志。
@@ -844,6 +941,7 @@ ALL_MODELS: tuple[type[Base], ...] = (
     KBArticle,
     Ticket,
     Task,
+    TaskTodo,
     TaskEvent,
     AgentRun,
     Asset,
@@ -851,23 +949,25 @@ ALL_MODELS: tuple[type[Base], ...] = (
     EmailMessage,
     AuditLog,
     # ---- 对话域（models_chat.py）----
-    # 排在最后：`chat_approvals` 指向 `chat_messages`，
+    # 排在最后：`chat_approvals` 指向 `chat_conversations` 和 `chat_messages`，
     # 所以父表（会话 → 消息 → 审批）必须按这个顺序建、倒着删。
+    # 注：`Approval` 是**对话和任务共用**的审批表，表名保留历史的
+    # `chat_approvals`，原因见 models_chat.py 里那一段。
     Conversation,
     ChatMessage,
-    ChatApproval,
+    Approval,
 )
-"""26 张表：8 张身份表 + 15 张业务表 + 3 张对话表，顺序即依赖顺序（父表在前）。"""
+"""27 张表：8 张身份表 + 16 张业务表 + 3 张对话表，顺序即依赖顺序（父表在前）。"""
 
 __all__ = [
     "ALL_MODELS",
     "APIKey",
     "AdCampaign",
     "AgentRun",
+    "Approval",
     "Asset",
     "AuditLog",
     "BIMetric",
-    "ChatApproval",
     "ChatMessage",
     "Competitor",
     "Conversation",
@@ -884,6 +984,7 @@ __all__ = [
     "SKU",
     "Task",
     "TaskEvent",
+    "TaskTodo",
     "Ticket",
     "User",
     "UserRole",

@@ -25,7 +25,7 @@
 
 审批是**待处理事项**，必须能一条 SQL 查出"现在有几个人工闸口卡着"：
 
-    SELECT * FROM chat_approvals WHERE status = 'pending'
+    SELECT * FROM approvals WHERE status = 'pending'
 
 塞进 `chat_messages` 就只能全表扫描 + 按 payload 猜，而且没法加索引。
 这条查询是运维看板要用，也是"这个系统有没有人在盯着"的证据。
@@ -188,7 +188,7 @@ class ChatMessage(Base):
     task_no: Mapped[str | None] = mapped_column(String(64), index=True)
     #
     # ⚠ **这里刻意没有 approval_id**：
-    # `chat_approvals.message_id` 已经指向消息了，再加一个反指的外键
+    # `approvals.message_id` 已经指向消息了，再加一个反指的外键
     # 会让两张表**互相引用** —— `create_all` 做拓扑排序时会直接报
     # CircularDependencyError。而且同一条信息存两处就要保证两处一致，
     # 那正是我们想避免的。要拿某条消息的审批，按 message_id 反查即可。
@@ -211,14 +211,44 @@ class ChatMessage(Base):
 
 
 # ===========================================================================
-# 3. 对话内的人工审批
+# 3. 人工审批（对话和任务共用）
 # ===========================================================================
-class ChatApproval(Base):
-    """对话流里的一个人工闸口。
+class Approval(Base):
+    """一个人工闸口。对话和任务共用这一张表。
+
+    ## 为什么要通用而不是各存一份
+
+    最早它叫 ``chat_approvals``，只服务对话；任务那边的闸口是用
+    ``tasks.approval_payload`` 这个 JSON 字段顶着的。两套的后果是：
+
+    * "现在有几个闸口卡着人" 这一条 SQL 要写两遍（一张表 + 一个 JSON 字段），
+      而 JSON 字段没法加索引，只能全表扫
+    * 判断"这个工具要不要审批"的逻辑会分成两份，改一处必漏另一处
+    * 任务的审批**没有独立行**，于是"谁批的、什么时候批的、批准后执行成什么了"
+      三个问题在任务侧根本答不了
+
+    所以合并成一张：``conversation_id`` 和 ``task_no`` 二选一，
+    由应用层保证至少有一个（数据库层做二选一的约束很别扭，
+    而且 MySQL 的 CHECK 支持得晚）。
+
+    ## 表名为什么还叫 ``chat_approvals``
+
+    类名已经改成 ``Approval``（它不再只服务对话），但**物理表名没改**，
+    因为重命名买不到对应的价值：
+
+    * ``conversation_id`` 上有外键。MySQL 里这个索引被外键占着，
+      直接 DROP 会报 errno 1553（"Cannot drop index ... needed in a
+      foreign key constraint"）—— 得先造一个新索引顶上去才能删
+    * SQLite 的 ``batch_alter_table`` 是**重建整表**，重建后索引名怎么落
+      取决于它自己，最后"迁移过的库"和"新建的库"索引名会分叉，
+      ``alembic check`` 会一直报
+
+    为一个纯装饰性的重命名搞出一个高风险迁移不划算。真要改，
+    等下次有别的理由动这张表时一起做。
 
     ## 为什么对话式 Agent 更需要它
 
-    任务式流程里，闸口天然存在：DAG 跑到 ``approval_gate`` 节点就停了，
+    任务式流程里，闸口天然存在：跑到需要确认的步骤就停了，
     人点"批准"才继续。**对话式没有这个天然停顿点** —— 模型说着说着
     就调了 ``mail.send``，邮件已经出去了。
 
@@ -236,19 +266,30 @@ class ChatApproval(Base):
         # 运维看板要查"现在有几个闸口卡着"，这条索引就是为它建的
         Index("ix_chat_approval_status", "status", "created_at"),
         Index("ix_chat_approval_conv", "conversation_id", "status"),
+        # 任务侧的对应索引。命名前缀跟着老名字走，理由见上面"表名"那一节。
+        Index("ix_chat_approval_task", "task_no", "status"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     approval_no: Mapped[str] = mapped_column(String(64), unique=True, index=True)
 
-    conversation_id: Mapped[int] = mapped_column(
+    # ---- 归属：对话或任务，二选一 ----
+    conversation_id: Mapped[int | None] = mapped_column(
         ForeignKey("chat_conversations.id", ondelete="CASCADE"), index=True
     )
-    #: 提出这个请求的那条 assistant 消息。
+    #: 任务侧用 ``task_no`` 而不是外键 id：任务对外就用 task_no，
+    #: 而且历史任务可能已经被清理（对话的审批会跟着 CASCADE 删，
+    #: 任务的审批要留下来当审计记录）。所以**刻意不做外键**。
+    task_no: Mapped[str | None] = mapped_column(String(64), index=True)
+
+    #: 提出这个请求的那条 assistant 消息（仅对话侧有）。
     #: 前端据此把审批卡片渲染在那条消息下面 —— 而不是在列表开头堆一堆卡片。
     message_id: Mapped[int | None] = mapped_column(
         ForeignKey("chat_messages.id", ondelete="SET NULL")
     )
+
+    #: 对话侧：第几轮。任务侧：第几个 todo（前端据此定位到具体步骤）。
+    todo_seq: Mapped[int | None] = mapped_column(Integer)
 
     # ---- 待批准的这次工具调用 ----
     tool_call_id: Mapped[str] = mapped_column(String(64))
