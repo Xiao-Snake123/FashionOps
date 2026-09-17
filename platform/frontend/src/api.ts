@@ -153,16 +153,19 @@ export interface ApprovalPayload {
   /** 为什么需要人来点确认（风险说明） */
   reason?: string
   risk?: 'low' | 'medium' | 'high'
-  goal?: string
-  payload?: {
-    todo_seq?: number
-    tool?: string
-    arguments?: Record<string, unknown>
-    /** 由 `describe_preview` 生成的人话摘要 —— 不是模型写的 */
-    preview?: string
-    approval_no?: string
-  }
+  /**
+   * 载荷是**平铺**的（`recorder.mark_waiting_approval` 把 payload 展开到顶层）。
+   * 不要写成 `payload.xxx` —— 那样读到的全是 undefined，
+   * 表现为"审批卡片上没有内容"，而接口明明给了。
+   */
+  todo_seq?: number
+  tool?: string
+  arguments?: Record<string, unknown>
+  /** 由 `describe_preview` 生成的人话摘要 —— 不是模型写的 */
+  preview?: string
+  approval_no?: string
   /** 以下字段旧架构用过，保留兼容：接少了不报错，只是少显示一行 */
+  goal?: string
   agent?: string
   step_id?: string
   recipients?: string[]

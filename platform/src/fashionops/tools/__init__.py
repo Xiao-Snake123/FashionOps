@@ -28,7 +28,10 @@ from fashionops.gateway.registry import Scope, ToolRegistry
 #: 各 Agent 的默认权限集。写在一处，方便对照和审查 ——
 #: 权限散在各处时，很容易出现"通知 Agent 居然能改广告预算"这种越权。
 AGENT_SCOPES: dict[str, frozenset[str]] = {
-    "orchestrator": frozenset({Scope.ERP_READ, Scope.ECOM_READ, Scope.AD_READ, Scope.KB_READ}),
+    # 注意：这里**没有** orchestrator 了。新架构里任务侧只有一个 Agent，
+    # 它的权限集是下面的 "task"。旧代码里"按 orchestrator 权限集求交"的
+    # 写法如果留着，会得到一个不含 mail:send 的集合 ——
+    # 表现为通知步骤的工具目录是空的，模型压根看不见发信工具。
     "selection": frozenset({Scope.ERP_READ, Scope.ECOM_READ}),
     "analytics": frozenset({Scope.ERP_READ, Scope.ECOM_READ, Scope.ASSET_WRITE}),
     "notification": frozenset({Scope.MAIL_SEND, Scope.ASSET_WRITE}),

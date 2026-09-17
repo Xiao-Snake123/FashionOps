@@ -374,6 +374,7 @@ class MockModelClient:
         response_schema: type[BaseModel] | None = None,
         temperature: float | None = None,  # noqa: ARG002 - 保持签名一致
         model: str | None = None,
+        tool_choice: Any = None,  # noqa: ARG002 - mock 按脚本走，不模拟强制调用
         **_: Any,
     ) -> ModelResponse:
         started = time.perf_counter()
@@ -395,6 +396,7 @@ class MockModelClient:
         response_schema: type[BaseModel] | None = None,
         temperature: float | None = None,  # noqa: ARG002 - 保持签名一致
         model: str | None = None,
+        tool_choice: Any = None,  # noqa: ARG002 - mock 按脚本走，不模拟强制调用
         **_: Any,
     ) -> Iterator[StreamChunk]:
         """流式版本。

@@ -282,6 +282,83 @@ def test_resume_after_approval_finishes_task(db):
     assert _task(db, task_no).status == "succeeded"
 
 
+def test_empty_conclusion_triggers_one_more_ask(db):
+    """模型调完工具却给出**空结论**时，要再问一次。
+
+    实测 glm-4-flash 会在工具结果之后返回一个空消息 —— 那一步就算"成功"了，
+    但结论是空的：既没东西给人看，下一步也拿不到任何输入。
+    再问一次（这次不给工具），通常能拿到正常结论。
+    """
+    task_no = "T-LOOP-005"
+    _new_task(task_no, "挑 2 款秋季连衣裙")
+
+    client = MockModelClient(
+        script=[
+            MockReply(
+                tool_calls=[
+                    ToolCall(
+                        id="c1",
+                        name="selection__rank_candidates",
+                        arguments={"candidates": [_candidate()], "top_n": 1},
+                    )
+                ]
+            ),
+            MockReply(content=""),  # ← 空结论（真实模型出现过）
+            MockReply(content="推荐 SPU-001：库存 120 件，毛利率 55%。"),
+        ]
+    )
+
+    run_task(
+        task_no,
+        user_request="挑 2 款秋季连衣裙",
+        scopes=AGENT_SCOPES[TASK_AGENT_NAME],
+        model=client,
+        recorder=TaskRecorder(),
+    )
+
+    rows = _todo_rows(db, task_no)
+    assert rows[0].status == "done"
+    assert rows[0].result_summary == "推荐 SPU-001：库存 120 件，毛利率 55%。"
+    # 追问的那一轮不该再给它工具 —— 否则它可能再去调一次 mail.send，
+    # 于是刚批准过又弹一次审批
+    assert len(client.calls) == 3
+
+
+def test_still_empty_conclusion_falls_back_to_honest_text(db):
+    """追问之后还是空的：写一句**如实**的说明，而不是留空。"""
+    task_no = "T-LOOP-006"
+    _new_task(task_no, "挑 2 款秋季连衣裙")
+
+    client = MockModelClient(
+        script=[
+            MockReply(
+                tool_calls=[
+                    ToolCall(
+                        id="c1",
+                        name="selection__rank_candidates",
+                        arguments={"candidates": [_candidate()], "top_n": 1},
+                    )
+                ]
+            ),
+            MockReply(content=""),
+            MockReply(content=""),
+        ]
+    )
+
+    run_task(
+        task_no,
+        user_request="挑 2 款秋季连衣裙",
+        scopes=AGENT_SCOPES[TASK_AGENT_NAME],
+        model=client,
+        recorder=TaskRecorder(),
+    )
+
+    rows = _todo_rows(db, task_no)
+    assert rows[0].status == "done"
+    assert "模型没有给出结论" in rows[0].result_summary
+    assert "selection.rank_candidates" in rows[0].result_summary
+
+
 def test_reject_cancels_task_and_skips_downstream(db):
     from fashionops.agents.loop import resume_task
 

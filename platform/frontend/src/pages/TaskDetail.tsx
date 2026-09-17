@@ -232,8 +232,9 @@ export default function TaskDetail() {
 
   if (!task) return <div className="empty">加载中…</div>
 
+  // 审批载荷是**平铺**的（后端把 payload 展开到顶层），所以直接读字段，
+  // 不再套一层 .payload
   const approval = task.approval_payload
-  const approvalDetail = approval?.payload ?? {}
   const todos = task.todos ?? []
   const artifacts = ((task.result?.artifacts ?? []) as Artifact[]).filter(Boolean)
   const summary = typeof task.result?.summary === 'string' ? (task.result.summary as string) : null
@@ -277,12 +278,12 @@ export default function TaskDetail() {
             <div style={{ fontSize: 14, marginBottom: 6 }}>{String(approval.action)}</div>
           )}
           <div className="muted" style={{ fontSize: 12.5 }}>
-            第 <span className="mono">{String(approvalDetail.todo_seq ?? '—')}</span> 步 · 工具{' '}
-            <span className="mono">{String(approvalDetail.tool ?? '—')}</span>
-            {approvalDetail.approval_no && (
+            第 <span className="mono">{String(approval?.todo_seq ?? '—')}</span> 步 · 工具{' '}
+            <span className="mono">{String(approval?.tool ?? '—')}</span>
+            {approval?.approval_no && (
               <>
                 {' '}
-                · 审批单 <span className="mono">{String(approvalDetail.approval_no)}</span>
+                · 审批单 <span className="mono">{String(approval.approval_no)}</span>
               </>
             )}
             {approval.risk && (
@@ -300,9 +301,9 @@ export default function TaskDetail() {
           )}
           {/* preview 是代码按参数生成的人话摘要（`describe_preview`）。
               必须显示 —— 不看内容就点同意那不叫审批，叫背锅。 */}
-          {approvalDetail.preview && (
+          {approval?.preview && (
             <div className="draft">
-              <div style={{ whiteSpace: 'pre-wrap' }}>{String(approvalDetail.preview)}</div>
+              <div style={{ whiteSpace: 'pre-wrap' }}>{String(approval.preview)}</div>
             </div>
           )}
           {approval.question && (

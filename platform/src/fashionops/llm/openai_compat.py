@@ -94,6 +94,7 @@ class OpenAICompatClient:
         response_schema: type[BaseModel] | None = None,
         temperature: float | None = None,
         model: str | None = None,
+        tool_choice: Any = None,
         **kwargs: Any,
     ) -> ModelResponse:
         used_model = model or self.model
@@ -105,7 +106,7 @@ class OpenAICompatClient:
             payload["temperature"] = temperature
         if tools:
             payload["tools"] = tools
-            payload["tool_choice"] = "auto"
+            payload["tool_choice"] = tool_choice or "auto"
         if response_schema is not None:
             # 只用最通用的 json_object 模式，schema 靠 prompt 约束
             payload["response_format"] = {"type": "json_object"}
@@ -127,6 +128,7 @@ class OpenAICompatClient:
         response_schema: type[BaseModel] | None = None,
         temperature: float | None = None,
         model: str | None = None,
+        tool_choice: Any = None,
         **kwargs: Any,
     ) -> Iterator[StreamChunk]:
         """流式调用。逐片吐 ``content``，工具调用拼完整后再吐。
@@ -164,7 +166,7 @@ class OpenAICompatClient:
             payload["temperature"] = temperature
         if tools:
             payload["tools"] = tools
-            payload["tool_choice"] = "auto"
+            payload["tool_choice"] = tool_choice or "auto"
         if response_schema is not None:
             payload["response_format"] = {"type": "json_object"}
 

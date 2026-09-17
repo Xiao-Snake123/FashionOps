@@ -355,6 +355,10 @@ def run_tool_loop(
     on_token: Callable[[str], None] | None = None,
     on_tool_call: Callable[[ToolCall], None] | None = None,
     on_tool_result: Callable[[ToolCall, dict[str, Any]], None] | None = None,
+    #: 只在**第一次**请求上生效的 tool_choice。
+    #: 用来"逼"模型必须调某个工具（见 `agents/loop.py` 的必需工具检查）。
+    #: 默认 None → 客户端按 ``auto`` 处理。
+    first_tool_choice: Any = None,
 ) -> ToolLoopResult:
     """跑「模型要求调工具 → 执行 → 把结果回喂」这个循环。
 
@@ -397,6 +401,9 @@ def run_tool_loop(
             stream=stream,
             on_token=on_token,
             on_tool_call=on_tool_call,
+            # 只在第一轮强制：逼出那次工具调用之后就交还给模型自己决定，
+            # 否则它会一直被逼着调同一个工具，停不下来
+            tool_choice=first_tool_choice if steps == 1 else None,
         )
         responses.append(response)
 
@@ -468,10 +475,13 @@ def _obtain_response(
     stream: bool,
     on_token: Callable[[str], None] | None,
     on_tool_call: Callable[[ToolCall], None] | None,
+    tool_choice: Any = None,
 ) -> ModelResponse:
     """拿一次响应 —— 整块或流式，对调用方是同一件事。"""
     if not stream:
-        response = client.complete(messages, tools=tools, model=model, temperature=temperature)
+        response = client.complete(
+            messages, tools=tools, model=model, temperature=temperature, tool_choice=tool_choice
+        )
         # 非流式也回调一次：让调用方不必为两种模式各写一套"把文本显示出去"的逻辑。
         # 少了这一句就会出现"切换 stream 开关后前端不显示内容"这种莫名其妙的 bug
         if on_token is not None and response.content:
@@ -479,7 +489,9 @@ def _obtain_response(
         return response
 
     response: ModelResponse | None = None
-    for chunk in client.stream(messages, tools=tools, model=model, temperature=temperature):
+    for chunk in client.stream(
+        messages, tools=tools, model=model, temperature=temperature, tool_choice=tool_choice
+    ):
         if chunk.kind is StreamChunkKind.CONTENT:
             if on_token is not None and chunk.text:
                 on_token(chunk.text)

@@ -56,6 +56,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from fashionops.agents.execution import (
+    TASK_AGENT,
     TaskBusyError,
     claim,
     enqueue_resume,
@@ -158,7 +159,7 @@ def submit_task(
 
     # 用户权限向下传导：Agent 只能用"提交人本来就有的"权限。
     # 这个交集是**唯一真实的越权防线**，不能省。
-    granted = effective_scopes(principal, AGENT_SCOPES["orchestrator"])
+    granted = effective_scopes(principal, AGENT_SCOPES[TASK_AGENT])
 
     try:
         task_no = submit(

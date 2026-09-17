@@ -88,6 +88,18 @@ TASK_AGENT_NAME = "task"
 #: 超过说明模型在绕圈，必须硬性截断，否则就是拿 token 打水漂。
 MAX_STEPS_PER_TODO = 8
 
+#: **这一步必须调用的工具**，不调用就算没做完。
+#:
+#: 为什么要这条硬规则：实测 glm-4-flash 在通知步骤里**稳定地不调** mail.send
+#: —— 它把邮件正文写得漂漂亮亮，然后说"已起草"，一步就结束了。
+#: 于是任务被标成 succeeded、收件人什么也没收到，用户以为发出去了。
+#: 更糟的是它顺手编了一个 asset_no 当附件。
+#:
+#: 这不是"提示词写清楚"能解决的（写清楚了它也不调），所以改成代码兜底：
+#: 少了这个工具就再提醒一次；还不调就**判失败** ——
+#: 宁可让任务失败并写明原因，也不能报一个假的成功。
+_KIND_REQUIRED_TOOL: dict[str, str] = {"notification": "mail.send"}
+
 #: 上一步结论进下一步上下文时截断到多少字。
 #: 不截断的话，出报表那步会把选品全表的 JSON 全背进 prompt，
 #: 而它真正需要的只是"选了几款、报表在哪"这类结论。
@@ -141,10 +153,14 @@ _KIND_GUIDE: dict[str, str] = {
         "以及报表的 asset_no 和下载地址。**严重程度以工具返回的 level 为准，不要自己判断**。"
     ),
     "notification": (
-        "用中文起草一封给相关人的邮件：说清楚这份分析的背景、最关键的数字结论、"
-        "以及报表在哪里（有 asset_no / URL 就必须写进去）。\n"
-        "然后调 mail.send 发送。**系统会在真正发送前拦下等人工确认**，"
-        "所以不要谎报「已经发出」，也不要在结论里解释这个机制。"
+        "用中文起草一封给相关人的邮件：说清楚背景、结论，有报表就把 asset_no / URL 写进去。\n"
+        "**必须调 mail.send 真正发送** —— 只把邮件内容写出来不算完成这一步"
+        "（实测过：模型写了一封措辞完整的邮件就说「已起草」，任务被标成成功，"
+        "而收件人什么也没收到，用户以为发出去了）。\n"
+        "正文里的**每个数字都必须来自前面步骤的结论或工具返回**；"
+        "这一步手上没有数据，就如实写「本次没有需要核对的数据」，**不要编数字**。\n"
+        "系统会在这次发送真正执行前拦下等人工确认 —— 那是设计，不是出错："
+        "不要谎报「已经发出」，也不要向读者解释这个机制。"
     ),
     "generic": (
         "用只读工具查到用户要的信息，然后用两三句中文给出结论。"
@@ -165,6 +181,9 @@ SYSTEM_PROMPT = """你是「服装电商多 Agent 运营中台」的任务执行
 * 只完成「当前这一步」的目标，**不要替后面的步骤操心**，
   也不要在没有对应工具的情况下去做别的事
 * 目录里的工具是为这一步挑出来的。**不要调用目录里没有的工具**
+* **这一步要调用工具才算做完。** 该发邮件就必须调 mail.send，
+  把邮件内容写在结论里不等于发出去了；该出报表就必须调生成报表的工具。
+  「我描述了要做什么」在这套系统里**不产生任何实际效果**
 * 系统会在对外发送之类的动作前拦下等人工确认，那是设计如此
 
 ## 结论怎么写成
@@ -201,7 +220,14 @@ def run_task(
     _save_todos(task_no, specs)
     recorder.save_plan(task_no, _plan_payload(specs))
 
-    return _execute(task_no, scopes=scopes, model=model, recorder=recorder)
+    try:
+        return _execute(task_no, scopes=scopes, model=model, recorder=recorder)
+    except Exception as exc:
+        # 异常如果是"工具挂了/模型超时"这类基础设施问题，正在跑的那一步
+        # 会永远停在 running —— 界面上就出现一条"执行中但其实已经死了"的任务。
+        # 任务级状态由 execution.mark_failed 收口，这里负责把那一步收拾干净。
+        _fail_running_todo(task_no, f"{type(exc).__name__}: {exc}")
+        raise
 
 
 def resume_task(
@@ -294,13 +320,17 @@ def resume_task(
         },
     )
 
-    return _execute(
-        task_no,
-        scopes=scopes,
-        model=model,
-        recorder=recorder,
-        resume_of=(seq, pending, result),
-    )
+    try:
+        return _execute(
+            task_no,
+            scopes=scopes,
+            model=model,
+            recorder=recorder,
+            resume_of=(seq, pending, result),
+        )
+    except Exception as exc:
+        _fail_running_todo(task_no, f"{type(exc).__name__}: {exc}")
+        raise
 
 
 # ===========================================================================
@@ -407,6 +437,27 @@ def _execute(
     return {"status": "succeeded", "steps": done}
 
 
+def _fail_running_todo(task_no: str, error: str) -> None:
+    """把"正在跑"的那一步标成失败。
+
+    只在**异常逃逸**时调用（模型超时、工具挂了这类基础设施问题）。
+    没有它，那一步会永远停在 ``running`` ——
+    界面上就多一条"执行中但其实已经死了"的任务，
+    而这与 §1 问题 4（running 没有超时，挂了就是永远）是同一类坑。
+    """
+    with session_scope() as session:
+        task = session.scalar(select(Task).where(Task.task_no == task_no))
+        if task is None:
+            return
+        row = session.scalar(
+            select(TaskTodo).where(TaskTodo.task_id == task.id, TaskTodo.status == TODO_STATUS_RUNNING)
+        )
+        if row is None:
+            return
+        row.status = TODO_STATUS_FAILED
+        row.error = error
+
+
 def _run_todo(
     *,
     task_no: str,
@@ -498,13 +549,72 @@ def _run_todo(
         )
         return result
 
+    required = _KIND_REQUIRED_TOOL.get(kind)
+    # 恢复续跑时，必需的工具**已经在批准时执行过了**（seen_tools 里有它）。
+    # 这时再强制一次就会让它再发一遍 —— 那封邮件会被要求审批第二次，
+    # 而人看到的是"刚批准过怎么又来"。所以只在还没调用过时强制。
+    already_done = bool(required) and required in seen_tools
+
+    # 第一步就**强制**调用必需的工具：这一步存在的意义就是它
+    # （通知步骤 = 一定要发出去），所以不需要"让模型自己决定要不要调"。
+    # 这也和旧架构一致 —— 那时节点代码自己调 mail.send，模型只管写内容。
+    # tool_choice 只压第一轮，逼出这次调用之后就交还给模型。
     loop_result = run_tool_loop(
         client,
         messages,
         tools=catalog,
         tool_runner=tool_runner,
         max_steps=MAX_STEPS_PER_TODO,
+        first_tool_choice=None
+        if already_done
+        else (_forced_choice(catalog, required) if required else None),
     )
+
+    # ---- "必须调用的工具"还没被调用 ----
+    # 只再试一次：再往下就变成和模型拉锯，而那一轮轮都是真金白银的 token。
+    # 一次不成就把这一步判失败并写明原因 —— 假成功比失败危险得多。
+    if (
+        required
+        and loop_result.finished
+        and required not in seen_tools
+        and required not in (loop_result.paused_payload or {}).values()
+    ):
+        from fashionops.llm import Message
+
+        # 记一条 warning 而不是 debug：这一步"没调该调的工具"是需要被看见的
+        # 异常，运维看日志时应该能看到它，而不是只看到最后那条"任务失败"
+        logger.warning(
+            "任务 %s 第 %s 步（%s）第一轮没有调用必需的 %s"
+            "（steps=%s finished=%s paused=%s 已调用=%s catalog=%s），重试并强制调用",
+            task_no,
+            seq,
+            kind,
+            required,
+            loop_result.steps,
+            loop_result.finished,
+            loop_result.paused,
+            seen_tools,
+            [_schema_name(s) for s in catalog],
+        )
+        messages = messages + [
+            Message.assistant(loop_result.content),
+            Message.user(
+                f"这一步还没有真正完成：你没有调用 {required}。"
+                f"把这条结论写成结论、把邮件正文写进参数，现在就调用 {required}。"
+                "只把内容写在回答里是无效的 —— 那样收件人什么也收不到。"
+            ),
+        ]
+        loop_result = run_tool_loop(
+            client,
+            messages,
+            tools=catalog,
+            tool_runner=tool_runner,
+            max_steps=MAX_STEPS_PER_TODO,
+            # 光靠文字提醒它还是不调（实测如此），所以这一轮**强制**它调：
+            # tool_choice 只作用在第一轮，逼出这次调用之后就交还给模型
+            first_tool_choice=_forced_choice(catalog, required),
+        )
+
     duration_ms = int((time.perf_counter() - started) * 1000)
     usage = loop_result.total_usage
 
@@ -560,6 +670,83 @@ def _run_todo(
 
     # ---- 正常结束 ----
     summary = (loop_result.content or "").strip()
+
+    # 模型在工具结果之后**返回了空内容**（glm-4-flash 实测会这样）：
+    # 它调完了工具、自认为"做完了"，却不写结论。而这一步的结论既是给人看的结果，
+    # 也是下一步的输入 —— 空着等于后面几步什么都拿不到。
+    #
+    # 所以再问一次，**并且这一次不给它任何工具**：
+    # ① 目标很明确，就是要一段总结；② 它不可能再去调工具，
+    # 于是不会再触发一次审批闸口（刚批准过又弹一遍是最让人困惑的）。
+    if summary == "" and seen_tools:
+        from fashionops.llm import Message
+
+        messages = messages + [
+            Message.assistant(loop_result.content),
+            Message.user(
+                "工具结果已经在上面了。现在请用两三句中文写出这一步的结论："
+                "引用工具返回的真实数字，不要新增数字，也不要重复我的要求。"
+            ),
+        ]
+        loop_result = run_tool_loop(
+            client,
+            messages,
+            tools=[],
+            tool_runner=tool_runner,
+            max_steps=1,
+        )
+        summary = (loop_result.content or "").strip()
+        if summary == "":
+            # 还是空的：写一句**如实**的说明，而不是留空让人以为它什么都没做
+            summary = f"模型没有给出结论。这一步调用了：{'、'.join(seen_tools)}。"
+
+    if required and loop_result.finished and required not in seen_tools:
+        # 提醒过一次了还是没调 —— 这一步**没有产生对用户承诺的效果**。
+        # 判失败，并且把原因写清楚：让人知道是"模型没调工具"，
+        # 而不是"系统坏了"或"已经发出去了"。
+        error = (
+            f"这一步要求调用 {required} 才算完成，但模型在没有调用它的情况下就结束了"
+            f"（已提醒一次）。结论里的数字和附件编号都没有真实来源，不要当真。"
+        )
+        _set_todo(
+            task_no,
+            seq,
+            status=TODO_STATUS_FAILED,
+            error=error,
+            result_summary=summary,
+            tool_names=seen_tools,
+            llm_calls=loop_result.steps,
+            total_tokens=loop_result.total_usage.total_tokens,
+            total_cost=loop_result.total_cost,
+            duration_ms=duration_ms,
+            finished_at=utcnow(),
+        )
+        recorder.event(
+            task_no,
+            "node_finished",
+            {
+                "node": f"todo-{seq}",
+                "agent": TASK_AGENT_NAME,
+                "status": "failed",
+                "summary": error,
+                "tool_calls": seen_tools,
+                "duration_ms": duration_ms,
+            },
+            level="error",
+        )
+        recorder.record_run(
+            task_no=task_no,
+            agent_name=TASK_AGENT_NAME,
+            status="failed",
+            latency_ms=duration_ms,
+            total_tokens=loop_result.total_usage.total_tokens,
+            cost=loop_result.total_cost,
+            tool_call_count=len(seen_tools),
+            output_summary=error,
+            error_code="REQUIRED_TOOL_NOT_CALLED",
+        )
+        return {"status": TODO_STATUS_FAILED, "error": error}
+
     if not loop_result.finished:
         # 步数用尽：**算失败**。不判失败的话，任务会带着一个被截断的
         # 半成品结论标成成功，而"它其实没做完"这件事在界面上看不出来。
@@ -718,6 +905,18 @@ def _catalog_for(kind: str, scopes: frozenset[str]) -> list[dict[str, Any]]:
 
 def _schema_name(schema: dict[str, Any]) -> str:
     return str((schema.get("function") or {}).get("name") or "").replace("__", ".")
+
+
+def _forced_choice(catalog: list[dict[str, Any]], tool: str) -> dict[str, Any] | None:
+    """构造"必须调这个工具"的 tool_choice（用模型看到的那个名字）。
+
+    目录里没有这个工具时返回 ``None`` —— 那就说明它不在这一步的可见范围里，
+    强制一个看不见的工具只会拿到 400。
+    """
+    for schema in catalog:
+        if _schema_name(schema) == tool:
+            return {"type": "function", "function": {"name": schema["function"]["name"]}}
+    return None
 
 
 def _call_tool(

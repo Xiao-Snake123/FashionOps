@@ -682,6 +682,7 @@ def _submit_task(setup: TurnSetup, arguments: dict[str, Any]) -> dict[str, Any]:
         }
 
     from fashionops.agents import execution
+    from fashionops.agents.execution import TASK_AGENT
     from fashionops.tools import AGENT_SCOPES
 
     request_text = str(arguments.get("request") or "").strip()
@@ -698,7 +699,7 @@ def _submit_task(setup: TurnSetup, arguments: dict[str, Any]) -> dict[str, Any]:
     # 权限继续向下传导：编排 Agent 只能用"这个人本来就有的"权限。
     # 对话这一层求过一次交，任务那一层再求一次 —— 两次都不能省：
     # 对话 Agent 的权限集和编排 Agent 的权限集本来就不同。
-    granted = effective_scopes(setup.principal, AGENT_SCOPES["orchestrator"])
+    granted = effective_scopes(setup.principal, AGENT_SCOPES[TASK_AGENT])
 
     try:
         task_no = execution.submit(
