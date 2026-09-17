@@ -57,7 +57,6 @@ from sqlalchemy.orm import Session
 
 from fashionops.agents.execution import (
     TaskBusyError,
-    build_runner,
     claim,
     enqueue_resume,
     is_running,
@@ -296,7 +295,14 @@ def approve_task(
 
     enqueue_resume(
         task_no,
-        {"approved": payload.approved, "by": principal.username, "reason": payload.reason},
+        {
+            "approved": payload.approved,
+            "by": principal.username,
+            # 审批人的**数字 id** 也要传：审批单上存的是 user_id（外键），
+            # 只存名字的话，那个人改名/被删之后这条记录就对不上人了。
+            "by_id": principal.user_id,
+            "reason": payload.reason,
+        },
     )
     verb = "批准" if payload.approved else "驳回"
     return TaskActionResponse(
@@ -476,7 +482,7 @@ def _iso(value: Any) -> str | None:
     return value.isoformat() if value else None
 
 
-#: `build_runner` 对外保留出口 —— 测试和脚本一直从这里拿它。
-#: 实现已经搬到 `agents/execution.py`：对话 Agent 也需要提交任务，
-#: 而业务逻辑不应该反向依赖 HTTP 层。
-__all__ = ["build_runner", "router"]
+#: 组装执行上下文那一套（原来的 `build_runner`）已经删掉了：
+#: 新架构里"跑任务"就是 `agents/loop.run_task`，没有图要编译、
+#: 没有 checkpointer 要传 —— 所以这里不再有对外出口。
+__all__ = ["router"]

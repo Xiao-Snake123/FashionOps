@@ -14,8 +14,12 @@
 
 ## 这一层负责什么
 
-* **去重**：同一个 task_no 不能被两个线程同时跑（同一个 LangGraph
-  thread_id 上跑两个图，checkpoint 状态会互相覆盖）
+* **去重**：同一个 task_no 不能被两个线程同时跑。
+  同一个任务被并发跑两次，两边的 todo 状态会互相覆盖 ——
+  表现是"第 2 步跑了两遍"或者"第 3 步被当成没做过又跑一次"，
+  而日志里两条线混在一起，看不出是谁覆盖了谁。
+  （原架构的理由是"同一个 thread_id 上跑两个图会覆盖 checkpoint"，
+  机制换了，但这条约束没变。）
 * **先落库**：任务行必须在返回之前写好，否则前端拿到编号立刻查会 404
 * **兜异常**：线程里抛出去的异常没人接，表现是"任务永远停在 running"
   而日志里什么都没有 —— 最难查的一类问题
@@ -63,52 +67,11 @@ class TaskBusyError(RuntimeError):
 
 
 # ---------------------------------------------------------------------------
-# 组装 runner
+# 组装执行上下文
 # ---------------------------------------------------------------------------
-def build_runner(
-    task_no: str,
-    *,
-    task_id: int | None = None,
-    scopes: frozenset[str] | None = None,
-) -> Any:
-    """组装一个能跑图并记账的 TaskRunner。抽成函数是为了让测试能直接调。
-
-    ``scopes`` 是**用户权限 ∩ Agent 权限集**的结果（见 `api/routers/tasks.py`
-    的模块 docstring）。传 ``None`` 时退回 Agent 的完整权限集 ——
-    这是给脚本/演示用的路径，**对外入口必须传**，否则权限传导就断了。
-    """
-    from fashionops.agents.checkpoint import get_checkpointer
-    from fashionops.agents.recorder import TaskRecorder
-    from fashionops.agents.runner import TaskRunner
-    from fashionops.agents.state import RunContext
-    from fashionops.config import get_settings
-    from fashionops.gateway import (
-        ToolGateway,
-        get_circuit_breaker,
-        get_rate_limiter,
-        registry,
-    )
-    from fashionops.llm import get_model_client
-    from fashionops.tools import AGENT_SCOPES, register_all_tools
-
-    # 注册表是进程级单例，重复注册会抛异常，所以先判空
-    if not len(registry):
-        register_all_tools(registry)
-
-    settings = get_settings()
-    gateway = ToolGateway(
-        registry,
-        rate_limiter=get_rate_limiter(settings.cache_backend),
-        breaker=get_circuit_breaker(settings.cache_backend),
-    )
-    ctx = RunContext(
-        gateway=gateway,
-        model=get_model_client(settings),
-        actor=f"orchestrator:{task_no}",
-        scopes=AGENT_SCOPES["orchestrator"] if scopes is None else scopes,
-        task_id=task_id,
-    )
-    return TaskRunner(ctx, recorder=TaskRecorder(), checkpointer=get_checkpointer(settings))
+#: 跑任务用的 Agent 名。新架构里任务侧**只有这一个 Agent**（见 `agents/loop.py`），
+#: 它同时是 `AGENT_SCOPES` 的键。
+TASK_AGENT = "task"
 
 
 # ---------------------------------------------------------------------------
@@ -201,53 +164,76 @@ def run_guarded(
     created_by: str,
     scopes: frozenset[str] | None = None,
 ) -> None:
-    """后台线程里跑任务。
+    """后台线程里跑任务 —— 直接驱动新循环（`agents/loop.run_task`）。
 
     **异常必须在这里兜住。** 线程里抛出去的异常没人接，
     表现是"任务永远停在 running"而日志里什么都没有 —— 最难查的一类问题。
 
     ``scopes`` 必须从请求线程传进来，不能在这里重新算 ——
-    后台线程里没有请求上下文（拿不到 Principal）。
-    这也意味着**审批通过后的续跑用的是提交时的权限快照**，
-    而不是审批时的权限：如果提交人的权限被中途撤销，续跑仍用旧快照。
-    这个窗口是任务的生命周期（分钟级），并且审计里记了当时的 granted_scopes，
-    对当前场景可以接受；要彻底解决得把权限随任务持久化并在续跑时重新求交。
+    后台线程里没有请求上下文（拿不到 Principal）。见 `resume_guarded`
+    对"续跑时权限从哪来"的处理。
     """
-    runner = None
+    del task_type  # 任务类型目前只用于落库和筛选，执行逻辑不看它
     try:
-        runner = build_runner(task_no, scopes=scopes)
-        runner.submit(
-            task_no=task_no,
-            user_request=user_request,
-            task_type=task_type,
-            created_by=created_by,
-        )
+        from fashionops.agents.loop import run_task
+
+        run_task(task_no, user_request=user_request, scopes=scopes)
     except Exception as exc:  # noqa: BLE001
         logger.exception("任务 %s 执行失败", task_no)
-        mark_failed(task_no, runner, exc)
+        mark_failed(task_no, exc)
     finally:
         release(task_no)
 
 
 def resume_guarded(task_no: str, decision: dict[str, Any]) -> None:
-    runner = None
+    """审批之后接着跑。
+
+    ## 续跑用谁的权限：**按提交人当前的权限重新求交**
+
+    原来的实现是"提交时的权限快照"（任务生命周期内不再求交），
+    代价写在旧注释里：提交人被撤权后，续跑仍然拿旧权限干活 ——
+    撤销权限的人以为自己已经收回了能力，而系统说没有。
+
+    现在改成重新求交：读任务的 ``created_by_id`` → 取提交人**当前**权限
+    ∩ 任务 Agent 权限集。撤权立刻生效；加权也会生效，但那份权限
+    仍然受 Agent 权限集和审批闸口双重约束，所以这个方向的风险可控。
+
+    取不到提交人（脚本/对话路径可能没记 user id）时退回 Agent 完整权限集 ——
+    那和 `run_guarded` 传 ``None`` 时的行为一致，不会更宽。
+    """
     try:
-        runner = build_runner(task_no)
-        runner.resume(task_no=task_no, decision=decision)
+        from fashionops.agents.loop import resume_task
+
+        resume_task(task_no, decision=decision, scopes=_resume_scopes(task_no))
     except Exception as exc:  # noqa: BLE001
         logger.exception("任务 %s 恢复失败", task_no)
-        mark_failed(task_no, runner, exc)
+        mark_failed(task_no, exc)
     finally:
         release(task_no)
 
 
-def mark_failed(task_no: str, runner: Any, exc: Exception) -> None:
+def _resume_scopes(task_no: str) -> frozenset[str] | None:
+    from fashionops.security import service
+    from fashionops.security.service import effective_scopes
+    from fashionops.tools import AGENT_SCOPES
+
+    with session_scope() as session:
+        task = session.scalar(select(Task).where(Task.task_no == task_no))
+        owner_id = None if task is None else task.created_by_id
+        if owner_id is None:
+            return None
+        principal = service.load_principal(session, owner_id)
+    if principal is None:
+        return None
+    return effective_scopes(principal, AGENT_SCOPES[TASK_AGENT])
+
+
+def mark_failed(task_no: str, exc: Exception) -> None:
     """尽力把失败状态写进去。写不进去也至少要留下日志。"""
     try:
         from fashionops.agents.recorder import TaskRecorder
 
-        recorder = runner.recorder if runner is not None else TaskRecorder()
-        recorder.finish(
+        TaskRecorder().finish(
             task_no=task_no, status="failed", error_message=f"{type(exc).__name__}: {exc}"
         )
     except Exception:  # noqa: BLE001
@@ -321,8 +307,8 @@ def enqueue_resume(task_no: str, decision: dict[str, Any]) -> None:
 
 __all__ = [
     "EXECUTOR",
+    "TASK_AGENT",
     "TaskBusyError",
-    "build_runner",
     "claim",
     "create_task_row",
     "enqueue_resume",
