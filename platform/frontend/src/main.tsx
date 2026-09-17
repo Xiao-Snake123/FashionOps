@@ -1,10 +1,9 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
-// 顺序很重要：React Flow 的默认样式必须先加载，自己的主题放后面才能覆盖它。
-// 反过来的话，.react-flow__node-default 和 .dag-node 优先级相同，
-// 后加载的那份赢 —— 结果就是自己写的节点配色全不生效。
-import '@xyflow/react/dist/style.css'
+// 样式表顺序有讲究：通用主题先加载，后面各页的专用规则才能覆盖它。
+// （原来这里第一份是 React Flow 的样式 —— 任务详情页的 DAG 图已经换成
+// todo 列表，那个依赖和它的样式一起不用了，但"顺序即优先级"这条不变。）
 import './styles.css'
 // 认证相关样式放最后：它里面有 .login-card .button 这类会覆盖通用按钮样式的规则，
 // 必须在 styles.css 之后加载才生效

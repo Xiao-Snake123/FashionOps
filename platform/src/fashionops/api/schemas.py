@@ -129,6 +129,39 @@ class TaskOut(ORMBase):
         return value
 
 
+class TaskTodoOut(ORMBase):
+    """任务里的一步 —— 详情页的 todo 列表读这个。
+
+    ## 为什么"计划"和"进度"合在一个对象里
+
+    旧架构里这两个是分开的：计划来自 ``tasks.dag``（静态、模型给的图），
+    进度靠从事件流里反推节点状态（间接、还要处理"最后一条 node_start
+    未必是当前节点"这类猜测）。
+
+    新架构里 ``task_todos`` 既有目标、又有状态和结果 ——
+    **它同时就是计划和进度**，前端不需要两套数据，也不需要猜。
+    所以这里直接把库里的行给出去，不做任何再加工。
+    """
+
+    seq: int
+    goal: str
+    kind: str
+    status: str
+    #: 这一步的结论（模型写的、给下一步看的）
+    result_summary: str | None = None
+    artifact_nos: list | None = None
+    tool_names: list | None = None
+    error: str | None = None
+    #: 卡在闸口时指向 approvals.approval_no
+    approval_no: str | None = None
+    llm_calls: int
+    total_tokens: int
+    total_cost: Decimal
+    duration_ms: int | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+
 class TaskDetailOut(TaskOut):
     """任务详情。在列表字段之上补「挂起状态」和「审批载荷」。"""
 
@@ -139,6 +172,9 @@ class TaskDetailOut(TaskOut):
     #: 还在迁移态（pending/running/waiting_approval）—— 即"值得继续轮询"
     is_pending: bool = False
     started_at: datetime | None = None
+    #: 有序的 todo 列表。旧任务（还没有 todo 行）给空列表，
+    #: 前端据此知道"这个任务是用旧架构跑的"，不用靠形状猜。
+    todos: list[TaskTodoOut] = []
 
 
 class TaskEventOut(ORMBase):

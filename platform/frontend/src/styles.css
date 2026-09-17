@@ -525,6 +525,83 @@ input[type='text']:focus {
   flex-wrap: wrap;
 }
 
+/* ---------- 执行步骤（todo 列表） ---------- */
+/*
+ * 原来是 ReactFlow 画的 DAG。换成线性列表的理由写在
+ * docs/12-AI协作交接.md 里：真实需求就是一条线，画成图只增加阅读成本。
+ * 左边框的颜色承担"这一步到哪了"的提示，所以状态色放在这里而不是徽标上。
+ */
+.todo-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.todo-item {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 10px 13px;
+  background: var(--panel-2);
+}
+
+.todo-item.done {
+  border-left-color: var(--ok);
+}
+
+.todo-item.running {
+  border-left-color: var(--accent);
+}
+
+.todo-item.waiting_approval {
+  border-left-color: var(--warn);
+}
+
+.todo-item.failed {
+  border-left-color: var(--danger);
+}
+
+.todo-item.skipped {
+  opacity: 0.72;
+}
+
+.todo-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.todo-seq {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.todo-result {
+  margin-top: 8px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+
+.todo-error {
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: var(--danger);
+}
+
 .dag-legend .dot {
   display: inline-block;
   width: 10px;

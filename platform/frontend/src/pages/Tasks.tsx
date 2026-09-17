@@ -67,8 +67,9 @@ export default function Tasks() {
     <>
       <h2 className="page-title">任务工作台</h2>
       <p className="page-desc">
-        用一句话交办需求，总控 Agent 会自己拆解成 DAG 并逐步执行；需要人工确认的步骤会停下来等你点。
-        点任意一行进入详情可以看到编排 DAG 与实时事件流。共 {total} 条。
+        用一句话交办需求，系统会按关键词把它拆成有序的步骤（选品 → 分析 → 通知）逐步执行；
+        会发邮件这类不可撤销的动作会停下来等你点确认。点任意一行进入详情可以看到
+        每一步的状态、结论与实时事件流。共 {total} 条。
       </p>
 
       {error && <div className="error-box">{error}</div>}

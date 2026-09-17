@@ -96,6 +96,38 @@ export interface Task {
   finished_at: string | null
 }
 
+/**
+ * 任务里的一步。**它同时就是计划和进度** ——
+ *
+ * 旧架构里这两个是分开的：计划来自 `tasks.dag`（静态的图），进度要靠
+ * 从事件流反推节点状态（间接，还得处理"最后一条 node_start 未必是当前
+ * 节点"这种猜测）。新架构的 `task_todos` 既有目标又有状态和结果，
+ * 所以前端只需要这一份数据，不必再猜。
+ *
+ * `kind` 是"这一步需要哪类工具能力"（selection / analytics / notification /
+ * generic），**不是**"谁在执行" —— 执行者只有一个 Agent。
+ */
+export interface Todo {
+  seq: number
+  goal: string
+  kind: string
+  /** pending / running / done / waiting_approval / failed / skipped */
+  status: string
+  /** 这一步的结论（模型写的，也给下一步当输入） */
+  result_summary: string | null
+  artifact_nos: string[] | null
+  tool_names: string[] | null
+  error: string | null
+  /** 卡在闸口时指向 approvals.approval_no */
+  approval_no: string | null
+  llm_calls: number
+  total_tokens: number
+  total_cost: string
+  duration_ms: number | null
+  started_at: string | null
+  finished_at: string | null
+}
+
 export interface TaskDetail extends Task {
   /** 非空 = 停在人工闸口，前端据此弹确认框 */
   approval_payload: ApprovalPayload | null
@@ -104,14 +136,16 @@ export interface TaskDetail extends Task {
   /** 还在迁移态，即"值得继续等" */
   is_pending: boolean
   started_at: string | null
+  /** 有序的 todo 列表。旧任务没有 todo 行，会是空数组 */
+  todos: Todo[]
 }
 
 /**
- * 需要人工确认的载荷，由后端 ``interrupt()`` 抛出（见 ``recorder.mark_waiting_approval``）。
+ * 需要人工确认的载荷（见 `recorder.mark_waiting_approval`）。
  *
- * 字段来自两处拼接：闸口自己的（``action`` / ``reason`` / ``risk``）和计划步
- * 里的（``goal`` / ``agent`` / ``step_id``）。全部可选 —— 接少了不报错，
- * 只是界面上少显示一行。
+ * 闸口挂在**某一次工具调用**上：人批准的正是"这次调用、这些参数"，
+ * 所以 `payload` 里带着工具名、完整参数和人话摘要 `preview` ——
+ * 界面必须把它们显示出来，否则就是在让人盲批。
  */
 export interface ApprovalPayload {
   /** 人话描述“这一步要干什么”。审批横幅的主标题就用它 */
@@ -120,9 +154,17 @@ export interface ApprovalPayload {
   reason?: string
   risk?: 'low' | 'medium' | 'high'
   goal?: string
+  payload?: {
+    todo_seq?: number
+    tool?: string
+    arguments?: Record<string, unknown>
+    /** 由 `describe_preview` 生成的人话摘要 —— 不是模型写的 */
+    preview?: string
+    approval_no?: string
+  }
+  /** 以下字段旧架构用过，保留兼容：接少了不报错，只是少显示一行 */
   agent?: string
   step_id?: string
-  /** 以下两个由通知 Agent 的草稿填，闸口在计划层时可能为空 */
   recipients?: string[]
   subject?: string
   body?: string

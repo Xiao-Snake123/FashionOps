@@ -1,93 +1,89 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { Background, Controls, ReactFlow, Position, type Edge, type Node } from '@xyflow/react'
 import {
   api,
   openTaskStream,
   type Artifact,
-  type Dag,
   type TaskDetail as TaskDetailData,
   type TaskEvent,
+  type Todo,
 } from '../api'
 import { num, StatusBadge } from '../ui'
 import { currentUserSnapshot } from '../auth'
 
-const NODE_W = 158
-const NODE_H = 64
-const GAP_X = 62
-const GAP_Y = 26
-
-type NodeState = 'done' | 'running' | 'failed' | 'waiting'
-
 /**
- * 按拓扑层级给节点算坐标。
+ * 步骤状态 → 中文 + 徽标样式。
  *
- * 为什么不用 dagre 之类的自动布局：这个 DAG 是流水线形状（每个节点最多一个前驱），
- * 自己算层级的代码只有十几行，还能完全控制间距 —— 引一个布局库反而更重。
- *
- * 多前驱的情形这里也能算（取所有前驱层级的最大值），只是不保证连线交叉最少。
- * 真到图复杂了再换自动布局。
+ * `waiting_approval` 刻意**不**用失败色：它没出错，只是在等人点一下。
+ * 把它显示成红色，看的人第一反应是"去查错误"，而实际该做的是去点确认。
  */
-function layout(dag: Dag): Map<string, { x: number; y: number }> {
-  const incoming = new Map<string, string[]>()
-  for (const step of dag.steps) incoming.set(step.step_id, [])
-  for (const step of dag.steps) {
-    for (const dep of step.depends_on ?? []) incoming.get(step.step_id)?.push(dep)
-  }
-
-  const depth = new Map<string, number>()
-  const resolve = (id: string, seen = new Set<string>()): number => {
-    if (depth.has(id)) return depth.get(id)!
-    if (seen.has(id)) return 0 // 防御：数据有环时别无限递归
-    seen.add(id)
-    const parents = incoming.get(id) ?? []
-    const value = parents.length === 0 ? 0 : Math.max(...parents.map((p) => resolve(p, seen))) + 1
-    depth.set(id, value)
-    return value
-  }
-  for (const step of dag.steps) resolve(step.step_id)
-
-  // 按层级分桶，桶内保持计划里的声明顺序
-  const buckets = new Map<number, string[]>()
-  for (const step of dag.steps) {
-    const level = depth.get(step.step_id) ?? 0
-    if (!buckets.has(level)) buckets.set(level, [])
-    buckets.get(level)!.push(step.step_id)
-  }
-
-  const positions = new Map<string, { x: number; y: number }>()
-  for (const [level, ids] of buckets) {
-    ids.forEach((id, index) => {
-      positions.set(id, { x: level * (NODE_W + GAP_X), y: index * (NODE_H + GAP_Y) })
-    })
-  }
-  return positions
+const TODO_STATUS: Record<string, { label: string; badge: string }> = {
+  pending: { label: '待执行', badge: 'dim' },
+  running: { label: '执行中', badge: 'accent' },
+  done: { label: '已完成', badge: 'ok' },
+  waiting_approval: { label: '等待确认', badge: 'warn' },
+  failed: { label: '失败', badge: 'danger' },
+  skipped: { label: '已跳过', badge: 'dim' },
 }
 
-/** 从事件流反推每个节点的状态。 */
-function deriveNodeStates(events: TaskEvent[]): Map<string, NodeState> {
-  const states = new Map<string, NodeState>()
-  for (const event of events) {
-    const node = event.node_name
-    if (!node) continue
-    switch (event.event_type) {
-      case 'node_finished':
-        states.set(node, 'done')
-        break
-      case 'approval_required':
-        states.set(node, 'waiting')
-        break
-      case 'task_failed':
-        states.set(node, 'failed')
-        break
-      default:
-        // node_start 之类不直接映射成 running —— 只靠事件流判断“谁在跑”
-        // 并不可靠（最后一条 node_start 未必还是当前节点），交给
-        // 后端的 current_node 字段
-        break
-    }
-  }
-  return states
+/** kind 是"这一步需要哪类工具能力"，不是"哪个 Agent 来干" —— 执行者只有一个。 */
+const TODO_KIND: Record<string, string> = {
+  selection: '选品',
+  analytics: '经营分析',
+  notification: '通知',
+  generic: '通用',
+}
+
+function TodoList({ todos }: { todos: Todo[] }) {
+  return (
+    <ol className="todo-list">
+      {todos.map((todo) => {
+        const status = TODO_STATUS[todo.status] ?? { label: todo.status, badge: 'dim' }
+        return (
+          <li className={`todo-item ${todo.status}`} key={todo.seq}>
+            <div className="todo-head">
+              <span className="todo-seq">{todo.seq}</span>
+              <span className={`badge ${status.badge}`}>{status.label}</span>
+              <span className="badge dim">{TODO_KIND[todo.kind] ?? todo.kind}</span>
+              <span style={{ flex: 1, fontWeight: 600 }}>{todo.goal}</span>
+              {todo.duration_ms !== null && (
+                <span className="muted mono" style={{ fontSize: 11.5 }}>
+                  {todo.duration_ms} ms · {todo.llm_calls} 次调用 · {num(todo.total_tokens)} token
+                </span>
+              )}
+            </div>
+
+            {/* 这一步的结论。它是下一步的输入 —— 让人看见它，才看得懂
+                "为什么下一步会得出那个结论" */}
+            {todo.result_summary && <div className="todo-result">{todo.result_summary}</div>}
+
+            {Array.isArray(todo.tool_names) && todo.tool_names.length > 0 && (
+              <div className="muted mono" style={{ fontSize: 11.5, marginTop: 5 }}>
+                用过的工具：{todo.tool_names.join(' · ')}
+              </div>
+            )}
+
+            {Array.isArray(todo.artifact_nos) && todo.artifact_nos.length > 0 && (
+              <div className="muted mono" style={{ fontSize: 11.5, marginTop: 3 }}>
+                产出素材：{todo.artifact_nos.join(' · ')}
+              </div>
+            )}
+
+            {todo.error && (
+              <div className="todo-error">失败原因：{todo.error}</div>
+            )}
+
+            {todo.status === 'skipped' && (
+              <div className="muted" style={{ fontSize: 12, marginTop: 5 }}>
+                上游没做成，这一步没有可依赖的输入，所以被跳过（而不是硬跑出一个
+                看起来成功、实则基于缺失数据的结论）。
+              </div>
+            )}
+          </li>
+        )
+      })}
+    </ol>
+  )
 }
 
 function Artifacts({ items }: { items: Artifact[] }) {
@@ -209,57 +205,6 @@ export default function TaskDetail() {
     // loadTask 是 useCallback 出来的，依赖它等同于依赖 taskNo，不会因此重开连接
   }, [shouldStream, taskNo, loadTask])
 
-  const nodeState = useMemo(() => {
-    const states = deriveNodeStates(events)
-    // current_node 是后端记的“正在执行的节点”，比从事件流猜准
-    const current = task?.current_node
-    if (current && task?.status !== 'succeeded' && task?.status !== 'failed') {
-      states.set(current, states.get(current) === 'done' ? 'done' : 'running')
-    }
-    return states
-  }, [events, task])
-
-  const { nodes, edges } = useMemo(() => {
-    if (!task?.dag?.steps?.length) return { nodes: [] as Node[], edges: [] as Edge[] }
-    const positions = layout(task.dag)
-    const nodes: Node[] = task.dag.steps.map((step) => {
-      const state = nodeState.get(step.step_id)
-      const classes = ['dag-node']
-      if (step.approval_required) classes.push('gate')
-      if (state) classes.push(state)
-      return {
-        id: step.step_id,
-        position: positions.get(step.step_id) ?? { x: 0, y: 0 },
-        data: {
-          label: (
-            <div>
-              <div style={{ fontWeight: 600 }}>{step.step_id}</div>
-              <div className="agent">
-                {step.approval_required ? `${step.agent} · 需确认` : step.agent}
-              </div>
-            </div>
-          ),
-        },
-        className: classes.join(' '),
-        style: { width: NODE_W, height: NODE_H, padding: 0 },
-        // 显式指定端口方向，否则默认是上下端口，横向排列时会绕成“从底部出发再回到底部”的弧线
-        sourcePosition: Position.Right,
-        targetPosition: Position.Left,
-        draggable: true,
-      }
-    })
-    const edges: Edge[] = task.dag.steps.flatMap((step) =>
-      (step.depends_on ?? []).map((dep) => ({
-        id: `${dep}->${step.step_id}`,
-        source: dep,
-        target: step.step_id,
-        animated: nodeState.get(dep) === 'done' && nodeState.get(step.step_id) === 'running',
-        style: { stroke: '#3b4a63' },
-      })),
-    )
-    return { nodes, edges }
-  }, [task, nodeState])
-
   const decide = async (approved: boolean) => {
     setDeciding(true)
     setActionError(null)
@@ -288,6 +233,8 @@ export default function TaskDetail() {
   if (!task) return <div className="empty">加载中…</div>
 
   const approval = task.approval_payload
+  const approvalDetail = approval?.payload ?? {}
+  const todos = task.todos ?? []
   const artifacts = ((task.result?.artifacts ?? []) as Artifact[]).filter(Boolean)
   const summary = typeof task.result?.summary === 'string' ? (task.result.summary as string) : null
 
@@ -299,7 +246,13 @@ export default function TaskDetail() {
             {task.title} <StatusBadge status={task.status} />
           </h2>
           <div className="muted mono" style={{ fontSize: 12.5 }}>
-            {task.task_no} · thread_id={task.task_no}
+            {task.task_no}
+            {todos.length > 0 && (
+              <>
+                {' '}
+                · 第 {todos.filter((t) => t.status === 'done').length}/{todos.length} 步
+              </>
+            )}
             {streamState === 'live' && (
               <span style={{ marginLeft: 12, color: 'var(--ok)' }}>
                 <i className="live-dot" />
@@ -324,18 +277,18 @@ export default function TaskDetail() {
             <div style={{ fontSize: 14, marginBottom: 6 }}>{String(approval.action)}</div>
           )}
           <div className="muted" style={{ fontSize: 12.5 }}>
-            由 <span className="mono">{String(approval.agent ?? '—')}</span> 在{' '}
-            <span className="mono">{String(approval.step_id ?? '—')}</span> 触发
+            第 <span className="mono">{String(approvalDetail.todo_seq ?? '—')}</span> 步 · 工具{' '}
+            <span className="mono">{String(approvalDetail.tool ?? '—')}</span>
+            {approvalDetail.approval_no && (
+              <>
+                {' '}
+                · 审批单 <span className="mono">{String(approvalDetail.approval_no)}</span>
+              </>
+            )}
             {approval.risk && (
               <>
                 {' '}
                 · 风险等级 <span className="mono">{String(approval.risk)}</span>
-              </>
-            )}
-            {Array.isArray(approval.recipients) && approval.recipients.length > 0 && (
-              <>
-                {' '}
-                · 收件人 <span className="mono">{approval.recipients.join(', ')}</span>
               </>
             )}
           </div>
@@ -345,12 +298,11 @@ export default function TaskDetail() {
               原因：{String(approval.reason)}
             </div>
           )}
-          {(approval.subject || approval.body) && (
+          {/* preview 是代码按参数生成的人话摘要（`describe_preview`）。
+              必须显示 —— 不看内容就点同意那不叫审批，叫背锅。 */}
+          {approvalDetail.preview && (
             <div className="draft">
-              {approval.subject && (
-                <div style={{ fontWeight: 600 }}>主题：{String(approval.subject)}</div>
-              )}
-              {approval.body && <div style={{ marginTop: 6 }}>{String(approval.body)}</div>}
+              <div style={{ whiteSpace: 'pre-wrap' }}>{String(approvalDetail.preview)}</div>
             </div>
           )}
           {approval.question && (
@@ -418,8 +370,12 @@ export default function TaskDetail() {
             <div>{task.task_type}</div>
           </div>
           <div>
-            <div className="stat-label">当前节点</div>
-            <div className="mono">{task.current_node ?? '—'}</div>
+            <div className="stat-label">当前步骤</div>
+            <div className="mono">
+              {todos.find((t) => t.status === 'running' || t.status === 'waiting_approval')?.goal ??
+                task.current_node ??
+                '—'}
+            </div>
           </div>
           <div>
             <div className="stat-label">LLM 调用 / Token</div>
@@ -434,48 +390,25 @@ export default function TaskDetail() {
         </div>
       </div>
 
+      {/* 执行步骤。**线性列表，不是 DAG** ——
+          真实需求就是"选品 → 出报表 → 发邮件"一条线，画成图只增加阅读成本。
+          计划由代码按关键词拆（`agents/workplan.py`），所以提交后立刻就能看到。 */}
       <div className="card" style={{ marginBottom: 14 }}>
-        <h3>编排计划</h3>
-        {task.dag?.reasoning && (
-          <div className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>
-            规划理由：{task.dag.reasoning}
-          </div>
-        )}
-        {task.dag?.legacy && (
-          <div className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>
-            这是 seed 灌入的演示任务，DAG 形状已在后端归一化。
-          </div>
-        )}
-        <div className="dag-legend">
-          <span>
-            <i className="dot" style={{ background: 'var(--ok)' }} />
-            已完成
-          </span>
-          <span>
-            <i className="dot" style={{ background: 'var(--accent)' }} />
-            执行中
-          </span>
-          <span>
-            <i className="dot" style={{ background: 'var(--danger)' }} />
-            失败
-          </span>
-          <span>
-            <i className="dot" style={{ background: 'var(--warn)' }} />
-            人工确认闸口（LangGraph interrupt）
-          </span>
-        </div>
-        {nodes.length > 0 ? (
-          <div style={{ height: 340, border: '1px solid var(--border)', borderRadius: 8 }}>
-            <ReactFlow nodes={nodes} edges={edges} fitView proOptions={{ hideAttribution: true }}>
-              <Background color="#222c3e" gap={18} />
-              <Controls showInteractive={false} />
-            </ReactFlow>
-          </div>
+        <h3>
+          执行步骤
+          {todos.length > 0 && (
+            <span className="muted" style={{ fontSize: 12.5, fontWeight: 400, marginLeft: 8 }}>
+              共 {todos.length} 步 · 已完成 {todos.filter((t) => t.status === 'done').length} 步
+            </span>
+          )}
+        </h3>
+        {todos.length > 0 ? (
+          <TodoList todos={todos} />
         ) : (
-          // 刚提交的任务在 plan 节点跑完前是没有 DAG 的（模型拆解要 15~30 秒）。
-          // 这里得说一句「在生成」，否则一块空白看起来像坏了
           <div className="empty">
-            {task.is_pending ? '正在生成计划（模型拆解需求中，约 15~30 秒）…' : '这个任务没有编排计划'}
+            {task.is_pending
+              ? '正在开始执行（第一步还没落库）…'
+              : '这个任务没有步骤记录 —— 它可能是旧架构跑的（那时的计划存在 tasks.dag 里）。'}
           </div>
         )}
       </div>

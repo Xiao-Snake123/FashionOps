@@ -63,9 +63,15 @@ from fashionops.agents.execution import (
     release,
     submit,
 )
-from fashionops.api.schemas import Page, TaskDetailOut, TaskEventOut, TaskOut
+from fashionops.api.schemas import (
+    Page,
+    TaskDetailOut,
+    TaskEventOut,
+    TaskOut,
+    TaskTodoOut,
+)
 from fashionops.db import get_db
-from fashionops.db.models import Task
+from fashionops.db.models import Task, TaskTodo
 from fashionops.security.deps import (
     StreamPrincipal,
     record_audit,
@@ -355,11 +361,16 @@ def get_task(
     if task is None:
         raise HTTPException(status_code=404, detail=f"任务 {task_no} 不存在")
 
+    todos = session.scalars(
+        select(TaskTodo).where(TaskTodo.task_id == task.id).order_by(TaskTodo.seq)
+    ).all()
+
     detail = TaskDetailOut.model_validate(task)
     # 这两个是**进程内**状态，不在库里，得手工补 ——
     # status 落库有延迟，光看它会以为任务还在跑
     detail.is_running = is_running(task_no)
     detail.is_pending = task.status in _RUNNING_STATES
+    detail.todos = [TaskTodoOut.model_validate(row) for row in todos]
     return detail
 
 
