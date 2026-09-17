@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Generic, TypeVar
@@ -113,6 +114,29 @@ class TaskOut(ORMBase):
     total_cost: Decimal
     created_at: datetime
     finished_at: datetime | None = None
+
+    @field_validator("result", mode="before")
+    @classmethod
+    def _coerce_result(cls, value: object) -> object:
+        """容忍历史行里 `result` 被写成**字符串**的情况。
+
+        库里有一行（``T260908009``）的 ``result`` 存的是字符串 ``"null"``
+        —— 那是早期把 JSON 列当文本写进去留下的。``result`` 声明成
+        ``dict | None``，拿到字符串就 500，而且**只在这一行落进分页区间时**
+        才炸（``page_size=200`` 才覆盖得到它），所以这个 bug 藏了很久。
+
+        处理原则是 §8.5 那条：**别为一行演示脏数据写迁移脚本**，
+        在读取时兼容成本最低。解析不出来就当 None ——
+        结果字段缺失只会让"产出"那一块少显示一点，
+        比整个列表页 500 好得多。
+        """
+        if not isinstance(value, str):
+            return value
+        try:
+            parsed = json.loads(value)
+        except (ValueError, TypeError):
+            return None
+        return parsed if isinstance(parsed, dict) else None
 
     @field_validator("dag", mode="before")
     @classmethod
