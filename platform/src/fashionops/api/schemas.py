@@ -122,7 +122,7 @@ class TaskOut(ORMBase):
         放这里（而不是只在详情接口里调一次）的原因是：列表页和详情页
         必须拿到同一种形状，否则前端每处渲染都要写两套分支。
         """
-        from fashionops.agents.planner import normalize_dag
+        from fashionops.agents.recorder import normalize_dag
 
         if isinstance(value, dict):
             return normalize_dag(value)

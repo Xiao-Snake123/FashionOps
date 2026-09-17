@@ -462,6 +462,61 @@ def task_snapshot(task_no: str) -> dict[str, Any] | None:
         }
 
 
+def normalize_dag(raw: dict[str, Any] | None) -> dict[str, Any] | None:
+    """把库里的计划统一成一种形状，让前端只处理一种。
+
+    ## 为什么放在 recorder 里
+
+    因为 ``tasks.dag`` 就是这一层写进去的 —— "写进去的形状"和
+    "读出来的兼容逻辑"放在一起，改一处不会漏另一处。
+    （这段从被删掉的 `planner.py` 搬来，逻辑一字未改。）
+
+    ## 库里存着三种历史形状
+
+    * 旧（seed 灌的演示任务）：``{nodes: [{id, name, agent, interrupt}], edges: [[from, to]]}``
+    * W4 起的真任务：``{reasoning, steps: [{step_id, agent, goal, depends_on, approval_required}]}``
+    * 现在的真任务：``{mode: "todo_list", todos: [...], steps: [...]}`` ——
+      它自带 ``steps``，直接原样返回
+
+    兼容逻辑放后端而不是前端：前端一旦要同时认几种形状，
+    每处渲染都得写 ``if`` 分支；以后加第四种时改的地方会翻倍。
+
+    不改库数据：已写入的行改造要写迁移脚本，而旧演示任务早晚会被清掉，
+    在读取时兼容成本最低。
+    """
+    if not raw:
+        return None
+    if "steps" in raw:
+        return raw  # 已经是新形状
+
+    nodes = raw.get("nodes") or []
+    edges = raw.get("edges") or []
+    if not nodes:
+        return raw
+
+    incoming: dict[str, list[str]] = {}
+    for edge in edges:
+        if isinstance(edge, (list, tuple)) and len(edge) == 2:
+            incoming.setdefault(str(edge[1]), []).append(str(edge[0]))
+
+    steps = [
+        {
+            "step_id": n.get("id"),
+            "agent": n.get("agent") or "",
+            # 旧形状的 name 是给人看的步骤名，对应新形状的 goal
+            "goal": n.get("name") or "",
+            "depends_on": incoming.get(str(n.get("id")), []),
+            "approval_required": bool(n.get("interrupt")),
+        }
+        for n in nodes
+    ]
+    return {
+        "reasoning": "（历史任务：由 seed 生成的演示数据，已归一化为新形状）",
+        "steps": steps,
+        "legacy": True,
+    }
+
+
 def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value else None
 
@@ -476,6 +531,7 @@ __all__ = [
     "EVENT_RESUMED",
     "EVENT_STARTED",
     "TaskRecorder",
+    "normalize_dag",
     "null_recorder",
     "read_events",
     "task_snapshot",

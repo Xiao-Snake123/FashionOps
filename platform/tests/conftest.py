@@ -23,6 +23,52 @@ from __future__ import annotations
 import secrets
 from typing import Any
 
+import pytest
+
+
+@pytest.fixture
+def db(tmp_path, monkeypatch):  # noqa: ANN001, ANN201
+    """临时 SQLite 库。
+
+    ## 为什么必须有它
+
+    没有它的话，任何走 `session_scope()` 的代码（记录器、审批单、todo）
+    都会打到**开发库**上 —— 跑一次测试污染一次真实数据，
+    而且测试之间会互相看见对方留下的任务。
+
+    做法是把 `fashionops.db.base.get_settings` 换成指向 `tmp_path` 的配置，
+    再建表。改动是 monkeypatch 的，夹具结束自动还原。
+    """
+    import fashionops.db.base as db_base
+    from fashionops.config import Settings
+    from fashionops.db.base import Base, build_engine, reset_engine
+
+    settings = Settings(data_dir=tmp_path, db_host=None)
+    reset_engine()
+    monkeypatch.setattr(db_base, "get_settings", lambda: settings)
+
+    engine = build_engine(settings)
+    Base.metadata.create_all(engine)
+    yield engine
+    Base.metadata.drop_all(engine)
+    engine.dispose()
+    reset_engine()
+
+
+@pytest.fixture(autouse=True)
+def tools_registered():
+    """把业务工具注册进进程内注册表。
+
+    `needs_approval` / 工具目录裁剪都依赖它 —— 没注册的话，
+    任务执行会在"工具不存在"上失败，而报错点离原因很远。
+    注册表本身不允许重名注册，所以先判空。
+    """
+    from fashionops.gateway.registry import registry
+    from fashionops.tools import register_all_tools
+
+    if not len(registry):
+        register_all_tools(registry)
+
 #: 测试用户的固定用户名。用固定值而不是随机值，是为了让失败时的报错可读 ——
 #: `pytest_a1b2c3d4` 这种名字出现在报错里会让人以为是数据问题。
 TEST_ADMIN_USERNAME = "pytest_admin"

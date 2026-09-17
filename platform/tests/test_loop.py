@@ -14,49 +14,19 @@
 
 from __future__ import annotations
 
-import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-import fashionops.db.base as db_base
 from fashionops.agents.loop import TASK_AGENT_NAME, _catalog_for, run_task
 from fashionops.agents.recorder import TaskRecorder
-from fashionops.config import Settings
-from fashionops.db.base import Base, build_engine, reset_engine
 from fashionops.db.models import Task, TaskEvent, TaskTodo
 from fashionops.db.models_chat import APPROVAL_STATUS_APPROVED, Approval
 from fashionops.llm.mock import MockModelClient, MockReply
 from fashionops.llm.types import ToolCall
 from fashionops.tools import AGENT_SCOPES
 
-
-@pytest.fixture
-def db(tmp_path, monkeypatch):  # noqa: ANN001, ANN201
-    """临时 SQLite 库。
-
-    和 `tests/test_chat.py` 的 `db` 夹具同一套做法：替换
-    `db.base.get_settings`，让 `session_scope()` 落在临时库上 ——
-    不这么做的测试会打到开发库，跑一次污染一次。
-    """
-    settings = Settings(data_dir=tmp_path, db_host=None)
-    reset_engine()
-    monkeypatch.setattr(db_base, "get_settings", lambda: settings)
-
-    engine = build_engine(settings)
-    Base.metadata.create_all(engine)
-    yield engine
-    Base.metadata.drop_all(engine)
-    engine.dispose()
-    reset_engine()
-
-
-@pytest.fixture(autouse=True)
-def tools_registered():
-    from fashionops.gateway.registry import registry
-    from fashionops.tools import register_all_tools
-
-    if not len(registry):
-        register_all_tools(registry)
+# `db`（临时库）与 `tools_registered`（注册工具）两个夹具在 tests/conftest.py 里，
+# 这里直接用 —— 它们是"任何碰数据库的测试都要的前置"，不该每个文件抄一遍。
 
 
 def _new_task(task_no: str, request: str) -> None:

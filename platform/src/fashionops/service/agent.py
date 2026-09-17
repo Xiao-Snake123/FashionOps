@@ -42,7 +42,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from fashionops.agents.state import RunContext
+from fashionops.agents.context import RunContext
 from fashionops.db import session_scope
 from fashionops.db.base import utcnow
 from fashionops.db.models import Ticket

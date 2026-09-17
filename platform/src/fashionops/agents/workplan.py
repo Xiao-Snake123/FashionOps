@@ -27,18 +27,31 @@ todo 是**线性有序列表**，固定成业务上正确的顺序
 ``selection → analytics → notification``，**不按关键词在句子里出现的先后**。
 "发给老板再选款"和"选款再发给老板"拆出来必须是同一个计划。
 
-## 次序依赖
+## 词表的来历
 
-暂时复用 `planner.py` 的 `_KEYWORDS` / `_matches_request`（历史验证过的
-词表，别新写一份）；T6 删 `planner.py` 时把它们**搬进本模块**，
-`_KEYWORDS` 里那条"为什么用正则而不是纯子串"的注释必须一起搬。
+`_KEYWORDS` 从被删掉的 `planner.py` 原样搬来 —— 那是按"运营真的会怎么说话"
+校准过的词表，别新写一份。
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
-from fashionops.agents.planner import _KEYWORDS, _matches_request
+#: 关键词 → 工作类别。用的是"运营真的会怎么说话"，不是技术术语。
+#:
+#: **必须用正则而不是纯子串**：运营说"帮我选 3 款女装"时中间夹了数字和空格，
+#: 纯子串匹配 ``"选款"`` 命中不了 —— 结果就是选品那步被整个丢掉，
+#: 而用户明明要的就是选品。这条是被真实输入逼出来的，别"优化"成 ``in`` 判断。
+_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "selection": (r"选\s*\d*\s*款", "选品", "挑款", "挑选", "上新", "款式"),
+    "analytics": ("报表", "分析", "数据", "日报", "周报", "月报", "经营", "指标"),
+    "notification": ("发给", "邮件", "通知", "告知", "汇报"),
+}
+
+def _matches_request(pattern: str, request: str) -> bool:
+    return re.search(pattern, request) is not None
+
 
 #: 三类工作，**业务上的正确顺序**（先有数据，再分析，最后才对外发通知）。
 #: 列表顺序就是 todo 的 seq 顺序。

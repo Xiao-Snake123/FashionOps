@@ -1,33 +1,33 @@
-"""Agent 层：状态定义、checkpointer、以及后续的 9 个业务 Agent。
+"""Agent 层。
 
-阶段 1（W2）先交付**编排内核**：
+## 现在的执行架构（见 docs/12-AI协作交接.md）
 
-* ``state``      —— 跨节点流转的状态定义 + 预算控制 + 依赖上下文
-* ``checkpoint`` —— 任务状态持久化，支撑"中断可恢复"与 HITL
+**一个 Agent + 显式 todo 列表**：
 
-9 个业务 Agent 在 W3/W4 落地，每个都只负责自己的决策逻辑，
-外部调用统一走 ``fashionops.gateway``。
+```
+agents/workplan.py   代码出计划（纯函数，按关键词判）
+  → agents/loop.py   逐步执行：同一个 Agent，每步按 kind 裁工具目录
+  → agents/recorder.py   旁路记账（事件流 + agent_runs，失败不影响业务）
+agents/execution.py  提交 / 去重 / 续跑（HTTP 与对话共用）
+```
 
-关键约定（写在最前面，因为很容易做错）：
+## 留在这里的纯逻辑模块
 
-1. **状态里只放可序列化的数据**。网关、模型客户端、数据库会话走
-   ``RunContext``，通过 ``config['configurable']['ctx']`` 传递。
-2. **节点不做治理**。限流、熔断、重试、审计全部在工具网关里，
-   Agent 只管"要调什么、拿到结果后怎么决策"。
-3. **预算在状态里累计**。没有预算约束的 Agent 会一直重试到把配额烧光。
+* ``scoring`` / ``analytics_rules`` —— **算数和判定**，可复现、可审计。
+  这两个模块是"表达交给模型、算数交给代码"那条线的落点，改之前先读它们的头部注释。
+* ``business`` 工具在 ``fashionops.tools.business``（它们是网关工具，不放这里）
+
+## 已经删掉的（别找回来）
+
+``planner`` / ``orchestrator`` / ``runner`` / ``checkpoint`` / ``state`` ——
+它们是"模型出 DAG → hub 路由 → 专用节点"那套架构的机器。
+换成线性 todo 之后，图校验、环检测、传递阻断、checkpoint 恢复全部不再需要；
+理由和证据写在交接文档 §1 与 §5。**词表和兼容逻辑没有丢**：
+前者搬进了 ``workplan.py``，后者搬进了 ``recorder.normalize_dag``。
 """
 
 from __future__ import annotations
 
-from fashionops.agents.checkpoint import (
-    get_checkpointer,
-    history,
-    latest_state,
-    pending_nodes,
-    reset_checkpointer_cache,
-    snapshot,
-    thread_config,
-)
 from fashionops.agents.scoring import (
     HardConstraints,
     Rejection,
@@ -38,57 +38,19 @@ from fashionops.agents.scoring import (
     rank_candidates,
     score_candidates,
 )
-from fashionops.agents.selection import (
-    SelectionCriteria,
-    SelectionNarrative,
-    make_selection_node,
-    parse_criteria,
-)
-from fashionops.agents.state import (
-    STATE_DEFAULTS,
-    ApprovalRequest,
-    Artifact,
-    BudgetExceeded,
-    RunContext,
-    StepRecord,
-    TaskState,
-    budget_status,
-    check_budget,
-    get_context,
-    new_state,
-    step_update,
-)
+from fashionops.agents.workplan import TodoSpec, matched_kinds, plan_as_text, plan_todos
 
 __all__ = [
-    "STATE_DEFAULTS",
-    "ApprovalRequest",
-    "Artifact",
-    "BudgetExceeded",
     "HardConstraints",
     "Rejection",
-    "RunContext",
     "ScoreWeights",
     "ScoredCandidate",
-    "SelectionCriteria",
-    "SelectionNarrative",
     "SelectionOutcome",
-    "StepRecord",
-    "TaskState",
+    "TodoSpec",
     "apply_constraints",
-    "budget_status",
-    "check_budget",
-    "get_checkpointer",
-    "get_context",
-    "history",
-    "latest_state",
-    "make_selection_node",
-    "new_state",
-    "parse_criteria",
-    "pending_nodes",
+    "matched_kinds",
+    "plan_as_text",
+    "plan_todos",
     "rank_candidates",
-    "reset_checkpointer_cache",
     "score_candidates",
-    "snapshot",
-    "step_update",
-    "thread_config",
 ]

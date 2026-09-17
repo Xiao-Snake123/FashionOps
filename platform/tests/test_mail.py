@@ -1,25 +1,27 @@
-"""邮件闸门 + 投递 + 通知 Agent 测试。
+"""邮件闸门 + 投递测试。
 
-分三层，和前几个 Agent 的测试结构一致：
+分三层：
 
 1. **闸门是纯函数** —— 不碰网络，所以能把每个分支密集测一遍
 2. **投递后端** —— 用假后端替换，在不发信的前提下走完整链路
-3. **端到端** —— 真实 SQLite 临时库 + 真实工具网关 + mock 模型
+3. **工具层端到端** —— 真实 SQLite 临时库 + 真实工具网关
 
 重点断言的是**被拦下的邮件也要落库** —— 这是这个模块最容易被做错、
 也最难在事后发现的地方。
+
+（原来的第 4 层"通知节点端到端"随 `notification.py` 一起删了：
+新架构里"起草邮件"由 Agent 自己写、"发送"由 `mail.send` 工具做，
+两者分别在 `tests/test_loop.py`（发信前挂闸口）和本文件第 3 层被覆盖。）
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from decimal import Decimal
 
 import pytest
 from sqlalchemy.orm import Session
 
-from fashionops.agents.notification import EmailDraft, make_notification_node
-from fashionops.agents.state import Artifact, RunContext, new_state
+from fashionops.agents.context import RunContext
 from fashionops.db.base import Base, build_engine, get_engine, reset_engine, utcnow
 from fashionops.db.models import Asset, EmailMessage
 from fashionops.gateway import (
@@ -31,7 +33,7 @@ from fashionops.gateway import (
     ToolGateway,
     ToolRegistry,
 )
-from fashionops.llm import MockModelClient, MockReply
+from fashionops.llm import MockModelClient
 from fashionops.mail import (
     AttachmentInfo,
     DryRunSender,
@@ -519,171 +521,3 @@ class TestMailTool:
         with Session(get_engine()) as session:
             assert session.query(EmailMessage).count() == 1
 
-
-# ---------------------------------------------------------------------------
-# 通知节点
-# ---------------------------------------------------------------------------
-def _draft_reply() -> MockReply:
-    return MockReply(
-        content=EmailDraft(
-            recipients=["ops@example.com"],
-            subject="【日报】近 30 天经营数据与直播退货率告警",
-            body_text=(
-                "近 30 天 GMV 154109.75 元，订单 389 单，退款金额 19710.42 元。\n"
-                "需要重点关注：直播渠道退货率 40.0%，超过 30.0% 红线。\n"
-                "附件是完整报表，请查收。"
-            ),
-            tone_note="先讲告警再讲常规数据",
-        ).model_dump_json()
-    )
-
-
-class TestNotificationNode:
-    def _state(self, **findings) -> dict:  # noqa: ANN003
-        state = new_state(task_no="T200", user_request="出一份日报并发给运营组")
-        state["findings"] = {"analytics": _analytics_findings(), **findings}
-        return state
-
-    def test_drafts_and_dry_runs(self, seeded_env):
-        ctx, _ = _build_context(model=MockModelClient(script=[_draft_reply()]))
-        update = make_notification_node(ctx)(self._state())
-
-        assert update["steps"][0].status == "succeeded"
-        findings = update["findings"]["notification"]
-        assert findings["decision"] == "dry_run"
-        assert findings["sent"] is False
-        assert findings["message_no"].startswith("EM")
-        assert findings["attachment_asset_nos"] == ["AS2609120001"]
-
-    def test_attachment_taken_from_report_artifact(self, seeded_env):
-        """附件来自上游 Artifact 的 ref，而不是模型自由发挥。"""
-        ctx, _ = _build_context(model=MockModelClient(script=[_draft_reply()]))
-        state = self._state()
-        state["artifacts"] = [
-            Artifact(kind="report", name="经营分析.xlsx", ref="AS2609120001", produced_by="analytics")
-        ]
-        update = make_notification_node(ctx)(state)
-        assert update["findings"]["notification"]["attachment_asset_nos"] == ["AS2609120001"]
-
-    def test_blocked_emits_approval_request(self, seeded_env, monkeypatch):
-        """被拦截时产出审批请求，让"要发但发不出去"在界面上可见。
-
-        注意节点状态仍然是 succeeded —— 策略拦截不是技术故障，
-        重试一万次也不会让白名单多一条配置。
-        """
-        import fashionops.tools.mail as mail_tool
-        from fashionops.config import Settings
-
-        monkeypatch.setattr(
-            mail_tool,
-            "get_settings",
-            lambda: Settings(
-                data_dir=seeded_env.data_dir,
-                db_host=None,
-                mail_enabled=True,
-                mail_dry_run=True,
-                mail_send_allowlist="@corp.com",  # example.com 不在里面
-            ),
-        )
-        ctx, _ = _build_context(model=MockModelClient(script=[_draft_reply()]))
-        update = make_notification_node(ctx)(self._state())
-
-        assert update["steps"][0].status == "succeeded"
-        assert update["findings"]["notification"]["decision"] == "blocked_whitelist"
-        approval = update["approval"]
-        assert "人工发送邮件" in approval.action
-        assert approval.payload["gate_decision"] == "blocked_whitelist"
-        assert update["errors"]
-
-    def test_explicit_recipients_win(self, seeded_env):
-        """编排层给了收件人就不让模型猜。"""
-        ctx, _ = _build_context(model=MockModelClient(script=[_draft_reply()]))
-        update = make_notification_node(ctx, recipients=["boss@example.com"])(self._state())
-        findings = update["findings"]["notification"]
-        assert findings["draft"]["recipients"] == ["boss@example.com"]
-        assert findings["draft"]["recipient_source"] == "caller"
-
-    def test_recipient_regex_fallback(self, seeded_env):
-        """模型没提取出收件人时，用正则从需求里捞。
-
-        实测 glm-4-flash 对「发给 ops@example.com」这种**明确写在需求里**的
-        地址都没有稳定地提取出来。邮箱是完全规则的东西，正则能 100% 提对，
-        让它去靠模型"理解"属于自找不确定性。
-        """
-        # 脚本里 recipients 留空，模拟模型没提取出来
-        empty_draft = MockReply(content=EmailDraft(
-            recipients=[],
-            subject="【日报】",
-            body_text="GMV 154109.75 元。",
-        ).model_dump_json())
-        ctx, _ = _build_context(model=MockModelClient(script=[empty_draft]))
-        state = self._state()
-        state["user_request"] = "出一份日报，发给 ops@example.com 和 Boss@Example.com"
-
-        update = make_notification_node(ctx)(state)
-        findings = update["findings"]["notification"]
-        assert findings["draft"]["recipient_source"] == "regex_fallback"
-        # 去重是不区分大小写的
-        assert findings["draft"]["recipients"] == ["ops@example.com", "Boss@Example.com"]
-
-    def test_no_recipient_anywhere_asks_for_human(self, seeded_env):
-        """需求里没地址、调用方也没给 → 不能带着空收件人去调工具。
-
-        真去调的话网关只会回一个 `[INVALID_ARGUMENTS] 参数校验失败：1 处不合法`，
-        看不出是哪个参数、更看不出"其实是你没给收件人"。
-        """
-        empty_draft = MockReply(content=EmailDraft(
-            recipients=[], subject="【日报】", body_text="正文"
-        ).model_dump_json())
-        ctx, _ = _build_context(model=MockModelClient(script=[empty_draft]))
-        state = self._state()
-        state["user_request"] = "出一份日报"  # 没有任何邮箱
-
-        update = make_notification_node(ctx)(state)
-        assert update["steps"][0].status == "failed"
-        assert "收件人" in update["steps"][0].error
-        # 没调工具 —— 空收件人根本不该发出去
-        assert update["steps"][0].tool_calls == []
-        # 草稿没丢，人在审批里补个地址就能发
-        assert update["approval"].payload["body_text"] == "正文"
-
-    def test_missing_upstream_findings_fails_cleanly(self, seeded_env):
-        """上游一条结论都没有时才失败 —— 有任意一条就该能干活。
-
-        第一版硬依赖 ``findings['analytics']``，结果真实模型把「选品 + 分析」
-        合并成一个步骤时，通知节点直接失败 —— 而选品结论本身就值得发一封邮件。
-        这个 Agent 的职责是"把已有结论组织成邮件"，不是"等某个特定上游"。
-        """
-        ctx, _ = _build_context(model=MockModelClient(script=[_draft_reply()]))
-        state = new_state(task_no="T201", user_request="发邮件")
-        update = make_notification_node(ctx)(state)
-        assert update["steps"][0].status == "failed"
-        assert "上游" in update["steps"][0].error
-
-    def test_works_from_selection_only(self, seeded_env):
-        """只有选品结论、没有分析结论时也要能发邮件。"""
-        ctx, _ = _build_context(model=MockModelClient(script=[_draft_reply()]))
-        state = new_state(task_no="T202", user_request="选品结果发给 ops@example.com")
-        state["findings"] = {
-            "selection": {
-                "criteria": {"category": "女装", "count": 3},
-                "passed": 3,
-                "filtered_out": 1,
-                "overall": "选中 3 款秋季女装",
-            }
-        }
-        update = make_notification_node(ctx)(state)
-        assert update["steps"][0].status == "succeeded"
-        assert update["findings"]["notification"]["decision"] == "dry_run"
-
-    def test_budget_accumulates(self, seeded_env):
-        ctx, _ = _build_context(model=MockModelClient(script=[_draft_reply()]))
-        update = make_notification_node(ctx)(self._state())
-        assert update["llm_calls"] == 1
-        assert update["total_tokens"] > 0
-        assert Decimal(str(update["total_cost"])) >= Decimal("0")
-
-    def test_tools_are_audited(self, seeded_env):
-        ctx, audit = _build_context(model=MockModelClient(script=[_draft_reply()]))
-        make_notification_node(ctx)(self._state())
-        assert "mail.send" in {r.tool_name for r in audit.entries}

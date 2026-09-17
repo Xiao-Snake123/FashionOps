@@ -1,34 +1,35 @@
-"""数据分析 Agent 测试。
+"""数据分析 —— 聚合口径与告警规则的测试。
 
-分三层：
+分两层：
 
 1. **聚合 SQL**（真实临时库）—— 退货率口径、outer join 不漏单、三种分组维度
-2. **节点端到端** —— 真实 SQL + 真实网关 + mock 模型，跑完整节点
-3. **产物的可用性** —— 把生成的 xlsx **读回来**验证，而不是只断言"返回了 URL"
+2. **告警规则是纯函数** —— 阈值、小样本不下结论、排序
 
-第 3 层是这个文件里最有价值的部分。只断言 ``export.ok is True``
-的话，一个生成了空工作簿、或者所有数字都变成 ``####`` 的实现照样能过。
+## 原来的"节点端到端"去哪了
+
+那组测试跑的是已删除的 `make_analytics_node`（它自己调模型写解读、
+生成报表）。新架构里这一步拆成了工具调用 + Agent 自己写解读：
+
+* 工具层（报表能生成、xlsx 能读回来）→ `tests/test_business_tools.py`
+* 端到端（挂闸口、落库、续跑）→ `tests/test_loop.py`
+
+`analytics_rules.py` **一行都没改**（交接文档明确要求），
+所以它的断言原样保留 —— 阈值判定是这个项目"算数交给代码"那条线的样板。
 """
 
 from __future__ import annotations
 
-import io
 from datetime import timedelta
 from decimal import Decimal
 
 import pytest
 
-from fashionops.agents.analytics import (
-    AnalyticsNarrative,
-    MetricInsight,
-    make_analytics_node,
-)
 from fashionops.agents.analytics_rules import (
     MIN_ORDERS_FOR_JUDGEMENT,
     Alert,
     detect_alerts,
 )
-from fashionops.agents.state import RunContext, new_state
+from fashionops.agents.context import RunContext
 from fashionops.db.base import Base, build_engine, reset_engine, utcnow
 from fashionops.db.models import SKU, Order, Product
 from fashionops.gateway import (
@@ -40,7 +41,7 @@ from fashionops.gateway import (
     ToolGateway,
     ToolRegistry,
 )
-from fashionops.llm import MockModelClient, MockReply
+from fashionops.llm import MockModelClient
 from fashionops.tools import AGENT_SCOPES, register_all_tools
 
 # ===========================================================================
@@ -384,227 +385,3 @@ class TestAlertRules:
         )
         assert alert.model_dump()["level"] == "critical"
 
-
-# ===========================================================================
-# 3. 节点端到端
-# ===========================================================================
-def _narrative_reply() -> MockReply:
-    """把预设结论转成一条脚本回复。
-
-    ``MockReply`` 只有 ``content`` / ``tool_calls`` 两个字段（刻意不做成
-    ``value``），所以要把 Pydantic 实例序列化成 JSON 字符串 ——
-    这也正是真实模型返回的形态，测起来更接近实际。
-    """
-    return MockReply(
-        content=AnalyticsNarrative(
-            summary="近 30 天 GMV 1450 元，共 7 单，退货率 14.3%，整体健康。",
-            insights=[
-                MetricInsight(
-                    dimension="抖音渠道",
-                    observation="抖音 2 单里退款 1 单，退货率 50%，远高于整体 14.3%",
-                    action="拉取抖音退款原因明细，先看是尺码问题还是描述不符",
-                ),
-                MetricInsight(
-                    dimension="天猫渠道",
-                    observation="天猫只有 240 元 GMV，占比 16.6%，明显低于淘宝",
-                    action="确认天猫是否缺货导致曝光不足",
-                ),
-            ],
-            data_quality_notes=["有 1 单关联商品已被删除，归入「未分类」"],
-        ).model_dump_json()
-    )
-
-
-class TestAnalyticsNodeEndToEnd:
-    def test_produces_report_artifact(self, seeded_env):
-        ctx, _ = _build_context(model=MockModelClient(script=[_narrative_reply()]))
-        state = new_state(task_no="T100", user_request="出一份经营分析报表")
-
-        update = make_analytics_node(ctx)(state)
-
-        assert update["steps"][0].status == "succeeded"
-        assert update["steps"][0].node == "analytics"
-        artifacts = update["artifacts"]
-        assert len(artifacts) == 1
-        assert artifacts[0].kind == "report"
-        assert artifacts[0].produced_by == "analytics"
-        assert artifacts[0].ref.startswith("AS")
-        assert artifacts[0].name.endswith(".xlsx")
-
-    def test_findings_are_written_back(self, seeded_env):
-        ctx, _ = _build_context(model=MockModelClient(script=[_narrative_reply()]))
-        update = make_analytics_node(ctx)(new_state(task_no="T101", user_request="报表"))
-        findings = update["findings"]["analytics"]
-        assert len(findings["insights"]) == 2
-        assert findings["totals"]["gmv"] == pytest.approx(1450.0)
-        assert findings["report"]["asset_no"].startswith("AS")
-        assert findings["by_channel"]  # 渠道维度也写回了
-        assert findings["alerts"] is not None
-
-    def test_critical_count_comes_from_code_not_model(self, seeded_env):
-        """关键：critical_count 由代码算，模型影响不了它。
-
-        真实跑 glm-4-flash 时它把 14.69% 的退货率标成了 critical ——
-        所以严重程度绝不能来自模型的自由文本。
-        """
-        ctx, _ = _build_context(model=MockModelClient(script=[_narrative_reply()]))
-        update = make_analytics_node(ctx)(new_state(task_no="T101b", user_request="报表"))
-        findings = update["findings"]["analytics"]
-
-        # 临时库每个分组都只有几单 → 不足 20 单，退货率维度只报"样本不足"
-        codes = {a["code"] for a in findings["alerts"]}
-        assert "insufficient_sample" in codes
-        assert "return_rate" not in codes
-        # 但整体退款金额占 GMV 450/1450 = 31%，这个口径不受样本量限制 → critical
-        criticals = [a for a in findings["alerts"] if a["level"] == "critical"]
-        assert [a["code"] for a in criticals] == ["refund_ratio"]
-        assert findings["critical_count"] == len(criticals) == 1
-        # 而模型在脚本里写了「退货率 50%」也照样改不了这个数字
-        assert any("50%" in i["observation"] for i in findings["insights"])
-
-    def test_model_schema_has_no_severity_field(self):
-        """模型不该被要求判断严重程度，所以 schema 里干脆不放这个字段。"""
-        assert "severity" not in MetricInsight.model_fields
-        assert "severity" not in AnalyticsNarrative.model_fields
-
-    def test_generated_workbook_is_readable(self, seeded_env):
-        """把 xlsx 读回来 —— 断言它真是一份能打开、有内容的报表。"""
-        from openpyxl import load_workbook
-
-        ctx, _ = _build_context(model=MockModelClient(script=[_narrative_reply()]))
-        update = make_analytics_node(ctx)(new_state(task_no="T102", user_request="报表"))
-
-        asset_no = update["artifacts"][0].ref
-        key = update["artifacts"][0].meta["storage_key"]
-
-        from fashionops.storage import get_storage
-
-        payload = get_storage().read(key)
-        assert len(payload) > 2000  # 空工作簿不会这么大
-
-        wb = load_workbook(io.BytesIO(payload))
-        assert set(wb.sheetnames) == {"类目汇总", "渠道汇总", "整体"}
-
-        ws = wb["类目汇总"]
-        assert ws["A1"].value  # 大标题
-        # 表头在标题下方，逐行找到它，避免把布局写死在测试里
-        header_row = next(
-            r for r in range(1, 10) if ws.cell(row=r, column=1).value == "类目"
-        )
-        values = {
-            ws.cell(row=r, column=1).value: ws.cell(row=r, column=2).value
-            for r in range(header_row + 1, ws.max_row + 1)
-        }
-        assert values["女装"] == pytest.approx(820.0)  # 200+200+210+210
-        assert values["（未分类）"] == pytest.approx(150.0)
-
-        # 金额必须带千分位格式，否则运营在 Excel 里看到的是裸数字
-        gmv_cell = ws.cell(row=header_row + 1, column=2)
-        assert gmv_cell.number_format == "#,##0.00"
-        assert asset_no  # 素材号非空
-
-    def test_asset_row_is_registered(self, seeded_env):
-        ctx, _ = _build_context(model=MockModelClient(script=[_narrative_reply()]))
-        update = make_analytics_node(ctx)(new_state(task_no="T103", user_request="报表"))
-        asset_no = update["artifacts"][0].ref
-
-        from sqlalchemy.orm import Session
-
-        from fashionops.db.base import get_engine
-        from fashionops.db.models import Asset
-
-        with Session(get_engine()) as session:
-            asset = session.query(Asset).filter_by(asset_no=asset_no).one()
-        assert asset.asset_type == "spreadsheet"
-        assert asset.generator == "analytics"
-        assert asset.size_bytes > 0
-
-    def test_budget_is_accumulated(self, seeded_env):
-        ctx, _ = _build_context(model=MockModelClient(script=[_narrative_reply()]))
-        update = make_analytics_node(ctx)(new_state(task_no="T104", user_request="报表"))
-        assert update["llm_calls"] == 1
-        assert update["total_tokens"] > 0
-
-    def test_report_export_is_idempotent_on_rerun(self, seeded_env):
-        """节点重跑不能产生第二份同名报表。
-
-        第二次调用时网关会命中幂等缓存，直接返回第一次的结果 ——
-        所以不会有新的 assets 记录。
-        """
-        ctx, _ = _build_context(
-            model=MockModelClient(script=[_narrative_reply(), _narrative_reply()])
-        )
-        node = make_analytics_node(ctx)
-        state = new_state(task_no="T105", user_request="报表")
-
-        first = node(state)
-        second = node(state)
-
-        assert first["artifacts"][0].ref == second["artifacts"][0].ref
-
-        from sqlalchemy.orm import Session
-
-        from fashionops.db.base import get_engine
-        from fashionops.db.models import Asset
-
-        with Session(get_engine()) as session:
-            count = session.query(Asset).filter_by(generator="analytics").count()
-        assert count == 1
-
-    def test_tools_are_audited(self, seeded_env):
-        ctx, audit = _build_context(model=MockModelClient(script=[_narrative_reply()]))
-        make_analytics_node(ctx)(new_state(task_no="T106", user_request="报表"))
-        names = {r.tool_name for r in audit.entries}
-        assert "erp.query_sales_summary" in names
-        assert "report.export_excel" in names
-
-    def test_consumes_upstream_selection_compactly(self, seeded_env):
-        """上游结论只取摘要字段，不带完整候选明细。
-
-        这是长链路不爆上下文的关键 —— 直接塞整个 selection 结果的话，
-        里面还有 top-10 候选的十几个字段，纯属浪费 token。
-        """
-        ctx, _ = _build_context(model=MockModelClient(script=[_narrative_reply()]))
-        node = make_analytics_node(ctx)
-        state = new_state(task_no="T107", user_request="报表")
-        state["findings"] = {
-            "selection": {
-                "criteria": {"category": "女装", "count": 3},
-                "passed": 7,
-                "filtered_out": 2,
-                "overall": "选中 3 款",
-                # 下面这些字段不该被传给模型
-                "top_items": [{"spu_code": f"S{i}", "reason": "x" * 200} for i in range(10)],
-                "rejected_samples": [{"spu_code": "R", "detail": "y" * 200}],
-            }
-        }
-        update = node(state)
-        assert update["steps"][0].status == "succeeded"
-        assert update["findings"]["analytics"]["totals"]["gmv"] > 0
-
-    def test_scope_denial_is_recorded(self, seeded_env):
-        """没有 ASSET_WRITE 权限时报表导出会被网关拒绝，但节点不崩。"""
-        ctx, _ = _build_context(
-            model=MockModelClient(script=[_narrative_reply()]),
-            scopes=frozenset(s for s in AGENT_SCOPES["analytics"] if s != "asset:write"),
-        )
-        update = make_analytics_node(ctx)(new_state(task_no="T108", user_request="报表"))
-
-        assert update["steps"][0].status == "succeeded"  # 结论仍然产出
-        assert "artifacts" not in update
-        assert update["findings"]["analytics"]["report"] is None
-        assert update["errors"]
-
-    def test_reproducible_across_runs(self, seeded_env):
-        """同样输入跑两次，结论和数字完全一致。"""
-        first = make_analytics_node(_build_context(model=MockModelClient(script=[_narrative_reply()]))[0])(
-            new_state(task_no="T109a", user_request="报表")
-        )
-        second = make_analytics_node(_build_context(model=MockModelClient(script=[_narrative_reply()]))[0])(
-            new_state(task_no="T109b", user_request="报表")
-        )
-        assert first["findings"]["analytics"]["totals"] == second["findings"]["analytics"]["totals"]
-        assert (
-            first["findings"]["analytics"]["summary"]
-            == second["findings"]["analytics"]["summary"]
-        )
