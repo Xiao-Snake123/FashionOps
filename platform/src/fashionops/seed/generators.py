@@ -706,6 +706,10 @@ DAILY_REPORT_DAG = {
     "edges": [["understand", "analyze"], ["analyze", "notify"]],
 }
 
+#: 需求池。**刻意铺到 18 条**：20 个任务从 8 条里抽的话，
+#: 列表页会出现同一个标题连着四五次 —— 一眼就是假数据。
+#: 这里覆盖三类意图的组合（选品 / 分析 / 通知），
+#: 让"规划器按关键词拆步骤"这件事在列表上就看得出来。
 TASK_REQUESTS = [
     ("帮我选 3 款秋季女装并出分析报告", "new_product_launch"),
     ("分析昨天各品类销售情况，出日报", "daily_report"),
@@ -715,10 +719,47 @@ TASK_REQUESTS = [
     ("生成上周店铺经营周报并邮件发我", "daily_report"),
     ("帮我把这款风衣上架到抖音小店", "new_product_launch"),
     ("最近退货率是不是变高了？做个归因", "daily_report"),
+    ("挑 5 款适合上新的秋季连衣裙", "new_product_launch"),
+    ("选 2 款针织衫做双十一预热，顺便出份选品表", "new_product_launch"),
+    ("把近 7 天的渠道 GMV 拉出来对比一下", "daily_report"),
+    ("出一份本月退货率专项分析，发给商品部", "daily_report"),
+    ("看看哪些 SKU 库存告急，列个补货清单", "after_sale"),
+    ("把上周的广告投放复盘一下，ROI 低于 1 的标出来", "ad_optimize"),
+    ("帮我挑 3 款大衣做直播专场，要能撑得住库存", "new_product_launch"),
+    ("这个月客单价掉了，做个归因分析给我", "daily_report"),
+    ("把这份选品结论整理成邮件发给运营组", "daily_report"),
+    ("查一下 SKU-1024 现在的可用库存", "after_sale"),
 ]
 
 
+#: 执行 Agent 的名字。新架构里任务侧**只有一个** Agent（见 `agents/loop.py`），
+#: 所有步骤都记在它名下 —— 指标看板上看到的就是这一个名字，不再有 9 个节点。
+TASK_AGENT = "task"
+
+#: 每类工作"做完了"的一句话结论，用来拼任务级 summary 和每个 todo 的结论。
+#: 数字是**编的但看起来合理**的量级 —— 假数据不能有"测试"味儿。
+_KIND_SUMMARY: dict[str, str] = {
+    "selection": "已选出 3 款候选（综合得分 87.4 / 82.1 / 79.6）",
+    "analytics": "已生成近 30 天经营分析报表（GMV ¥130,226.43，共 322 单）",
+    "notification": "已将结论与报表邮件发送给运营组",
+    "generic": "已完成，结论见上方摘要",
+}
+
+
 def make_tasks(rng: random.Random, count: int = 20) -> list[dict]:
+    """生成任务行。
+
+    ## 计划是怎么来的：调真正的规划器，而不是在假数据里另写一套
+
+    这里直接调 ``agents/workplan.plan_todos()``，它和线上跑任务时用的是
+    **同一个函数**。这么做有两个好处：
+
+    1. 假数据里的步骤拆分永远是"真实规则"的样子 —— 不会出现"演示数据里
+       有 9 个节点、实际任务只有 3 步"这种割裂
+    2. 规划规则一改，假数据自动跟着变；要是抄一份在生成器里，迟早分叉
+    """
+    from fashionops.agents.workplan import plan_payload, plan_todos
+
     now = datetime(2026, 9, 11, 21, 0, 0)
     rows: list[dict] = []
     for i in range(count):
@@ -728,7 +769,13 @@ def make_tasks(rng: random.Random, count: int = 20) -> list[dict]:
             ["succeeded", "running", "waiting_approval", "failed", "pending", "cancelled"],
             weights=[48, 14, 12, 12, 8, 6],
         )[0]
-        dag = NEW_PRODUCT_DAG if task_type == "new_product_launch" else DAILY_REPORT_DAG
+        plan = [s for s in plan_todos(request)]
+
+        # 只有"包含需要审批的那一步"的任务才可能卡在闸口。
+        # 不判的话会出现"一步查库存的任务在等人确认发邮件"这种假数据 ——
+        # 演示时一眼就被看穿，而且会让人误以为审批规则是随机的。
+        if status == "waiting_approval" and not any(s.approval_required for s in plan):
+            status = "succeeded"
 
         progress = {
             "succeeded": 100,
@@ -740,6 +787,17 @@ def make_tasks(rng: random.Random, count: int = 20) -> list[dict]:
         }[status]
         finished = status in ("succeeded", "failed", "cancelled")
 
+        # 每一步停在哪：由任务终态反推"跑到第几步了"，
+        # 这样事件流 / todo 状态 / 进度条三者一定对得上（对不上最容易被一眼看穿）
+        stop_at = {
+            "succeeded": len(plan),
+            "running": rng.randrange(1, len(plan) + 1),
+            "waiting_approval": len(plan),
+            "failed": rng.randrange(1, len(plan) + 1),
+            "pending": 0,
+            "cancelled": rng.randrange(1, len(plan) + 1),
+        }[status]
+
         rows.append(
             {
                 "task_no": f"T{created.strftime('%y%m%d')}{i + 1:03d}",
@@ -747,18 +805,23 @@ def make_tasks(rng: random.Random, count: int = 20) -> list[dict]:
                 "user_request": request,
                 "task_type": task_type,
                 "status": status,
-                "current_node": (
-                    "review" if status == "succeeded"
-                    else "approve" if status == "waiting_approval"
-                    else rng.choice([n["id"] for n in dag["nodes"]]) if status in ("running", "failed")
-                    else None
-                ),
+                # 当前节点不再是"图里的节点名"，而是"第几步"
+                "current_node": (f"todo-{stop_at}" if stop_at else None),
                 "progress": progress,
                 "priority": rng.randrange(1, 9),
-                "dag": dag,
-                "state": {"user_request": request, "step": progress // 10},
+                "dag": plan_payload(plan),
+                # 以下划线开头的是给**其它生成器**用的中间量，不进模型
+                # （seed 里统一过滤掉，见 `seed()` 里的那段说明）
+                "_plan": plan,
+                "_stop_at": stop_at,
                 "result": (
-                    {"summary": "已选出 3 款秋季女装，综合得分 87.4/82.1/79.6", "assets": 3}
+                    {
+                        "summary": (
+                            f"已完成 {len(plan)} 步："
+                            + " ｜ ".join(_KIND_SUMMARY.get(s.kind, "已完成") for s in plan)
+                        ),
+                        "todo_count": len(plan),
+                    }
                     if status == "succeeded"
                     else None
                 ),
@@ -773,9 +836,22 @@ def make_tasks(rng: random.Random, count: int = 20) -> list[dict]:
                     if status == "failed"
                     else None
                 ),
-                "thread_id": f"T{created.strftime('%y%m%d')}{i + 1:03d}",
+                # 不再写 thread_id：它是 LangGraph checkpoint 的遗留物，
+                # 新架构没有 checkpoint，写上去只会让人以为还有状态机
                 "approval_payload": (
-                    {"action": "调整广告日预算", "from": 800, "to": 1500, "reason": "ROI 3.8 高于阈值"}
+                    {
+                        "action": "执行「把结论与报表邮件发送给运营组」中的 mail.send 调用",
+                        "reason": "mail.send 会产生对外不可撤销的副作用，需要人工确认",
+                        "risk": "medium",
+                        "todo_seq": len(plan),
+                        "tool": "mail.send",
+                        "preview": (
+                            "收件人：ops@fashionops.com\n"
+                            "主题：【经营日报】近 30 天数据与退货率告警\n"
+                            "正文（86 字）：近 30 天 GMV ¥130,226.43，订单 322 单；"
+                            "直播渠道退货率 40.0% 超过 30% 红线，详见附件报表。"
+                        ),
+                    }
                     if status == "waiting_approval"
                     else None
                 ),
@@ -789,109 +865,259 @@ def make_tasks(rng: random.Random, count: int = 20) -> list[dict]:
                 "updated_at": created + timedelta(minutes=rng.randrange(1, 90)),
             }
         )
+
+    _ensure_one_waiting_approval(rng, rows)
     return rows
 
 
-EVENT_TEMPLATES = [
-    ("node_start", "info", "节点开始执行"),
-    ("tool_call", "info", "调用工具 mock_erp.query_inventory"),
+def _ensure_one_waiting_approval(rng: random.Random, rows: list[dict]) -> None:
+    """保证**至少有一个**任务卡在人工闸口。
+
+    ## 为什么要强制
+
+    随机抽状态的话，某些种子下一次都抽不到 `waiting_approval`
+    （默认种子就是这样）。于是演示时看不到审批卡片 ——
+    而这个项目最想展示的东西恰好是"不可撤销的对外动作会停下来等人"。
+
+    所以这里做一件**显式**的事：如果没有闸口任务，就把第一个"计划里含审批步骤"
+    的任务改成闸口状态，并把与之相关的字段（进度 / 当前步 / 审批载荷 / 是否结束）
+    一起改对 —— 只改 status 会留下"状态说在等人、但 result 已经写好了"这种自相矛盾的数据。
+    """
+    if any(r["status"] == "waiting_approval" for r in rows):
+        return
+    for row in rows:
+        if not any(s.approval_required for s in row["_plan"]):
+            continue
+        row["status"] = "waiting_approval"
+        row["progress"] = rng.randrange(40, 70)
+        row["_stop_at"] = [s.seq for s in row["_plan"] if s.approval_required][0]
+        row["current_node"] = f"todo-{row['_stop_at']}"
+        row["result"] = None
+        row["finished_at"] = None
+        row["approval_payload"] = {
+            "action": "执行「把结论与报表邮件发送给运营组」中的 mail.send 调用",
+            "reason": "mail.send 会产生对外不可撤销的副作用，需要人工确认",
+            "risk": "medium",
+            "todo_seq": row["_stop_at"],
+            "tool": "mail.send",
+            "preview": (
+                "收件人：ops@fashionops.com\n"
+                "主题：【经营日报】近 30 天数据与退货率告警\n"
+                "正文（86 字）：近 30 天 GMV ¥130,226.43，订单 322 单；"
+                "直播渠道退货率 40.0% 超过 30% 红线，详见附件报表。"
+            ),
+        }
+        return
+
+
+#: 每一步里会出现的过程事件。名字和线上 `agents/loop.py` 写出的一致 ——
+#: 前端按 event_type 渲染，假数据用另一套名字的话，演示时会一片空白。
+TODO_EVENT_TEMPLATES = [
+    ("tool_call", "info", "调用工具 erp.query_candidates"),
+    ("tool_call", "info", "调用工具 selection.rank_candidates"),
+    ("tool_call", "info", "调用工具 erp.query_sales_summary"),
+    ("tool_call", "info", "调用工具 analytics.detect_alerts"),
+    ("tool_call", "info", "调用工具 analytics.render_business_report"),
     ("llm_call", "info", "模型返回结构化结果"),
-    ("node_end", "info", "节点执行完成"),
+    ("log", "debug", "命中缓存，跳过重复查询"),
 ]
 
 
+def _events_for_task(rng: random.Random, task_index: int, task: dict) -> list[dict]:
+    """一个任务的事件流。拆成独立函数是为了让 `seq` 的推进一眼可见。"""
+    plan = task["_plan"]
+    stop_at = task["_stop_at"]
+    status = task["status"]
+    base = task["created_at"]
+    rows: list[dict] = []
+
+    def emit(event_type: str, *, node: str | None = None, level: str = "info",
+             message: str = "", payload=None, duration_ms: int | None = None) -> None:
+        rows.append(
+            {
+                "task_index": task_index,
+                "seq": len(rows) + 1,  # 从 1 连续递增，不跳号
+                "event_type": event_type,
+                "node_name": node,
+                "agent_name": TASK_AGENT if node else None,
+                "level": level,
+                "message": message,
+                "payload": payload,
+                "duration_ms": duration_ms,
+                "created_at": base + timedelta(seconds=(len(rows) + 1) * 9),
+            }
+        )
+
+    emit("task_started", node="start", message=f"任务开始：{task['user_request']}")
+    emit(
+        "task_planned",
+        node="plan",
+        message="已拆分为 " + " → ".join(s.kind for s in plan),
+        payload={"mode": "todo_list", "todos": len(plan)},
+    )
+
+    if status == "pending":
+        return rows
+
+    for spec in plan:
+        node = f"todo-{spec.seq}"
+        if spec.seq > stop_at:
+            # 取消/驳回之后，余下的步骤是被跳过的，不是失败
+            if status == "cancelled":
+                emit("node_finished", node=node, level="warn",
+                     message=f"第 {spec.seq} 步被跳过：上游未通过人工确认")
+            continue
+
+        emit("todo_started", node=node, message=f"第 {spec.seq} 步（{spec.kind}）：{spec.goal}")
+
+        for _ in range(rng.randrange(1, 4)):
+            event_type, level, message = rng.choice(TODO_EVENT_TEMPLATES)
+            emit(event_type, node=node, level=level, message=message,
+                 payload={"elapsed_step": len(rows) + 1},
+                 duration_ms=rng.randrange(80, 9000))
+
+        if status == "waiting_approval" and spec.seq == stop_at:
+            emit("approval_required", node=node, level="warn",
+                 message="这一步会产生对外不可撤销的副作用，已挂起等待人工确认",
+                 payload=task.get("approval_payload"))
+            break
+        if status == "running" and spec.seq == stop_at:
+            break
+        if status == "failed" and spec.seq == stop_at:
+            emit("node_finished", node=node, level="error",
+                 message=f"第 {spec.seq} 步失败：{task['error_message']}",
+                 duration_ms=rng.randrange(200, 24000))
+            break
+
+        emit("node_finished", node=node,
+             message=_KIND_SUMMARY.get(spec.kind, f"第 {spec.seq} 步完成"),
+             duration_ms=rng.randrange(200, 24000))
+
+    if status == "succeeded":
+        emit("task_finished", node="finalize", message="任务完成")
+    elif status == "failed":
+        emit("task_failed", node="finalize", level="error",
+             message=task["error_message"] or "任务失败")
+    elif status == "cancelled":
+        emit("task_cancelled", node="finalize", level="warn", message="任务已被人工取消")
+    return rows
+
+
 def make_task_events(rng: random.Random, tasks: list[dict]) -> list[dict]:
+    """按**新架构的事件词汇**生成事件流。
+
+    顺序刻意和线上一致：
+    ``task_started → task_planned → (todo_started → tool_call… → node_finished) × N
+      → [approval_required] → task_finished / task_failed / task_cancelled``
+
+    ``seq`` 必须从 1 连续递增 —— 它和 ``uq_task_event_seq`` 唯一约束、
+    以及 SSE 的断线续传是同一件事（见 `agents/recorder.py` 里那条踩坑记录）。
+    """
     rows: list[dict] = []
     for task_index, task in enumerate(tasks, start=1):
-        nodes = [n["id"] for n in task["dag"]["nodes"]]
-        seq = 0
-        base = task["created_at"]
-        for node in nodes:
-            seq += 1
-            rows.append(
-                {
-                    "task_index": task_index,
-                    "seq": seq,
-                    "event_type": "node_start",
-                    "node_name": node,
-                    "agent_name": next(
-                        (n["agent"] for n in task["dag"]["nodes"] if n["id"] == node), None
-                    ),
-                    "level": "info",
-                    "message": f"开始执行节点 {node}",
-                    "payload": None,
-                    "duration_ms": None,
-                    "created_at": base + timedelta(seconds=seq * 12),
-                }
-            )
-
-            for _ in range(rng.randrange(1, 4)):
-                seq += 1
-                event_type, level, message = rng.choice(EVENT_TEMPLATES)
-                rows.append(
-                    {
-                        "task_index": task_index,
-                        "seq": seq,
-                        "event_type": event_type,
-                        "node_name": node,
-                        "agent_name": None,
-                        "level": level,
-                        "message": message,
-                        "payload": {"elapsed_step": seq},
-                        "duration_ms": rng.randrange(80, 9000),
-                        "created_at": base + timedelta(seconds=seq * 12),
-                    }
-                )
-
-            seq += 1
-            ok = not (task["status"] == "failed" and node == task["current_node"])
-            rows.append(
-                {
-                    "task_index": task_index,
-                    "seq": seq,
-                    "event_type": "node_end" if ok else "error",
-                    "node_name": node,
-                    "agent_name": None,
-                    "level": "info" if ok else "error",
-                    "message": f"节点 {node} 完成" if ok else f"节点 {node} 失败：工具调用超时",
-                    "payload": None,
-                    "duration_ms": rng.randrange(200, 24000),
-                    "created_at": base + timedelta(seconds=seq * 12),
-                }
-            )
-
-            if node == "approve":
-                seq += 1
-                rows.append(
-                    {
-                        "task_index": task_index,
-                        "seq": seq,
-                        "event_type": "interrupt",
-                        "node_name": node,
-                        "agent_name": "human_gate",
-                        "level": "warn",
-                        "message": "高危操作已挂起，等待人工确认",
-                        "payload": task.get("approval_payload"),
-                        "duration_ms": None,
-                        "created_at": base + timedelta(seconds=seq * 12),
-                    }
-                )
-            if not ok:
-                break
+        rows.extend(_events_for_task(rng, task_index, task))
     return rows
 
 
 AGENT_NAMES = [
-    "orchestrator",
-    "selection",
-    "creative",
-    "video",
-    "listing",
-    "ads",
-    "service",
-    "analytics",
-    "notification",
+    TASK_AGENT,
+    TASK_AGENT,
+    TASK_AGENT,
+    "service",  # 客服 Agent 是独立链路（工单不是任务，见 service/agent.py）
 ]
+
+
+def make_task_todos(rng: random.Random, tasks: list[dict]) -> list[dict]:
+    """给每个任务生成它的步骤（新架构的 `task_todos`）。
+
+    ## 这一步是"看起来像真项目"的关键
+
+    只灌 tasks 不灌 todos 的话，任务详情页会显示"这个任务没有步骤记录"——
+    一眼就是空壳。所以每个任务都按它的终态生成一整套步骤：
+
+    * ``succeeded``  → 全部 done，每步都有结论 / 工具 / 耗时 / token
+    * ``running``    → 前面 done、当前步 running
+    * ``waiting_approval`` → 通知那步 waiting_approval（并挂上审批单号）
+    * ``failed``     → 失败那步 failed，后面全部 skipped
+    * ``cancelled``  → 被驳回那步及之后全部 skipped
+    * ``pending``    → 全部 pending
+    """
+    rows: list[dict] = []
+    for task_index, task in enumerate(tasks, start=1):
+        plan = task["_plan"]
+        stop_at = task["_stop_at"]
+        status = task["status"]
+        started = task["started_at"]
+
+        for spec in plan:
+            if status == "pending":
+                todo_status = "pending"
+            elif status == "succeeded":
+                todo_status = "done"
+            elif spec.seq < stop_at:
+                todo_status = "done"  # 终态之前的步骤都已经跑完了
+            elif spec.seq == stop_at:
+                todo_status = {
+                    "running": "running",
+                    "waiting_approval": "waiting_approval",
+                    "failed": "failed",
+                    "cancelled": "skipped",
+                }[status]
+            else:
+                # 上游没做成 → 下游 skipped，而不是失败。
+                # failed 是"我错了"，skipped 是"轮不到我"，这两件事不能混
+                todo_status = "skipped"
+
+            duration = None
+            if todo_status in ("done", "failed"):
+                duration = rng.randrange(1500, 52000)
+            tokens = rng.randrange(900, 9000) if todo_status in ("done", "failed") else 0
+
+            rows.append(
+                {
+                    "task_index": task_index,
+                    "seq": spec.seq,
+                    "goal": spec.goal,
+                    "kind": spec.kind,
+                    "status": todo_status,
+                    "tool_names": (
+                        _KIND_TOOLS.get(spec.kind, []) if todo_status in ("done", "failed") else None
+                    ),
+                    "result_summary": (
+                        _KIND_SUMMARY.get(spec.kind) if todo_status == "done" else None
+                    ),
+                    "artifact_nos": (
+                        ["AS20260911000001"] if spec.kind == "analytics" and todo_status == "done"
+                        else None
+                    ),
+                    "error": (
+                        task["error_message"]
+                        if todo_status == "failed"
+                        else ("上游步骤未通过人工确认" if todo_status == "skipped" and status == "cancelled" else None)
+                    ),
+                    "llm_calls": rng.randrange(1, 8) if todo_status == "done" else 0,
+                    "total_tokens": tokens,
+                    "total_cost": Decimal(str(round(tokens * 3e-6, 6))),
+                    "started_at": started + timedelta(minutes=(spec.seq - 1) * 3) if started else None,
+                    "finished_at": (
+                        started + timedelta(minutes=(spec.seq - 1) * 3, milliseconds=duration or 0)
+                        if started and duration
+                        else None
+                    ),
+                    "duration_ms": duration,
+                    "created_at": task["created_at"],
+                }
+            )
+    return rows
+
+
+#: 每类工作"实际会调"的工具（和 `agents/loop.py` 的 KIND_TOOLS 保持一致）
+_KIND_TOOLS: dict[str, list[str]] = {
+    "selection": ["erp.query_candidates", "selection.rank_candidates"],
+    "analytics": ["erp.query_sales_summary", "analytics.detect_alerts", "analytics.render_business_report"],
+    "notification": ["mail.send"],
+    "generic": ["erp.query_candidates"],
+}
 
 
 def make_agent_runs(rng: random.Random, tasks: list[dict]) -> list[dict]:
@@ -910,7 +1136,12 @@ def make_agent_runs(rng: random.Random, tasks: list[dict]) -> list[dict]:
                     "task_index": task_index,
                     "trace_id": f"{task['task_no']}-{rng.randrange(10**7, 10**8 - 1):08x}",
                     "agent_name": agent,
-                    "node_name": rng.choice([n["id"] for n in task["dag"]["nodes"]]),
+                    # 一次运行对应**一个 todo**，所以 node_name 是 todo-N；
+                    # 客服那条链路跑的是工单，没有 todo，记 service
+                    "node_name": (
+                        None if agent == "service"
+                        else f"todo-{rng.randrange(1, len(task['_plan']) + 1)}"
+                    ),
                     "run_index": rng.randrange(1, 3),
                     "model": rng.choices(
                         ["deepseek-chat", "deepseek-chat", "qwen-turbo"], weights=[6, 3, 1]
@@ -1159,3 +1390,162 @@ def make_audit_logs(rng: random.Random, count: int = 300) -> list[dict]:
             }
         )
     return rows
+
+
+# ===========================================================================
+# 对话演示数据
+# ===========================================================================
+#: 三段"真实会发生"的对话。刻意覆盖三种结局：
+#: ① 一问一答（查数据直接答）  ② 调工具后建任务  ③ 停在人工闸口等确认
+CHAT_SCRIPTS = [
+    {
+        "title": "最近退货是不是变高了？",
+        "created_days_ago": 0,
+        "messages": [
+            ("user", "最近退货是不是变高了？帮我看看哪个类目最严重。", None),
+            (
+                "tool",
+                "erp.query_sales_summary 返回：近 30 天共 322 单，退款 ¥19,710.42；"
+                "连衣裙类目退货率 21.4%，直播渠道 40.0%（超 30% 红线）。",
+                "erp.query_sales_summary",
+            ),
+            (
+                "assistant",
+                "是变高了。近 30 天整体退货率 15.1%，比上月的 12.6% 上升 2.5 个百分点。\n\n"
+                "最严重的是**连衣裙**（21.4%），其中**直播渠道**达到 40%，已经越过 30% 红线。"
+                "这两个数字都来自 ERP 汇总，不是估算。\n\n"
+                "要我做一次归因分析的话，我可以出一份带报表的数据分析任务，"
+                "你到任务页看进度就行。",
+                None,
+            ),
+        ],
+    },
+    {
+        "title": "帮我选 3 款秋季女装并出报表",
+        "created_days_ago": 2,
+        "messages": [
+            ("user", "帮我选 3 款秋季女装，再出一份选品报表。", None),
+            (
+                "tool",
+                "task.submit 返回 task_no=T260909001，状态 pending，已入队后台执行。",
+                "task.submit",
+            ),
+            (
+                "assistant",
+                "已经建了一个任务（T260909001），它会先选品、再出报表。\n\n"
+                "这类「先做 A 再拿 A 的结果做 B」的事我不在对话里一步步跑 ——"
+                "任务有进度、有断点、有产物，去**任务页**看更合适。",
+                None,
+            ),
+        ],
+    },
+    {
+        "title": "把这份结论发给运营组",
+        "created_days_ago": 1,
+        "messages": [
+            ("user", "把这份结论整理一下发给运营组，抄送商品部。", None),
+            (
+                "assistant",
+                "我准备发一封邮件给运营组（抄送商品部），主题是"
+                "「【经营日报】近 30 天数据与退货率告警」。\n\n"
+                "邮件发出去就收不回来，所以系统会**先拦下来等你确认**，"
+                "你点同意之后才真正发送。",
+                None,
+            ),
+            (
+                "assistant",
+                "（等待你确认：收件人 ops@fashionops.com、cc merchandising@fashionops.com）",
+                "mail.send",
+            ),
+        ],
+        # 第三条会话停在人工闸口 —— 对话页要能看到一张待确认的卡片
+        "pending_approval": {
+            "tool_name": "mail.send",
+            "subject": "【经营日报】近 30 天数据与退货率告警",
+            "to_addrs": ["ops@fashionops.com"],
+            "cc_addrs": ["merchandising@fashionops.com"],
+            "body_text": (
+                "各位好：\n\n"
+                "近 30 天 GMV ¥130,226.43，订单 322 单，退款 ¥19,710.42。\n"
+                "需要重点关注：连衣裙类目退货率 21.4%，直播渠道 40.0%，已超过 30% 红线。\n\n"
+                "完整报表见附件。\n\n商品运营中台"
+            ),
+        },
+    },
+]
+
+
+def make_chat_demo(rng: random.Random, *, now: datetime | None = None) -> dict:
+    """生成对话演示数据：会话 + 消息 +（可选）一张待确认的审批卡。
+
+    ## 为什么连对话也要灌假数据
+
+    演示时光秃秃一个空对话框，看的人只会觉得"又一个聊天壳子"。
+    灌进去的这三条**刻意覆盖了三种结局**（直接答 / 建任务 / 停在闸口），
+    正好对应 `chat/agent.py` 模块头部写的那棵决策树 ——
+    看演示的人不用读代码就能明白"什么情况走哪条路"。
+
+    返回的是**纯 dict**，不碰数据库（和别的生成器一样，方便单测）。
+    """
+    now = now or datetime(2026, 9, 11, 21, 0, 0)
+    conversations: list[dict] = []
+
+    for index, script in enumerate(CHAT_SCRIPTS, start=1):
+        created = now - timedelta(days=script["created_days_ago"], hours=rng.randrange(0, 10))
+        messages = []
+        tokens = 0
+        tool_calls = 0
+
+        for seq, (role, content, tool_name) in enumerate(script["messages"], start=1):
+            is_tool = role == "tool"
+            prompt_tokens = rng.randrange(400, 3200) if role == "assistant" else rng.randrange(20, 160)
+            completion_tokens = rng.randrange(60, 900) if role == "assistant" else 0
+            tokens += prompt_tokens + completion_tokens
+            if is_tool:
+                tool_calls += 1
+            messages.append(
+                {
+                    "seq": seq,
+                    "role": role,
+                    "content": content,
+                    "tool_call_id": f"call_{index}{seq:02d}" if (is_tool or tool_name) else None,
+                    "tool_name": tool_name,
+                    "tool_arguments": None,
+                    "tool_result": {"ok": True} if is_tool else None,
+                    "tool_ok": True if is_tool else None,
+                    "tool_duration_ms": rng.randrange(120, 6500) if is_tool else None,
+                    "model": "glm-4-flash" if role == "assistant" else None,
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "cost": Decimal(str(round((prompt_tokens * 1e-6 + completion_tokens * 2e-6) * 7.2, 6))),
+                    "latency_ms": rng.randrange(600, 12000) if role == "assistant" else None,
+                    "finish_reason": (
+                        "tool_calls" if tool_name else ("stop" if role == "assistant" else None)
+                    ),
+                    "interrupted": False,
+                    "created_at": created + timedelta(seconds=seq * 7),
+                }
+            )
+
+        conversations.append(
+            {
+                # 对外编号形如 CH2609110003 —— 不用自增 id 对外（会泄漏"总共有多少会话"）
+                "conversation_no": f"CH{created.strftime('%y%m%d')}{index:04d}",
+                "title": script["title"],
+                "status": "active",
+                "username": "demo",
+                "model": "glm-4-flash",
+                "message_count": len(messages),
+                "llm_calls": sum(1 for m in messages if m["role"] == "assistant"),
+                "tool_calls": tool_calls,
+                "total_tokens": tokens,
+                "total_cost": Decimal(str(round(tokens * 1.4e-6, 6))),
+                "last_message_at": messages[-1]["created_at"],
+                "created_at": created,
+                "updated_at": messages[-1]["created_at"],
+                "messages": messages,
+                "pending_approval": script.get("pending_approval"),
+            }
+        )
+
+    return {"conversations": conversations}

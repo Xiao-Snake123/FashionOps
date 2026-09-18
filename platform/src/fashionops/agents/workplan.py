@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import Any
 
 #: 关键词 → 工作类别。用的是"运营真的会怎么说话"，不是技术术语。
 #:
@@ -125,6 +126,40 @@ def plan_todos(user_request: str) -> list[TodoSpec]:
         )
         for i, kind in enumerate(kinds)
     ]
+
+
+def plan_payload(specs: list[TodoSpec]) -> dict[str, Any]:
+    """写给 ``tasks.dag`` 的计划。
+
+    字段名同时给出 ``todos`` 和 ``steps``：``steps`` 是给现在的前端
+    （它按步骤渲染），``todos`` 是新形状，前端改版后切过去。
+    两份数据同源 —— 它就是这么算出来的，不是存了两遍。
+
+    放在这里而不是执行层：这是**计划的形状**，属于规划器，
+    seed 灌假数据时也要用它（假数据和真数据因此永远同形）。
+    """
+    return {
+        "mode": "todo_list",
+        "todos": [
+            {
+                "seq": s.seq,
+                "goal": s.goal,
+                "kind": s.kind,
+                "approval_required": s.approval_required,
+            }
+            for s in specs
+        ],
+        "steps": [
+            {
+                "step_id": f"s{s.seq}",
+                "agent": s.kind,
+                "goal": s.goal,
+                "approval_required": s.approval_required,
+                "depends_on": [f"s{s.seq - 1}"] if s.seq > 1 else [],
+            }
+            for s in specs
+        ],
+    }
 
 
 def plan_as_text(todos: list[TodoSpec]) -> str:

@@ -59,7 +59,7 @@ from typing import Any
 
 from sqlalchemy import delete, select
 
-from fashionops.agents.workplan import TodoSpec, plan_todos
+from fashionops.agents.workplan import TodoSpec, plan_payload, plan_todos
 from fashionops.approval import records as approval_records
 from fashionops.approval.policy import needs_approval
 from fashionops.db import session_scope
@@ -218,7 +218,7 @@ def run_task(
 
     specs = plan_todos(user_request)
     _save_todos(task_no, specs)
-    recorder.save_plan(task_no, _plan_payload(specs))
+    recorder.save_plan(task_no, plan_payload(specs))
 
     try:
         return _execute(task_no, scopes=scopes, model=model, recorder=recorder)
@@ -1117,37 +1117,6 @@ def _progress(done: int, total: int) -> int:
         return 100
     # 留 5% 给收尾：进度条到 100 却还在跑，会让人以为卡死了
     return min(95, int(done / total * 100))
-
-
-def _plan_payload(specs: list[TodoSpec]) -> dict[str, Any]:
-    """写给 ``tasks.dag`` 的计划。
-
-    字段名同时给出 ``todos`` 和 ``steps``：``steps`` 是给现在的前端
-    （它按步骤渲染），``todos`` 是新形状，T8 改前端时切过去。
-    两份数据同源，不会漂移 —— 它就是这么算出来的，不是存了两遍。
-    """
-    return {
-        "mode": "todo_list",
-        "todos": [
-            {
-                "seq": s.seq,
-                "goal": s.goal,
-                "kind": s.kind,
-                "approval_required": s.approval_required,
-            }
-            for s in specs
-        ],
-        "steps": [
-            {
-                "step_id": f"s{s.seq}",
-                "agent": s.kind,
-                "goal": s.goal,
-                "approval_required": s.approval_required,
-                "depends_on": [f"s{s.seq - 1}"] if s.seq > 1 else [],
-            }
-            for s in specs
-        ],
-    }
 
 
 class _ApprovalView:

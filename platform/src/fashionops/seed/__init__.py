@@ -14,12 +14,22 @@
 3. **按依赖顺序插入**：父表先插并 ``flush()`` 拿到自增主键，
    再用它还原子表的外键。生成器里用的是"第几个"这种逻辑序号，
    不掺和数据库主键，这样生成器可以脱离数据库单测。
+
+## 一个必须知道的坑：`--keep=False` 会连账号一起删
+
+``reset=True`` 走的是 ``Base.metadata.drop_all()``，**身份表（users / roles /
+permissions）也在 metadata 里**，所以灌完库是登不进去的。
+早期这个坑表现为"灌完数据后登录一直 401"。
+
+所以这里在重建之后会**立刻把身份体系补回来**（见 `_bootstrap_identity`）：
+同步权限码与内置角色 → 建演示账号。这样"灌完就能登进去看"这条路径是通的。
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
+from datetime import timedelta
 from decimal import Decimal
 
 from faker import Faker
@@ -44,8 +54,11 @@ from fashionops.db.models import (
     Product,
     Task,
     TaskEvent,
+    TaskTodo,
     Ticket,
 )
+from fashionops.db.models_chat import Approval, ChatMessage, Conversation
+from fashionops.db.models_identity import User
 from fashionops.seed import generators as gen
 
 # Windows 控制台默认 GBK，打印中文会抛 UnicodeEncodeError
@@ -61,6 +74,50 @@ def _print(msg: str = "") -> None:
 
 def _mask(url: str) -> str:
     return url if "@" not in url else url.split("://", 1)[0] + "://***@" + url.rsplit("@", 1)[-1]
+
+
+#: 灌库后自动建好的演示账号。**密码写在文档里是刻意的** ——
+#: 这是本地演示库；真上生产要用 `fashionops-user` 改掉，
+#: 而"默认账号不存在"会让第一次打开项目的人卡在登录页。
+DEMO_USERS: tuple[tuple[str, str, str, tuple[str, ...], bool], ...] = (
+    ("demo", "FashionOps@2026", "演示管理员", ("admin",), True),
+    ("ops_manager", "FashionOps@2026", "运营主管", ("ops_manager",), False),
+    ("operator", "FashionOps@2026", "运营专员", ("operator",), False),
+)
+
+
+def _bootstrap_identity(session: Session) -> dict[str, int]:
+    """重建身份体系（权限码 / 内置角色 / 演示账号）。
+
+    为什么必须做：`seed(reset=True)` 会 `drop_all`，账号和角色一起没了。
+    不做这一步，灌完库的第一件事就是"登录 401"，
+    而这个现象看起来像鉴权坏了，排查方向会整个跑偏。
+    """
+    from fashionops.security.permissions import sync_identity
+    from fashionops.security.service import create_user
+
+    sync_identity(session)
+    session.flush()
+
+    created = 0
+    for username, password, full_name, roles, is_superuser in DEMO_USERS:
+        from fashionops.db.models_identity import User
+
+        exists = session.scalar(select(User).where(User.username == username))
+        if exists is not None:
+            continue
+        create_user(
+            session,
+            username=username,
+            password=password,
+            full_name=full_name,
+            roles=roles,
+            is_superuser=is_superuser,
+            created_by="seed",
+        )
+        created += 1
+    session.flush()
+    return {"users": created}
 
 
 def seed(seed_value: int = DEFAULT_SEED, reset: bool = True) -> dict[str, int]:
@@ -82,6 +139,12 @@ def seed(seed_value: int = DEFAULT_SEED, reset: bool = True) -> dict[str, int]:
     counts: dict[str, int] = {}
 
     with Session(engine) as session:
+        # ------------------------------------------------------------------
+        # 0. 身份体系（drop_all 会把它一起删掉，必须先补回来）
+        # ------------------------------------------------------------------
+        counts.update(_bootstrap_identity(session))
+        counts["_users_created"] = counts.pop("users", 0)
+
         # ------------------------------------------------------------------
         # 1. 商品 + SKU
         # ------------------------------------------------------------------
@@ -172,11 +235,61 @@ def seed(seed_value: int = DEFAULT_SEED, reset: bool = True) -> dict[str, int]:
         # 6. 任务 → 事件 / Agent 运行
         # ------------------------------------------------------------------
         task_rows = gen.make_tasks(rng, count=20)
-        tasks = [Task(**row) for row in task_rows]
+        # 生成器里下划线开头的是给别的生成器用的中间量（_plan / _stop_at），
+        # 不是模型字段 —— 统一在这里过滤掉
+        tasks = [
+            Task(**{k: v for k, v in row.items() if not k.startswith("_")}) for row in task_rows
+        ]
         session.add_all(tasks)
         session.flush()
         task_ids = [t.id for t in tasks]
         counts["tasks"] = len(tasks)
+
+        # ---- 6.1 新架构：每一步一条 todo ----
+        todos = [
+            TaskTodo(**{k: v for k, v in row.items() if k != "task_index"},
+                     task_id=task_ids[row["task_index"] - 1])
+            for row in gen.make_task_todos(rng, task_rows)
+        ]
+        session.add_all(todos)
+        counts["task_todos"] = len(todos)
+        counts["_todos_waiting"] = sum(1 for t in todos if t.status == "waiting_approval")
+
+        # ---- 6.2 停在闸口的任务：补一张对应的待确认审批单 ----
+        # 只有 tasks.approval_payload 而没有审批单行的话，"哪一步在等、
+        # 等人批的是哪次调用"这两个问题答不上来 —— 那正是审批表存在的理由。
+        todo_by_key = {(t.task_id, t.seq): t for t in todos}
+        approvals: list[Approval] = []
+        for index, row in enumerate(task_rows, start=1):
+            if row["status"] != "waiting_approval":
+                continue
+            payload = row["approval_payload"] or {}
+            approval_no = f"AP{row['created_at'].strftime('%Y%m%d')}{rng.randrange(10**5, 10**6):06d}"
+            approvals.append(
+                Approval(
+                    approval_no=approval_no,
+                    task_no=row["task_no"],
+                    todo_seq=row["_stop_at"],
+                    tool_call_id=f"call_{row['task_no'][-6:]}",
+                    tool_name="mail.send",
+                    tool_arguments={
+                        "to_addrs": ["ops@fashionops.com"],
+                        "subject": "【经营日报】近 30 天数据与退货率告警",
+                        "body_text": "近 30 天 GMV ¥130,226.43，订单 322 单，直播渠道退货率 40.0%。",
+                    },
+                    preview=payload.get("preview"),
+                    reason=payload.get("reason"),
+                    status="pending",
+                    created_at=row["created_at"] + timedelta(minutes=rng.randrange(2, 30)),
+                )
+            )
+            todo = todo_by_key.get((task_ids[index - 1], row["_stop_at"]))
+            if todo is not None:
+                todo.approval_no = approval_no
+        if approvals:
+            session.add_all(approvals)
+            session.flush()
+            counts["chat_approvals"] = len(approvals)
 
         events = [
             TaskEvent(**{k: v for k, v in row.items() if k != "task_index"},
@@ -237,6 +350,63 @@ def seed(seed_value: int = DEFAULT_SEED, reset: bool = True) -> dict[str, int]:
         session.add_all(audits)
         counts["audit_logs"] = len(audits)
 
+        # ------------------------------------------------------------------
+        # 9. 对话演示数据（三条，覆盖"直接答 / 建任务 / 停在闸口"三种结局）
+        # ------------------------------------------------------------------
+        demo_user = session.scalar(select(User).where(User.username == "demo"))
+        chat = gen.make_chat_demo(rng)
+        pending_approvals = 0
+        for conv in chat["conversations"]:
+            messages = conv.pop("messages")
+            pending = conv.pop("pending_approval")
+            conversation = Conversation(**conv, user_id=demo_user.id if demo_user else None)
+            session.add(conversation)
+            session.flush()
+
+            approval_message_id = None
+            if pending:
+                approval_message_id = messages[-1]["seq"]
+            for msg in messages:
+                session.add(ChatMessage(**msg, conversation_id=conversation.id))
+            session.flush()
+
+            if pending:
+                msg_row = session.scalar(
+                    select(ChatMessage).where(
+                        ChatMessage.conversation_id == conversation.id,
+                        ChatMessage.seq == approval_message_id,
+                    )
+                )
+                session.add(
+                    Approval(
+                        approval_no=f"AP{conversation.created_at.strftime('%Y%m%d')}"
+                        f"{rng.randrange(10**5, 10**6):06d}",
+                        conversation_id=conversation.id,
+                        message_id=msg_row.id if msg_row else None,
+                        tool_call_id=f"call_{conversation.conversation_no[-4:]}",
+                        tool_name=pending["tool_name"],
+                        tool_arguments={
+                            "to_addrs": pending["to_addrs"],
+                            "cc_addrs": pending["cc_addrs"],
+                            "subject": pending["subject"],
+                            "body_text": pending["body_text"],
+                        },
+                        preview=(
+                            f"收件人：{'、'.join(pending['to_addrs'])}\n"
+                            f"抄送：{'、'.join(pending['cc_addrs'])}\n"
+                            f"主题：{pending['subject']}\n"
+                            f"正文（{len(pending['body_text'])} 字）：{pending['body_text'][:60]}…"
+                        ),
+                        reason="邮件发出去就收不回来，需要人工确认",
+                        status="pending",
+                        created_at=conversation.updated_at,
+                    )
+                )
+                pending_approvals += 1
+            session.flush()
+
+        counts["_chat_pending_approval"] = pending_approvals
+
         session.commit()
 
         # 再查一遍行数，确认真的落库了（而不是只在自己的 Session 里）
@@ -271,7 +441,13 @@ def report(counts: dict[str, int], seed_value: int) -> None:
     _print(f"    转人工工单          : {counts.get('_tickets_escalated', 0)} 个")
     _print(f"    Agent 失败/超时运行 : {counts.get('_runs_failed', 0)} 次")
     _print(f"    被闸门拦下的邮件    : {counts.get('_email_blocked', 0)} 封")
+    _print("-" * 66)
+    _print("  新架构的演示数据（任务详情页 / 审批卡片要用）：")
+    _print(f"    待办步骤 task_todos : {counts.get('task_todos', 0)} 行")
+    _print(f"    卡在闸口的步骤      : {counts.get('_todos_waiting', 0)} 个")
+    _print(f"    对话里待确认的卡片  : {counts.get('_chat_pending_approval', 0)} 张")
     _print()
+    _print(f"  演示账号：demo / FashionOps@2026（本次新建 {counts.get('_users_created', 0)} 个账号）")
     _print("  下一步：uv run fashionops-db info   # 核对行数")
     _print()
 
