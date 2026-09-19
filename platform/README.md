@@ -1,157 +1,261 @@
 # 服装电商多 Agent 运营中台
 
-> 一句话：把「秋季女装上新」这件事，从选品到投放到复盘，交给 9 个 Agent 自动编排完成，
+> 一句话：运营说一句「帮我选 3 款秋季女装并出报表发给运营组」，
+> 系统自己拆成有序步骤、逐步执行，涉及对外发信的步骤**停下来等人点确认**，
 > 全程可追踪、可干预、可评测。
 
 ---
 
-## 先看效果（演示账号）
+## 一、怎么把它跑起来
 
-**打开 <http://localhost:5173>，用这个账号登录：**
+> 下面每条命令都在本机（Windows 11 + PowerShell）实测过。
+> 顺序很重要：**依赖服务 → 建库 → 建表灌数据 → 起后端 → 起前端**。
 
-| 用户名 | 密码 | 角色 |
-| --- | --- | --- |
-| `demo` | `FashionOps@2026` | `admin`（全部权限） |
+### 0. 前提
 
-> ⚠ **这是本地演示账号，只用于跑起来的开发环境。**
-> 它明文写在 README 里，所以**绝不能在任何公开部署上使用它** ——
-> 真要部署，先用下面的命令把它删掉或改密。
->
-> 同理，**真实凭据一律不进仓库**：数据库密码、邮箱授权码、模型 API Key
-> 全部只在 `platform/.env` 里，而 `.env` 在 `.gitignore` 里。仓库里还有一道
-> pre-commit 钩子（`no-hardcoded-secrets`）会在提交时扫 `.md` / `.py` / `.json`，
-> 防止这类东西被误提交。
+| 需要 | 版本 | 端口 |
+|---|---|---|
+| Python | 3.12（仓库自带 `.venv`） | — |
+| Node.js | 18+（本机 24） | — |
+| MySQL | 8.0 | 3306 |
+| Redis | 8.x（限流 / 熔断 / 缓存） | 6379 |
+| Qdrant | 1.x（知识库向量检索） | 6333 |
 
-登录后建议按这个顺序看：
-
-| 页面 | 看什么 |
-| --- | --- |
-| **对话助手** | 直接说一句话（"SKU00042 还有多少库存？"），看流式回答 + 工具调用过程 |
-| 对话里说"给 x@y.com 发封邮件…" | 会**停下来弹一张确认卡片**，点了才真发 —— 写操作的人工闸口 |
-| 对话里说"帮我选 3 款秋季女装并出报表" | 转成一个**真实任务**，给一张能点进任务页的卡片 |
-| **任务工作台** → 点任务 | DAG 图、SSE 实时事件流、审批横幅、产物下载 |
-| 客服工单 / 商品库 / 广告投放 / 邮件闸门 | 业务数据展示；邮件闸门页能看到被拦下的邮件及拦截原因 |
-
-### 自己加账号
-
-```powershell
-# 建用户（密码留空会自动生成并打印一次）
-.venv\Scripts\fashionops-user.exe create 张三 --role operator --full-name "张三"
-# 改密码（会撤销该用户全部会话）
-.venv\Scripts\fashionops-user.exe passwd demo
-# 看某个用户"实际生效"的权限（角色改了但它不生效时先看这个）
-.venv\Scripts\fashionops-user.exe show 张三
-```
-
-角色与权限的区别（`operator` 刻意**不能审批、不能发信**）见
-`src/fashionops/security/permissions.py` 顶部的说明。
-
----
-
-## 这是什么
-
-一个**多 Agent 编排平台**（不是单体 Agent 应用），核心是三个东西：
-
-1. **总控编排 Agent** —— 把一句自然语言需求拆成 DAG，路由给垂直 Agent，收敛结果，异常熔断，高危操作停下来等人确认。
-2. **9 个垂直业务 Agent** —— 选品 / 图文生成 / 视频生成 / 商品上架 / 广告投放 / 智能客服 / 数据分析 / 邮件通知。
-3. **工具网关层** —— 所有外部调用（电商 API、广告 API、ERP、SMTP）收口到一层，统一限流、重试、熔断、审计、凭证隔离。
-
-## 技术栈
-
-| 层 | 选型 |
-| --- | --- |
-| 后端 | FastAPI + uvicorn + SQLAlchemy 2.0 + Pydantic v2 |
-| 关系库 | **MySQL 8.0**（本地实例） |
-| 缓存 / 任务状态 | **Redis 8.x**（AOF 持久化，支撑任务中断恢复） |
-| 向量库 | **Qdrant 1.x**（客服 RAG 混合检索） |
-| Agent 编排 | LangGraph + langgraph-checkpoint-redis + langchain-core |
-| 前端 | React + Vite + React Flow（DAG 可视化）+ ECharts |
-| 可观测性 | OpenTelemetry + OpenLLMetry |
-| 持久化执行 | DBOS |
-
-外部系统（电商平台 / 广告平台 / ERP）全部走 **MockAdapter**，开发期零真实调用；
-通过配置开关即可切到真实实现，不需要改业务代码。
-
-## 目录结构
-
-```
-platform/
-├─ src/fashionops/
-│  ├─ config.py          # 全部配置（前缀 FASHIONOPS_）
-│  ├─ db/                # 引擎、会话、14 张业务表模型
-│  ├─ seed/              # 假数据生成（故意埋异常数据）
-│  ├─ gateway/           # 工具网关：限流 / 重试 / 熔断 / 审计 / 凭证
-│  ├─ adapters/          # 外部系统可插拔适配器（Mock / Real）
-│  ├─ agents/            # 9 个 Agent + 总控编排
-│  └─ api/               # FastAPI 路由 + SSE
-├─ deploy/
-│  ├─ scripts/           # 服务启停、MySQL 初始化
-│  ├─ mysql/             # 建库建号 SQL
-│  └─ redis/             # Redis 配置
-└─ frontend/             # React + Vite 工作台
-```
-
-## 快速开始
-
-### 1. 启动数据层服务
+Redis 和 Qdrant 由仓库脚本管理：
 
 ```powershell
 cd deploy\scripts
-.\services.ps1 start          # 启 Redis + Qdrant
-.\services.ps1 status         # 看三个服务状态
+.\services.ps1 start      # 启 Redis + Qdrant
+.\services.ps1 status     # 看状态
 ```
 
-### 2. 初始化 MySQL（只需跑一次）
+### 1. 初始化 MySQL（只需一次）
 
 ```powershell
 cd deploy\scripts
-.\init-mysql.ps1              # 建库 + 建专用账号 + 自动写入 .env
+.\init-mysql.ps1          # 建库 + 建专用账号 + 自动写入 .env
 ```
 
-脚本会交互式询问你的 MySQL root 密码（**密码只在本机终端内使用，不会被上传**），
-然后自动生成一个应用专用账号密码并写进 `.env`。
+脚本会交互询问 MySQL root 密码（**只在本机终端使用**），然后生成应用账号密码写进 `.env`。
 
-### 3. 装依赖 + 建表 + 灌假数据
+### 2. 装依赖 · 建表 · 灌假数据
 
 ```powershell
+cd "c:\Users\Administrator\Desktop\Work agent\platform"
+
+# 装依赖（二选一：装了 uv 用前者，没有就用后者）
 uv sync --all-extras
-uv run fashionops-db init
-uv run fashionops-seed
+.venv\Scripts\python.exe -m pip install -e ".[dev]"
+
+# 建表 / 升级到最新迁移版本（幂等，可反复跑）
+.venv\Scripts\fashionops-db.exe init
+
+# 灌假数据
+.venv\Scripts\fashionops-seed.exe
 ```
 
-### 4. 起后端
+`fashionops-seed` 会**清空并重建业务表**，同时按新架构生成：
+任务的步骤（`task_todos`）、事件流、Agent 运行记录、停在人工闸口的任务与审批单、
+以及三条对话演示数据（覆盖"直接答 / 建任务 / 停在闸口"）。
+
+> ⚠ 它也会重建身份表，所以脚本内部会**自动补回演示账号**
+> （`demo` / `ops_manager` / `operator`，密码都是 `FashionOps@2026`）——
+> 这一步是必要的：早期版本灌完库登不进去（401），看起来像鉴权坏了。
+
+### 3. 起后端
 
 ```powershell
-uv run uvicorn fashionops.api.main:app --reload --port 8000
+cd "c:\Users\Administrator\Desktop\Work agent\platform"
+
+# ⚠ 必须用 Start-Process 起：直接在前台跑的话，终端会话一结束进程就被带走，
+#    表现是"刚才还好好的，一会儿接口全 404"
+Start-Process -FilePath ".venv\Scripts\python.exe" `
+  -ArgumentList "-m","uvicorn","fashionops.api.main:app","--host","127.0.0.1","--port","8000" `
+  -WindowStyle Hidden
+
+# 改代码调试时加 --reload（前台跑就行，反正要盯着日志）
+.venv\Scripts\python.exe -m uvicorn fashionops.api.main:app --reload --port 8000
 ```
 
-打开 <http://127.0.0.1:8000/docs> 看接口，<http://127.0.0.1:8000/health> 看依赖连通性。
+自检：**<http://127.0.0.1:8000/health>**（注意是根路径，不是 `/api/v1/health`）
 
-### 5. 起前端
+```json
+{"status": "degraded", "dependencies": [
+  {"name": "database", "ok": true,  "detail": "MySQL 8"},
+  {"name": "redis",    "ok": false, ...},
+  {"name": "qdrant",   "ok": false, ...}]}
+```
+
+- `ok`：三个都通
+- `degraded`：Redis / Qdrant 没起 —— **项目照样能跑**，只是限流熔断走降级、
+  知识库检索用不了（见"排错"）
+
+接口文档：<http://127.0.0.1:8000/docs>
+
+### 4. 起前端
 
 ```powershell
 cd frontend
-pnpm install
-pnpm dev
+npm install      # 首次
+npm run dev      # http://localhost:5173
 ```
 
-## 配置说明
+- 前端**只能用 `http://localhost:5173`**（走 IPv6 `::1`），`127.0.0.1` 连不上
+- `/api` 与 `/health` 由 Vite 代理到 `http://127.0.0.1:8000`；
+  后端不在 8000 时用 `VITE_API_TARGET` 改：`$env:VITE_API_TARGET="http://127.0.0.1:8010"`
+- 生产构建：`npm run build`（= `tsc --noEmit` + `vite build`）
 
-所有配置走环境变量，前缀 `FASHIONOPS_`，也可以写在 `platform/.env`。
-完整清单见 `.env.example`。
+### 5. 打开看效果
 
-**关于模型**：`FASHIONOPS_MODEL_PROVIDER` 默认是 `mock` —— 不填任何 API Key
-也能把全链路跑通（返回结构合法的假响应）。要接真实模型再改成 `deepseek` / `qwen` / `zhipu`。
+**<http://localhost:5173>** → 用演示账号登录：
 
-## 设计原则
+| 用户名 | 密码 | 角色 |
+|---|---|---|
+| `demo` | `FashionOps@2026` | `admin`（全部权限） |
+| `ops_manager` | `FashionOps@2026` | 运营主管（**能审批、能发信**） |
+| `operator` | `FashionOps@2026` | 运营专员（**不能审批、不能发信**） |
 
-1. **外部依赖全部可插拔**：关系库、向量库、缓存、对象存储、外部 API 各留一个适配器接口，
-   开发期用本地实现，生产只换适配器类，业务代码不动。
-2. **假数据必须埋异常**：库存不足、ROI 暴跌、纠纷工单 —— 不然演示不出熔断和转人工的价值。
-3. **高危操作必须有闸口**：上架、改预算这类动作走 LangGraph 的 `interrupt()`，等人确认。
+> ⚠ 这是**本地演示账号**，明文写在 README 里，**绝不能用于任何公开部署**。
+> 真实凭据（数据库密码、邮箱授权码、模型 API Key）只在 `platform/.env`，
+> 而 `.env` 在 `.gitignore` 里；仓库还有 pre-commit 钩子扫硬编码密钥。
 
-## 相关文档
+### 6. 可选：把知识库灌进 Qdrant
 
-- `../docs/07-服装电商多Agent运营中台-项目规划.md` —— 完整项目规划、分期、技术点矩阵
-- `../docs/08-数据层安装记录.md` —— 本机装了什么、装在哪、怎么启停、怎么卸
-- `../mcp-servers/` —— 独立可交付的办公 MCP 工具服务（23 个工具）
+客服 RAG 的向量在 Qdrant 里，不在 MySQL。Qdrant 起来后：
+
+```powershell
+.venv\Scripts\fashionops-kb.exe index    # 建索引（幂等）
+.venv\Scripts\fashionops-kb.exe stats    # 看索引状态
+.venv\Scripts\fashionops-kb.exe search "连衣裙退货政策"   # 检查召回效果
+```
+
+### 7. 跑测试
+
+```powershell
+.venv\Scripts\python.exe -m pytest -q                 # 全量（约 3 分钟）
+.venv\Scripts\python.exe -m pytest tests/test_loop.py -q --tb=line
+.venv\Scripts\ruff.exe check src tests scripts        # 静态检查
+```
+
+> 单元测试用**临时 SQLite**（`tests/conftest.py` 的 `db` 夹具），不碰开发库；
+> 只有 `tests/test_api_mysql.py` 故意打真实 MySQL —— 它专抓 SQLite 上不复现的问题。
+
+### 8. 停服务
+
+```powershell
+cd deploy\scripts
+.\services.ps1 stop
+```
+
+---
+
+## 二、命令速查
+
+| 想干什么 | 命令 |
+|---|---|
+| 建表 / 升级 | `.venv\Scripts\fashionops-db.exe init` |
+| 看库里各表行数 | `.venv\Scripts\fashionops-db.exe info` |
+| 生成新迁移 | `.venv\Scripts\fashionops-db.exe revision` |
+| 灌假数据 | `.venv\Scripts\fashionops-seed.exe`（`--keep` 追加、`--seed 42` 换数据） |
+| 起 Redis / Qdrant | `deploy\scripts\services.ps1 start` |
+| 起后端 | `uvicorn fashionops.api.main:app --port 8000` |
+| 起前端 | `npm run dev`（5173） |
+| 建用户 / 改密 / 看权限 | `.venv\Scripts\fashionops-user.exe create\|passwd\|show` |
+| 补角色预设权限 | `.venv\Scripts\fashionops-user.exe sync --apply-presets` |
+| 知识库建索引 | `.venv\Scripts\fashionops-kb.exe index` |
+| 批量处理工单 | `.venv\Scripts\fashionops-ticket.exe handle-pending` |
+| 体检配置 | `.venv\Scripts\fashionops-config.exe doctor` |
+
+---
+
+## 三、看什么（页面导览）
+
+| 页面 | 看什么 |
+|---|---|
+| **对话助手** | 说一句话直接问（"SKU00042 还有多少库存？"）—— 流式回答 + 工具调用过程 |
+| 对话里说"给 x@y.com 发封邮件…" | **停下来弹一张确认卡片**，点了才真发（人工闸口） |
+| 对话里说"帮我选 3 款秋季女装并出报表" | 转成**真实任务**，给一张能点进任务页的卡片 |
+| **任务工作台** → 点任务 | **有序的步骤列表**（每步的状态 / 结论 / 用过的工具 / 耗时 / 产出），SSE 实时事件流 |
+| 任务停在闸口时 | 审批横幅显示"第几步 / 哪个工具 / 审批单号 + 人话摘要（收件人、主题、正文）" |
+| 客服工单 / 商品库 / 广告投放 / 邮件闸门 | 业务数据；邮件闸门页能看到被拦下的邮件及拦截原因 |
+
+---
+
+## 四、它现在是怎么工作的
+
+```
+用户一句话
+   ↓
+agents/workplan.py   代码按关键词拆成**有序步骤**（选品 → 分析 → 通知）
+   ↓                 命中 0~1 类意图 → 单步直接做；≥2 类才拆多步
+agents/loop.py       一个 Agent 逐步执行：每步按 kind 裁剪工具目录
+   ↓                 算数和判定走代码（scoring / analytics_rules），表达交给模型
+   ↓                 要发邮件等不可撤销的动作 → 落审批单 → 停下来等人（不阻塞线程）
+   ↓
+agents/recorder.py   旁路记账：事件流（SSE）+ agent_runs + 任务主表
+```
+
+**刻意没有的东西**（都是删掉的旧架构）：模型出 DAG、图校验与环检测、
+hub 路由、9 个专用 Agent 节点、LangGraph checkpoint。
+理由与证据见 [`docs/12-AI协作交接.md`](docs/12-AI协作交接.md)。
+
+---
+
+## 五、技术栈
+
+| 层 | 选型 |
+|---|---|
+| 后端 | FastAPI + uvicorn + SQLAlchemy 2.0 + Pydantic v2 |
+| 关系库 | MySQL 8.0（28 张表，Alembic 管理） |
+| 缓存 / 限流 / 熔断 | Redis 8.x |
+| 向量库 | Qdrant 1.x（客服 RAG） |
+| 执行编排 | **自研**：一个 Agent + 显式 todo 列表（不再依赖 LangGraph） |
+| 前端 | React + Vite + ECharts |
+| 模型 | OpenAI 兼容接口（默认 `mock`，不填 Key 也能跑通全链路） |
+
+外部系统（电商 / 广告 / ERP）走 **MockAdapter**，开发期零真实调用，靠配置切换。
+
+---
+
+## 六、配置
+
+所有配置走环境变量，前缀 `FASHIONOPS_`，也可写在 `platform/.env`（清单见 `.env.example`）。
+
+**关于模型**：`FASHIONOPS_MODEL_PROVIDER` 默认 `mock` —— 返回结构合法的假响应，
+不填 API Key 也能把全链路跑通；接真实模型改成 `deepseek` / `qwen` / `zhipu`。
+
+---
+
+## 七、排错
+
+| 现象 | 原因 / 怎么办 |
+|---|---|
+| `/health` 是 `degraded`，redis / qdrant 报 10061 | 依赖服务没起 → `deploy\scripts\services.ps1 start`。**不影响主流程**，只是限流降级、知识库检索不可用 |
+| 后端起不来：`[Errno 10048]` 端口被占 | 换端口 `--port 8010`，并给前端设 `$env:VITE_API_TARGET` |
+| 前端能开但一直 401 / 接口全 404 | 后端没在 8000（或进程被终端带走了）→ 用 `Start-Process` 重启后端 |
+| 灌完库登不进去 | 老版本 bug，已修；现在 seed 会自动补回演示账号。真没有就跑 `fashionops-user create demo --role admin` |
+| `pytest` 有一批 skip | 全是 Redis / Qdrant 没起导致的，不是代码问题 |
+| 任务详情页"没有步骤记录" | 那是旧架构灌的任务（计划存在 `tasks.dag`）；重新跑 `fashionops-seed` 即可 |
+
+---
+
+## 八、设计原则
+
+1. **算数交给代码，表达交给模型**：打分、阈值判定、拆步骤全是可复现的纯函数；
+   模型只负责理解和写结论。
+2. **不可撤销的动作必须有闸口**：发信前落审批单 + 停下来等人；批准时执行的是
+   **当时存下来的那份参数**，人和系统看的是同一份内容。
+3. **假数据必须埋异常**：库存告急、ROI 暴跌、纠纷工单、失败运行 ——
+   不然熔断和转人工这些分支永远演示不出来。
+4. **外部依赖可插拔**：缓存、向量库、对象存储、外部 API 各留适配器，
+   开发用本地实现，生产只换适配器类。
+
+---
+
+## 九、相关文档
+
+| 文档 | 内容 |
+|---|---|
+| [`docs/12-AI协作交接.md`](docs/12-AI协作交接.md) | 为什么把 DAG 编排换成 todo 列表（含实测数据与决策记录） |
+| [`docs/13-数据模型与库表设计.md`](docs/13-数据模型与库表设计.md) | 28 张表、外键关系、灌库方式与体检结论 |
+| `../mcp-servers/` | 独立可交付的办公 MCP 工具服务 |

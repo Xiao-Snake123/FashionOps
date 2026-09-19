@@ -27,7 +27,29 @@
 > 真实凭据（数据库密码、邮箱授权码、模型 API Key）只在 `platform/.env` 里，
 > 不进仓库。
 
-完整说明、页面导览、以及"怎么自己加账号"见
+### 把 `platform/` 跑起来（命令都在 PowerShell 里实测过）
+
+```powershell
+cd deploy\scripts
+.\services.ps1 start              # 1) Redis 6379 + Qdrant 6333
+.\init-mysql.ps1                  # 2) 建库建号（只需一次，会写 .env）
+
+cd ..\..                          # 回到 platform/
+.venv\Scripts\fashionops-db.exe init    # 3) 建表（幂等）
+.venv\Scripts\fashionops-seed.exe       #    灌假数据（会自动补回演示账号）
+
+# 4) 起后端（必须用 Start-Process，否则终端一关进程就没了）
+Start-Process -FilePath ".venv\Scripts\python.exe" `
+  -ArgumentList "-m","uvicorn","fashionops.api.main:app","--host","127.0.0.1","--port","8000" `
+  -WindowStyle Hidden
+
+cd frontend
+npm run dev                       # 5) 起前端 → http://localhost:5173
+```
+
+自检：<http://127.0.0.1:8000/health>（根路径）· 页面：<http://localhost:5173>
+
+完整说明（页面导览、目录结构、命令速查、排错、设计原则）见
 [`platform/README.md`](platform/README.md)。
 
 ---
