@@ -11,6 +11,14 @@
 > 下面每条命令都在本机（Windows 11 + PowerShell）实测过。
 > 顺序很重要：**依赖服务 → 建库 → 建表灌数据 → 起后端 → 起前端**。
 
+> ⚠ **下面所有命令都假设"当前目录是 `platform/`"，不是仓库根目录。**
+> 仓库根目录下**没有** `deploy\` —— 在根目录执行 `cd deploy\scripts` 会报
+> "找不到路径"。先 `cd platform` 再往下走（路径里有空格，引号别省）：
+>
+> ```powershell
+> cd "c:\Users\Administrator\Desktop\Work agent\platform"
+> ```
+
 ### 0. 前提
 
 | 需要 | 版本 | 端口 |
@@ -24,15 +32,15 @@
 Redis 和 Qdrant 由仓库脚本管理：
 
 ```powershell
-cd deploy\scripts
+cd "c:\Users\Administrator\Desktop\Work agent\platform\deploy\scripts"
 .\services.ps1 start      # 启 Redis + Qdrant
-.\services.ps1 status     # 看状态
+.\services.ps1 status     # 看状态（MySQL 也一起显示）
 ```
 
 ### 1. 初始化 MySQL（只需一次）
 
 ```powershell
-cd deploy\scripts
+cd "c:\Users\Administrator\Desktop\Work agent\platform\deploy\scripts"
 .\init-mysql.ps1          # 建库 + 建专用账号 + 自动写入 .env
 ```
 
@@ -44,6 +52,7 @@ cd deploy\scripts
 cd "c:\Users\Administrator\Desktop\Work agent\platform"
 
 # 装依赖（二选一：装了 uv 用前者，没有就用后者）
+# 仓库里已经有 .venv，通常不用重装；换了 Python 版本或重装环境时才需要
 uv sync --all-extras
 .venv\Scripts\python.exe -m pip install -e ".[dev]"
 

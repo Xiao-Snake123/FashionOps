@@ -29,12 +29,14 @@
 
 ### 把 `platform/` 跑起来（命令都在 PowerShell 里实测过）
 
+> 注意：这些服务脚本在 **`platform/deploy/scripts/`**，不在仓库根目录。
+
 ```powershell
-cd deploy\scripts
+cd "c:\Users\Administrator\Desktop\Work agent\platform\deploy\scripts"
 .\services.ps1 start              # 1) Redis 6379 + Qdrant 6333
 .\init-mysql.ps1                  # 2) 建库建号（只需一次，会写 .env）
 
-cd ..\..                          # 回到 platform/
+cd "c:\Users\Administrator\Desktop\Work agent\platform"
 .venv\Scripts\fashionops-db.exe init    # 3) 建表（幂等）
 .venv\Scripts\fashionops-seed.exe       #    灌假数据（会自动补回演示账号）
 
@@ -43,7 +45,7 @@ Start-Process -FilePath ".venv\Scripts\python.exe" `
   -ArgumentList "-m","uvicorn","fashionops.api.main:app","--host","127.0.0.1","--port","8000" `
   -WindowStyle Hidden
 
-cd frontend
+cd "c:\Users\Administrator\Desktop\Work agent\platform\frontend"
 npm run dev                       # 5) 起前端 → http://localhost:5173
 ```
 
