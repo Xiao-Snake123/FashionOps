@@ -8,6 +8,55 @@
 
 ## 一、怎么把它跑起来
 
+### 最快：一条命令（推荐）
+
+```powershell
+cd "c:\Users\Administrator\Desktop\Work agent\platform\deploy\scripts"
+.\start.ps1
+```
+
+它会按顺序把整个项目拉起来，并且**每一步都幂等**（已经在跑的就跳过，
+所以可以放心重复执行）：
+
+1. 数据层：Redis + Qdrant（复用 `services.ps1`）
+2. 校验数据库迁移版本（库里没有迁移记录就自动 `fashionops-db init`）
+3. 后端 uvicorn（后台进程，日志在 `D:\develop\logs\backend.out.log`）
+4. 前端 Vite（<http://localhost:5173>）
+
+跑完会打印：健康检查状态（`ok` / `degraded` + 哪个依赖没起）、访问地址、
+演示账号、以及怎么停。
+
+常用参数：
+
+```powershell
+.\start.ps1 -BackendPort 8010     # 8000 被别的程序占了时
+.\start.ps1 -NoFrontend           # 只起后端（前端你自己开）
+.\start.ps1 -SkipData             # Redis/Qdrant 由外部管理（比如跑在 Docker 里）
+```
+
+**停止**：
+
+```powershell
+.\stop.ps1          # 停前端 + 后端（按端口找，只对 node / python 进程下手，不会误杀别的服务）
+.\stop.ps1 -All     # 连 Redis + Qdrant 一起停
+```
+
+> ⚠ `stop.ps1` 是**按端口**定位进程的（没记 PID —— PID 文件在机器重启后就是
+> 过期数据，还会误杀）。找到占用者后会校验进程名，名字不对就不动它。
+
+### 首次运行前要做的两件事
+
+一键脚本不管这两件（它们只需要做一次）：
+
+```powershell
+cd "c:\Users\Administrator\Desktop\Work agent\platform\deploy\scripts"
+.\init-mysql.ps1          # 1) 建库 + 建专用账号 + 自动写入 .env
+cd "c:\Users\Administrator\Desktop\Work agent\platform"
+.venv\Scripts\fashionops-seed.exe   # 2) 灌演示数据（会自动补回演示账号）
+```
+
+### 想分步手动跑
+
 > 下面每条命令都在本机（Windows 11 + PowerShell）实测过。
 > 顺序很重要：**依赖服务 → 建库 → 建表灌数据 → 起后端 → 起前端**。
 

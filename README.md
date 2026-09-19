@@ -29,24 +29,20 @@
 
 ### 把 `platform/` 跑起来（命令都在 PowerShell 里实测过）
 
-> 注意：这些服务脚本在 **`platform/deploy/scripts/`**，不在仓库根目录。
+**有启动脚本，一条命令就行**（脚本在 `platform/deploy/scripts/`，不在仓库根目录）：
 
 ```powershell
 cd "c:\Users\Administrator\Desktop\Work agent\platform\deploy\scripts"
-.\services.ps1 start              # 1) Redis 6379 + Qdrant 6333
-.\init-mysql.ps1                  # 2) 建库建号（只需一次，会写 .env）
+.\start.ps1        # 数据层 → 后端 → 前端，全程幂等，可重复执行
+.\stop.ps1         # 停止（加 -All 连 Redis/Qdrant 一起停）
+```
 
+首次运行前还要做一次（建库、灌演示数据）：
+
+```powershell
+.\init-mysql.ps1                                                  # 建库建号，会写 .env
 cd "c:\Users\Administrator\Desktop\Work agent\platform"
-.venv\Scripts\fashionops-db.exe init    # 3) 建表（幂等）
-.venv\Scripts\fashionops-seed.exe       #    灌假数据（会自动补回演示账号）
-
-# 4) 起后端（必须用 Start-Process，否则终端一关进程就没了）
-Start-Process -FilePath ".venv\Scripts\python.exe" `
-  -ArgumentList "-m","uvicorn","fashionops.api.main:app","--host","127.0.0.1","--port","8000" `
-  -WindowStyle Hidden
-
-cd "c:\Users\Administrator\Desktop\Work agent\platform\frontend"
-npm run dev                       # 5) 起前端 → http://localhost:5173
+.venv\Scripts\fashionops-seed.exe                                 # 灌假数据 + 补回演示账号
 ```
 
 自检：<http://127.0.0.1:8000/health>（根路径）· 页面：<http://localhost:5173>
