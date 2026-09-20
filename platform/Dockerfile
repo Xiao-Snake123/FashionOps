@@ -47,10 +47,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --all-extras --no-install-project --no-dev
 
 # ---- 代码层 ----
-COPY src/ ./src/
-COPY migrations/ ./migrations/
+COPY backend/fashionops/ ./backend/fashionops/
+COPY backend/migrations/ ./backend/migrations/
 COPY alembic.ini ./
-COPY scripts/ ./scripts/
+COPY backend/scripts/ ./backend/scripts/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --all-extras --no-dev
 

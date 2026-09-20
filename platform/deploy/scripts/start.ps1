@@ -17,7 +17,7 @@
     后端端口，默认 8000。前端会用它拼 VITE_API_TARGET。
 
 .PARAMETER FrontendPort
-    前端端口，默认 5173。
+    前端端口，默认 3000。
 
 .PARAMETER NoFrontend
     只起后端和依赖服务（比如你要用自己已经开好的前端）。
@@ -33,7 +33,7 @@
 [CmdletBinding()]
 param(
     [int]$BackendPort = 8000,
-    [int]$FrontendPort = 5173,
+    [int]$FrontendPort = 3000,
     [switch]$NoFrontend,
     [switch]$SkipData
 )
@@ -68,7 +68,7 @@ function Test-PortOpen([int]$Port) {
     # 用 TcpClient 探测端口，比 Test-NetConnection 快得多。
     #
     # ⚠ 必须同时试 IPv4 / IPv6：Vite 默认只监听 ::1（所以前端**只能**用
-    #   http://localhost:5173 打开，127.0.0.1 连不上）。只探 127.0.0.1 的话，
+    #   http://localhost:3000 打开，127.0.0.1 连不上）。只探 127.0.0.1 的话，
     #   明明起来了也会被判成"启动超时" —— 这个坑就是这么来的。
     foreach ($probe in @(
         @{ Host = '127.0.0.1'; Family = [System.Net.Sockets.AddressFamily]::InterNetwork },

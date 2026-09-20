@@ -130,7 +130,16 @@ export default function App() {
 
   if (location.pathname === '/login') {
     // 已登录还去登录页就直接送回去，免得"登录后按后退又回到登录页"
-    return session === 'authenticated' ? <Navigate to="/chat" replace /> : <Login />
+    return session === 'authenticated' ? (
+      <Navigate to="/chat" replace />
+    ) : (
+      <Login
+        onAuthenticated={(u) => {
+          setUser(u)
+          setSession('authenticated')
+        }}
+      />
+    )
   }
 
   if (session === 'checking') {

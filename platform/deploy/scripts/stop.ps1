@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     按**端口**找到占用它的进程并停掉：
-      - 5173 → 前端（Vite / node）
+      - 3000 → 前端（Vite / node）
       - 8000 → 后端（uvicorn / python）
 
     ## 为什么按端口找，而不是记 PID
@@ -18,7 +18,7 @@
     后端端口，默认 8000。
 
 .PARAMETER FrontendPort
-    前端端口，默认 5173。
+    前端端口，默认 3000。
 
 .PARAMETER All
     连 Redis / Qdrant 一起停（等于再调一次 services.ps1 stop）。
@@ -30,7 +30,7 @@
 [CmdletBinding()]
 param(
     [int]$BackendPort = 8000,
-    [int]$FrontendPort = 5173,
+    [int]$FrontendPort = 3000,
     [switch]$All
 )
 

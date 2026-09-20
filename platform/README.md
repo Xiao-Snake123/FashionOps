@@ -21,7 +21,7 @@ cd "c:\Users\Administrator\Desktop\Work agent\platform\deploy\scripts"
 1. 数据层：Redis + Qdrant（复用 `services.ps1`）
 2. 校验数据库迁移版本（库里没有迁移记录就自动 `fashionops-db init`）
 3. 后端 uvicorn（后台进程，日志在 `D:\develop\logs\backend.out.log`）
-4. 前端 Vite（<http://localhost:5173>）
+4. 前端 Vite（<http://localhost:3000>）
 
 跑完会打印：健康检查状态（`ok` / `degraded` + 哪个依赖没起）、访问地址、
 演示账号、以及怎么停。
@@ -155,17 +155,17 @@ Start-Process -FilePath ".venv\Scripts\python.exe" `
 ```powershell
 cd frontend
 npm install      # 首次
-npm run dev      # http://localhost:5173
+npm run dev      # http://localhost:3000
 ```
 
-- 前端**只能用 `http://localhost:5173`**（走 IPv6 `::1`），`127.0.0.1` 连不上
+- 前端**只能用 `http://localhost:3000`**（走 IPv6 `::1`），`127.0.0.1` 连不上
 - `/api` 与 `/health` 由 Vite 代理到 `http://127.0.0.1:8000`；
   后端不在 8000 时用 `VITE_API_TARGET` 改：`$env:VITE_API_TARGET="http://127.0.0.1:8010"`
 - 生产构建：`npm run build`（= `tsc --noEmit` + `vite build`）
 
 ### 5. 打开看效果
 
-**<http://localhost:5173>** → 用演示账号登录：
+**<http://localhost:3000>** → 用演示账号登录：
 
 | 用户名 | 密码 | 角色 |
 |---|---|---|
@@ -217,7 +217,7 @@ cd deploy\scripts
 | 灌假数据 | `.venv\Scripts\fashionops-seed.exe`（`--keep` 追加、`--seed 42` 换数据） |
 | 起 Redis / Qdrant | `deploy\scripts\services.ps1 start` |
 | 起后端 | `uvicorn fashionops.api.main:app --port 8000` |
-| 起前端 | `npm run dev`（5173） |
+| 起前端 | `npm run dev`（3000） |
 | 建用户 / 改密 / 看权限 | `.venv\Scripts\fashionops-user.exe create\|passwd\|show` |
 | 补角色预设权限 | `.venv\Scripts\fashionops-user.exe sync --apply-presets` |
 | 知识库建索引 | `.venv\Scripts\fashionops-kb.exe index` |

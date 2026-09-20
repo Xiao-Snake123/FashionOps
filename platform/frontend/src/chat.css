@@ -38,18 +38,68 @@
   min-height: 0;
 }
 
+/* 会话列表底部的"加载更多"。挂在滚动区外面，永远看得见 */
+.chat-list-more {
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px dashed var(--border, #d0d7de);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted, #6b7280);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.chat-list-more:hover:not(:disabled) {
+  color: var(--accent, #2563eb);
+  border-color: currentColor;
+}
+
+.chat-list-more:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
 .chat-list-item {
-  display: block;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
   width: 100%;
-  text-align: left;
-  padding: 9px 10px;
   border: 1px solid transparent;
   border-radius: 9px;
   background: transparent;
   color: var(--text-soft);
+  transition: background 0.12s, color 0.12s;
+}
+
+.chat-list-main {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  padding: 9px 10px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: inherit;
   cursor: pointer;
   font: inherit;
-  transition: background 0.12s, color 0.12s;
+}
+
+.chat-list-archive {
+  flex: 0 0 auto;
+  align-self: center;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  color: var(--text-dim);
+}
+
+.chat-list-archive:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--text);
 }
 
 .chat-list-item:hover {
@@ -116,6 +166,14 @@
   flex-direction: column;
   gap: 24px;
   min-height: 0;
+}
+
+/* 向上翻历史的按钮。放在滚动容器最顶部，跟着内容一起滚 */
+.chat-load-older {
+  display: flex;
+  justify-content: center;
+  /* 顶部那批消息之间已经有 24px 的 gap，这里不再额外留白 */
+  margin-bottom: -8px;
 }
 
 /* ---- 消息 ---- */
@@ -327,6 +385,15 @@
   color: var(--text-dim);
 }
 
+/* ---- 追问（模型不确定，等用户回答）---- */
+/* 和审批卡片刻意长得**不一样**：那个是"我要做一件有风险的事，你点头"，
+   这个是"我有个问题，你给个方向"。用中性灰、不用警告色 ——
+   染成黄的会让用户以为又出了什么要担责的事。 */
+.chat-awaiting {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
 /* ---- 任务卡片 ---- */
 .task-card {
   display: block;
@@ -462,6 +529,131 @@
 
 .button.block {
   width: 100%;
+}
+
+/* 列表顶部的状态筛选（进行中 / 已归档 / 全部） */
+.chat-filter {
+  display: flex;
+  gap: 4px;
+  background: rgba(0, 0, 0, 0.04);
+  padding: 3px;
+  border-radius: 10px;
+}
+
+.chat-filter-btn {
+  flex: 1;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  padding: 6px 4px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  cursor: pointer;
+  font: inherit;
+}
+
+.chat-filter-btn.active {
+  background: #fff;
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+/* 对话头右侧操作（记忆 / 取消归档） */
+.chat-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ---- 长期记忆抽屉 ---- */
+.mem-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  justify-content: flex-end;
+  z-index: 50;
+}
+
+.mem-drawer {
+  width: 380px;
+  max-width: 90vw;
+  height: 100%;
+  background: var(--bg, #fff);
+  display: flex;
+  flex-direction: column;
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.12);
+}
+
+.mem-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.mem-head h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.mem-head-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.mem-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mem-empty {
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.mem-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mem-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mem-topic {
+  font-weight: 600;
+  font-size: 13.5px;
+}
+
+.mem-content {
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.mem-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.mem-foot .muted {
+  font-size: 11.5px;
+  color: var(--text-dim);
 }
 
 /* 窄屏时把会话列表收起来 —— 两个窄栏并排比一个更难看，

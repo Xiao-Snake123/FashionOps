@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
-import { saveSession, type TokenPair } from '../auth'
+import { saveSession, type TokenPair, type User } from '../auth'
 
 /**
  * 登录页。
@@ -23,7 +23,12 @@ import { saveSession, type TokenPair } from '../auth'
  *    哪些 provider 只留了适配位（`implemented=false`）。
  *    让用户点了才发现 501，比一开始就说"还没接"要差。
  */
-export default function Login() {
+export default function Login({
+  onAuthenticated,
+}: {
+  /** 登录成功后通知上层把会话状态切到已登录（auth 模块不耦合路由，由 App 传入）。 */
+  onAuthenticated?: (user: User) => void
+}) {
   const navigate = useNavigate()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -50,6 +55,9 @@ export default function Login() {
     try {
       const pair: TokenPair = await api.login(username.trim(), password)
       saveSession(pair)
+      // 先切 App 的 React 状态再跳转：否则 App 还认为 session 是 anonymous，
+      // 到了 /chat 会被守卫 <Navigate to="/login"> 弹回登录页（见 App.tsx 的守卫）。
+      onAuthenticated?.(pair.user)
       // 用 replace：登录后按浏览器后退不该回到登录页
       //
       // 落点是**对话页**而不是看板：用户登录后想干的第一件事通常是

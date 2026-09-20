@@ -739,6 +739,17 @@ async function postSse<T>(
   if (buffer.trim()) flush(buffer)
 }
 
+export interface AgentMemory {
+  id: number
+  topic: string
+  content: string
+  kind: string
+  username: string
+  source_conversation_no: string | null
+  created_at: string | null
+  updated_at: string | null
+}
+
 export const api = {
   health: () => request<Health>('/health'),
   summary: () => request<Summary>('/api/v1/summary'),
@@ -829,19 +840,49 @@ export const api = {
   lowStock: (threshold = 5) => request<LowStockItem[]>(`/api/v1/inventory/low-stock${qs({ threshold })}`),
 
   // ---- 对话 ----
-  conversations: (p: { limit?: number } = {}) =>
+  /**
+   * 我的会话列表。`total` 是**真实总数**（不是本页条数），
+   * 配合 `offset` 就能翻页 —— 以前 total 恒等于返回条数，第 51 个会话永远取不到。
+   */
+  conversations: (p: { limit?: number; status?: string; offset?: number } = {}) =>
     request<{ items: Conversation[]; total: number }>(`/api/v1/conversations${qs(p)}`),
   createConversation: (title?: string) =>
     request<{ conversation: Conversation }>('/api/v1/conversations', {
       method: 'POST',
       body: JSON.stringify({ title: title ?? null }),
     }),
-  conversation: (conversationNo: string) =>
+  /**
+   * 会话详情 + 历史消息。
+   *
+   * 默认只回**最近**的一批（后端 `DEFAULT_HISTORY_LIMIT`），`before_seq`
+   * 用来往回翻更早的消息 —— 一场长对话不该为了看最新几句就把整段历史
+   * （含工具返回的大段 JSON）全量拉下来。
+   */
+  conversation: (conversationNo: string, p: { limit?: number; before_seq?: number } = {}) =>
     request<{
       conversation: Conversation
       messages: ChatMessage[]
       pending_approvals: ChatApproval[]
-    }>(`/api/v1/conversations/${encodeURIComponent(conversationNo)}`),
+      /** 还有更早的消息可以翻（用最后一条的 seq 当 before_seq 再请求一次）。 */
+      has_more: boolean
+    }>(`/api/v1/conversations/${encodeURIComponent(conversationNo)}${qs(p)}`),
+
+  /** 归档 / 取消归档：把会话从默认列表收起或放回，不删数据。 */
+  archiveConversation: (conversationNo: string) =>
+    request<{ ok: boolean; status: string }>(
+      `/api/v1/conversations/${encodeURIComponent(conversationNo)}/archive`,
+      { method: 'POST' },
+    ),
+  unarchiveConversation: (conversationNo: string) =>
+    request<{ ok: boolean; status: string }>(
+      `/api/v1/conversations/${encodeURIComponent(conversationNo)}/unarchive`,
+      { method: 'POST' },
+    ),
+
+  /** 我记住了关于你的哪些事（长期记忆）。 */
+  memories: () => request<{ items: AgentMemory[] }>('/api/v1/memories'),
+  deleteMemory: (id: number) =>
+    request<{ ok: boolean; id: number }>(`/api/v1/memories/${id}`, { method: 'DELETE' }),
 
   /** 发一条消息，流式接收 Agent 的回答。 */
   sendChatMessage: (

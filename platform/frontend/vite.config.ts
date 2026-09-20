@@ -16,7 +16,7 @@ const API_TARGET = process.env.VITE_API_TARGET ?? 'http://127.0.0.1:8000'
 export default defineConfig({
   plugins: [react()],
   server: {
-    port: 5173,
+    port: 3000,
     // 用 Vite 的代理把 /api 转到后端，前端代码里写相对路径就行。
     // 好处：浏览器同源，完全不涉及 CORS；后端换端口也只改这一处。
     proxy: {

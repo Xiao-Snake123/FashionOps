@@ -12,7 +12,7 @@
 #     docker compose exec api fashionops-seed
 #     docker compose exec api fashionops-user create-admin admin   # 密码只显示一次
 #     docker compose exec api fashionops-kb index --rebuild
-#     打开 http://localhost:5173
+#     打开 http://localhost:3000
 #
 # ## 第一次跑之前检查这几项
 #
@@ -37,7 +37,7 @@
 # 7. **端口冲突**：本机已经装了 MySQL / Redis / Qdrant，它们占着
 #      3306 / 6379 / 6333。所以本文件**默认不把这三个容器映射到宿主端口**
 #      （容器之间用服务名互通，不需要宿主端口）。
-#      而 `api` 和 `web` 默认用 8000 / 5173 —— 这两个也常常被本地开发服务占着，
+#      而 `api` 和 `web` 默认用 8000 / 3000 —— 这两个也常常被本地开发服务占着，
 #      在 `.env.docker` 里改 `API_PORT` / `WEB_PORT` 即可（或先停掉本地服务）。
 #      *为什么基础设施默认不映射*：让两个东西抢同一个端口，
 #      报错长得像“权限不足”（Windows 上尤其如此），排查方向会完全跑偏。
@@ -246,9 +246,9 @@ services:
     volumes:
       - ./frontend:/app
       - web-node-modules:/app/node_modules
-    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 3000"
     ports:
-      - "127.0.0.1:${WEB_PORT:-5173}:5173"
+      - "127.0.0.1:${WEB_PORT:-3000}:3000"
 
 volumes:
   mysql-data:

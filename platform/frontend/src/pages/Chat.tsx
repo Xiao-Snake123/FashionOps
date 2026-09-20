@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import {
   api,
   ApiError,
+  type AgentMemory,
   type ChatApproval,
   type ChatEvent,
   type ChatMessage,
@@ -31,8 +32,14 @@ interface LiveState {
 
 const EMPTY_LIVE: LiveState = { text: '', steps: [] }
 
+/** 会话列表每页条数。 */
+const CONVERSATION_PAGE_SIZE = 50
+
 export default function Chat() {
   const [conversations, setConversations] = useState<Conversation[]>([])
+  /** 会话总数（后端真实值），用来判断还有没有下一页 */
+  const [convTotal, setConvTotal] = useState(0)
+  const [loadingMoreConv, setLoadingMoreConv] = useState(false)
   const [current, setCurrent] = useState<string | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [pending, setPending] = useState<ChatApproval[]>([])
@@ -41,23 +48,92 @@ export default function Chat() {
   const [input, setInput] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [listStatus, setListStatus] = useState<'active' | 'archived' | 'all'>('active')
+  const [memPanelOpen, setMemPanelOpen] = useState(false)
+  /** 还有更早的历史可以翻（后端 limit 之后由 has_more 告知）。 */
+  const [hasMore, setHasMore] = useState(false)
+  const [loadingOlder, setLoadingOlder] = useState(false)
 
   const abortRef = useRef<AbortController | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
+  /** 往上翻历史时置位：这一轮不要执行"滚到底"，否则等于白翻。 */
+  const keepScrollRef = useRef(false)
 
   // ---------------------------------------------------------------- 数据加载
-  const loadConversations = useCallback(async () => {
-    const data = await api.conversations({ limit: 50 })
-    setConversations(data.items)
+  /**
+   * 拉会话列表。
+   *
+   * `offset > 0` 表示"再往后翻一页"，结果**追加**在后面；
+   * 否则是重新拉首页，结果**替换**。
+   *
+   * 后端现在返回的是**真实总数**（以前是 `len(items)`，最多 50），
+   * 所以这里能知道"还有没有下一页"。
+   */
+  const loadConversations = useCallback(async (status?: string, offset = 0) => {
+    const data = await api.conversations({ limit: CONVERSATION_PAGE_SIZE, status, offset })
+    setConvTotal(data.total)
+    setConversations((prev) => (offset > 0 ? [...prev, ...data.items] : data.items))
     return data.items
   }, [])
 
-  const loadConversation = useCallback(async (conversationNo: string) => {
-    const data = await api.conversation(conversationNo)
-    setMessages(data.messages)
-    setPending(data.pending_approvals)
-  }, [])
+  /** 翻下一页会话。`conversations.length` 就是下一页的起点 ——
+   *  列表里每一行都对应服务端的一行，不存在"本地有、服务端没有"的项。 */
+  const loadMoreConversations = useCallback(async () => {
+    if (loadingMoreConv) return
+    setLoadingMoreConv(true)
+    try {
+      await loadConversations(listStatus, conversations.length)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoadingMoreConv(false)
+    }
+  }, [conversations.length, listStatus, loadConversations, loadingMoreConv])
+
+  /**
+   * 拉取会话详情。
+   *
+   * 默认只取**最近**的一批（后端 `DEFAULT_HISTORY_LIMIT`）；
+   * 传 `beforeSeq` 则是"往回翻更早的一批"，此时要把结果**拼在前面**
+   * 而不是覆盖 —— 覆盖会让已经在屏幕上的新消息整段消失。
+   */
+  const loadConversation = useCallback(
+    async (conversationNo: string, opts?: { beforeSeq?: number }) => {
+      const data = await api.conversation(conversationNo, { before_seq: opts?.beforeSeq })
+      if (opts?.beforeSeq) {
+        setMessages((prev) => [...data.messages, ...prev])
+      } else {
+        setMessages(data.messages)
+      }
+      setHasMore(data.has_more)
+      setPending(data.pending_approvals)
+    },
+    [],
+  )
+
+  /** 翻更早的消息。翻完要把视口挪回原位，不然会被自动滚动拽到底部。 */
+  const loadOlder = useCallback(async () => {
+    const oldest = messages[0]
+    if (!current || loadingOlder || !hasMore || !oldest) return
+    const el = scrollRef.current
+    const prevHeight = el?.scrollHeight ?? 0
+    const prevTop = el?.scrollTop ?? 0
+    setLoadingOlder(true)
+    try {
+      keepScrollRef.current = true
+      await loadConversation(current, { beforeSeq: oldest.seq })
+      // DOM 更新后补偿新增内容的高度：用户视线停在原来的那条消息上
+      requestAnimationFrame(() => {
+        const node = scrollRef.current
+        if (node) node.scrollTop = prevTop + (node.scrollHeight - prevHeight)
+      })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoadingOlder(false)
+    }
+  }, [current, hasMore, loadConversation, loadingOlder, messages])
 
   useEffect(() => {
     let alive = true
@@ -89,6 +165,11 @@ export default function Chat() {
   // 新内容进来就滚到底。用 requestAnimationFrame 等 DOM 更新完再滚，
   // 否则会滚到"上一条的高度"，表现是永远差一行
   useEffect(() => {
+    // 翻历史那一次不滚到底 —— 见 keepScrollRef
+    if (keepScrollRef.current) {
+      keepScrollRef.current = false
+      return
+    }
     requestAnimationFrame(() => {
       const el = scrollRef.current
       if (el) el.scrollTop = el.scrollHeight
@@ -101,6 +182,20 @@ export default function Chat() {
       case 'message':
         setMessages((prev) => {
           if (prev.some((m) => m.id === event.message.id)) return prev
+          // 发送时先乐观插了一条用户消息（id 是**负数**占位值）。服务端落库后
+          // 会把**同一条**用户消息再推回来，这时 id 才是真实值 —— 直接 append
+          // 会让同一句话显示两遍（本次要修的就是这个）。所以先按"负 id + 同内容"
+          // 认出那条占位，**就地替换**成落库版本；认不出才当新消息追加。
+          if (event.message.role === 'user') {
+            const at = prev.findIndex(
+              (m) => m.id < 0 && m.role === 'user' && m.content === event.message.content,
+            )
+            if (at >= 0) {
+              const next = [...prev]
+              next[at] = event.message
+              return next
+            }
+          }
           return [...prev, event.message]
         })
         // 落库的助手正文和 live 里那份是同一段内容，别显示两遍
@@ -129,6 +224,15 @@ export default function Chat() {
           }
           return { ...prev, steps }
         })
+        // 工具消息是**搭在 tool_result 事件里**下发的（不是 type=message）。
+        // 必须自己收进 messages —— 否则"调用 + 结果"卡片永远拿不到返回内容。
+        // 以前看不出问题，是因为每回合结束后会全量重拉会话把它补回来，
+        // 代价是长对话每回合都要把整段历史重新拉一遍。
+        if (event.message?.id) {
+          setMessages((prev) =>
+            prev.some((m) => m.id === event.message.id) ? prev : [...prev, event.message],
+          )
+        }
         break
       case 'approval_required':
         setPending((prev) =>
@@ -170,12 +274,15 @@ export default function Chat() {
         setStreaming(false)
         setLive(EMPTY_LIVE)
         abortRef.current = null
-        // 重新拉一遍会话列表：标题、计数、成本这些汇总值变了
+        // 只刷新**会话列表**：标题、计数、成本这些汇总值变了。
+        //
+        // 消息本身已经由 SSE 增量补齐（包括随 tool_result 下发的工具消息，
+        // 见 handleEvent），所以不再重拉会话详情 —— 以前那一趟纯粹是为了
+        // 补工具消息，代价是长会话每回合都要把整段历史再拉一遍。
         loadConversations().catch(() => undefined)
-        if (current) loadConversation(current).catch(() => undefined)
       }
     },
-    [current, handleEvent, loadConversation, loadConversations],
+    [handleEvent, loadConversations],
   )
 
   const send = useCallback(async () => {
@@ -229,9 +336,28 @@ export default function Chat() {
     setCurrent(created.conversation.conversation_no)
     setMessages([])
     setPending([])
+    setHasMore(false)
     setLive(EMPTY_LIVE)
     inputRef.current?.focus()
   }, [])
+
+  const toggleArchive = useCallback(
+    async (c: Conversation) => {
+      const archived = c.status === 'archived'
+      try {
+        if (archived) await api.unarchiveConversation(c.conversation_no)
+        else await api.archiveConversation(c.conversation_no)
+        // 列表按当前筛选条件刷新；正在看的这条若是它自己，也重新拉一下状态
+        await loadConversations(listStatus)
+        if (c.conversation_no === current) {
+          loadConversation(current).catch(() => undefined)
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err))
+      }
+    },
+    [current, listStatus, loadConversations, loadConversation],
+  )
 
   // 工具消息按 tool_call_id 归并到发起它的那条 assistant 消息上，
   // 这样"调用 + 结果"在界面上是一张卡片，而不是两条谁也不挨着的记录
@@ -243,7 +369,9 @@ export default function Chat() {
     return map
   }, [messages])
 
-  const visible = messages.filter((m) => m.role !== 'tool')
+  // 工具消息要保留在 messages 里（结果卡片要用），只是不单独成行。
+  // 包 useMemo：否则每次输入一个字、每次 token 到达都要重过滤一遍。
+  const visible = useMemo(() => messages.filter((m) => m.role !== 'tool'), [messages])
   const pendingByMessage = useMemo(() => {
     const map = new Map<number, ChatApproval>()
     for (const a of pending) if (a.message_id) map.set(a.message_id, a)
@@ -258,26 +386,66 @@ export default function Chat() {
         <button className="button primary block" type="button" onClick={newConversation}>
           ＋ 新对话
         </button>
-        <div className="chat-list-items">
-          {conversations.map((c) => (
+        <div className="chat-filter">
+          {(['active', 'archived', 'all'] as const).map((s) => (
             <button
-              key={c.conversation_no}
+              key={s}
               type="button"
-              className={`chat-list-item${c.conversation_no === current ? ' active' : ''}`}
+              className={`chat-filter-btn${listStatus === s ? ' active' : ''}`}
               onClick={() => {
-                setCurrent(c.conversation_no)
-                setLive(EMPTY_LIVE)
-                setError(null)
-                loadConversation(c.conversation_no).catch((err: Error) => setError(err.message))
+                setListStatus(s)
+                loadConversations(s).catch((err: Error) => setError(err.message))
               }}
             >
-              <div className="chat-list-title">{c.title || '新对话'}</div>
-              <div className="chat-list-meta">
-                {c.message_count} 条 · {c.updated_at?.slice(5, 16).replace('T', ' ')}
-              </div>
+              {s === 'active' ? '进行中' : s === 'archived' ? '已归档' : '全部'}
             </button>
           ))}
         </div>
+        <div className="chat-list-items">
+          {conversations.map((c) => (
+            <div
+              key={c.conversation_no}
+              className={`chat-list-item${c.conversation_no === current ? ' active' : ''}`}
+            >
+              <button
+                type="button"
+                className="chat-list-main"
+                onClick={() => {
+                  setCurrent(c.conversation_no)
+                  setLive(EMPTY_LIVE)
+                  setError(null)
+                  loadConversation(c.conversation_no).catch((err: Error) => setError(err.message))
+                }}
+              >
+                <div className="chat-list-title">{c.title || '新对话'}</div>
+                <div className="chat-list-meta">
+                  {c.message_count} 条 · {c.updated_at?.slice(5, 16).replace('T', ' ')}
+                </div>
+              </button>
+              <button
+                type="button"
+                className="chat-list-archive"
+                title={c.status === 'archived' ? '取消归档' : '归档'}
+                onClick={() => void toggleArchive(c)}
+              >
+                {c.status === 'archived' ? '↩' : '🗄'}
+              </button>
+            </div>
+          ))}
+        </div>
+
+        {conversations.length < convTotal && (
+          <button
+            type="button"
+            className="chat-list-more"
+            disabled={loadingMoreConv}
+            onClick={() => void loadMoreConversations()}
+          >
+            {loadingMoreConv
+              ? '加载中…'
+              : `加载更多（还有 ${convTotal - conversations.length} 个）`}
+          </button>
+        )}
       </aside>
 
       <section className="chat-main">
@@ -290,10 +458,39 @@ export default function Chat() {
                 : '加载中…'}
             </div>
           </div>
+          <div className="chat-head-actions">
+            {currentConversation?.status === 'archived' && (
+              <button
+                type="button"
+                className="button small"
+                onClick={() => currentConversation && void toggleArchive(currentConversation)}
+              >
+                ↩ 取消归档
+              </button>
+            )}
+            <button type="button" className="button small" onClick={() => setMemPanelOpen(true)}>
+              记忆
+            </button>
+          </div>
         </header>
 
         <div className="chat-scroll" ref={scrollRef}>
           {loading && <div className="chat-hint">正在加载…</div>}
+
+          {/* 后端只回最近一批，更早的按需翻 —— 长会话不用为了看最新几句
+              就把整段历史（含工具返回的大段 JSON）全量拉下来 */}
+          {!loading && hasMore && (
+            <div className="chat-load-older">
+              <button
+                type="button"
+                className="button small"
+                disabled={loadingOlder}
+                onClick={() => void loadOlder()}
+              >
+                {loadingOlder ? '加载中…' : '↑ 加载更早的消息'}
+              </button>
+            </div>
+          )}
 
           {!loading && visible.length === 0 && (
             <div className="chat-empty">
@@ -404,6 +601,97 @@ export default function Chat() {
           )}
         </div>
       </section>
+
+      {memPanelOpen && <MemoriesPanel onClose={() => setMemPanelOpen(false)} />}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+/** 长期记忆面板：看清 Agent 记住了关于你的哪些事，并可以"让它忘掉"。 */
+function MemoriesPanel({ onClose }: { onClose: () => void }) {
+  const [items, setItems] = useState<AgentMemory[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [busyId, setBusyId] = useState<number | null>(null)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const data = await api.memories()
+      setItems(data.items)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const remove = async (m: AgentMemory) => {
+    setBusyId(m.id)
+    try {
+      await api.deleteMemory(m.id)
+      setItems((prev) => prev.filter((x) => x.id !== m.id))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const kindLabel: Record<string, string> = { preference: '偏好', fact: '事实', note: '备注' }
+
+  return (
+    <div className="mem-mask" onClick={onClose}>
+      <div className="mem-drawer" onClick={(e) => e.stopPropagation()}>
+        <div className="mem-head">
+          <h3>长期记忆</h3>
+          <div className="mem-head-actions">
+            <button type="button" className="button small" onClick={() => void load()}>
+              刷新
+            </button>
+            <button type="button" className="button small" onClick={onClose}>
+              关闭
+            </button>
+          </div>
+        </div>
+        <div className="mem-body">
+          {loading && <div className="chat-hint">加载中…</div>}
+          {!loading && error && <div className="chat-error"><span>{error}</span></div>}
+          {!loading && !error && items.length === 0 && (
+            <div className="mem-empty">
+              还没有记住任何关于你的事。在对话里告诉它你的偏好（例如"报表只发 CSV"），
+              它会记住并在以后自动照做。
+            </div>
+          )}
+          {!loading &&
+            items.map((m) => (
+              <div key={m.id} className="mem-card">
+                <div className="mem-card-head">
+                  <span className="mem-topic">{m.topic}</span>
+                  <span className="badge dim">{kindLabel[m.kind] ?? m.kind}</span>
+                </div>
+                <div className="mem-content">{m.content}</div>
+                <div className="mem-foot">
+                  <span className="muted">更新于 {m.updated_at?.slice(0, 10)}</span>
+                  <button
+                    type="button"
+                    className="button small danger"
+                    disabled={busyId === m.id}
+                    onClick={() => void remove(m)}
+                  >
+                    {busyId === m.id ? '删除中…' : '忘记'}
+                  </button>
+                </div>
+              </div>
+            ))}
+        </div>
+      </div>
     </div>
   )
 }
@@ -472,6 +760,12 @@ function MessageRow({
 
       {isApprovalCard && !pending && (
         <div className="approval-done">这张确认卡片已经处理过了</div>
+      )}
+
+      {/* 模型自己不确定、问了一句 —— 和审批卡片是两回事：
+          那个要"点确认/拒绝"，这个只要用文字回答。 */}
+      {message.finish_reason === 'awaiting_user' && (
+        <div className="chat-awaiting">等你回答 —— 直接在下面输入即可</div>
       )}
 
       {toolResult?.task_no && (
