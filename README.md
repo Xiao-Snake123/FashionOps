@@ -27,6 +27,17 @@
 > 真实凭据（数据库密码、邮箱授权码、模型 API Key）只在 `platform/.env` 里，
 > 不进仓库。
 
+### 界面预览
+
+> 以下截图都取自**本地真实运行**的 `platform/`（灌入的演示数据），不是设计稿。
+
+| | |
+| --- | --- |
+| **登录**<br>![](docs/screenshots/01-login.png) | **对话助手** —— Agent 调用 ERP / 知识库后给结论，并附下一步动作<br>![](docs/screenshots/02-chat.png) |
+| **数据看板** —— GMV / 退货率 / 广告 ROI / 库存告急，含 Redis·Qdrant 连通状态<br>![](docs/screenshots/03-dashboard.png) | **任务工作台** —— Agent 拆解出的任务与执行进度<br>![](docs/screenshots/04-tasks.png) |
+| **商品库** —— SKU 与库存<br>![](docs/screenshots/05-products.png) | **邮件闸门** —— 外发邮件的人工确认与限流<br>![](docs/screenshots/06-emails.png) |
+| **客服工单** —— 情绪/金额风险标注<br>![](docs/screenshots/07-tickets.png) | |
+
 ### 把 `platform/` 跑起来（命令都在 PowerShell 里实测过）
 
 **有启动脚本，一条命令就行**（脚本在 `platform/deploy/scripts/`，不在仓库根目录）：
