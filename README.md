@@ -17,7 +17,7 @@
 
 ### 想看 `platform/` 的效果
 
-**打开 <http://localhost:5173>，用演示账号登录：**
+**打开 <http://localhost:3000>，用演示账号登录：**
 
 | 用户名 | 密码 | 角色 |
 | --- | --- | --- |
@@ -56,7 +56,7 @@ cd "c:\Users\Administrator\Desktop\Work agent\platform"
 .venv\Scripts\fashionops-seed.exe                                 # 灌假数据 + 补回演示账号
 ```
 
-自检：<http://127.0.0.1:8000/health>（根路径）· 页面：<http://localhost:5173>
+自检：<http://127.0.0.1:8000/health>（根路径）· 页面：<http://localhost:3000>
 
 完整说明（页面导览、目录结构、命令速查、排错、设计原则）见
 [`platform/README.md`](platform/README.md)。
