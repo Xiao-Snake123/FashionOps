@@ -69,6 +69,46 @@ USER_STATUS_PENDING = "pending"  # 邀请未激活 / 等审批
 
 
 # ===========================================================================
+# 部门 —— 账号管理的组织维度
+# ---------------------------------------------------------------------------
+# 编号没有跟着往下排（放在"1. 用户"之前但不叫 0），是刻意的：
+# 给这个文件里已有的 1~8 重新编号会制造一次全文件的无意义 diff，
+# review 时真正要看的"多了一张表、用户多了一列"反而被淹掉。
+#
+# **为什么部门要单独建表，而不是 users 上放一个字符串**
+#
+# 字符串方案（`users.department = "运营部"`）看起来更省事，但立刻会撞上三件事：
+# 1. 界面上要能**下拉选择**部门 —— 靠 `SELECT DISTINCT department` 拼出来的
+#    候选列表里，会出现"运营部/运营部 /运营部 "这种靠人眼才能分辨的变体；
+# 2. 部门要能**改名**（"市场部"→"增长部"），字符串方案要 UPDATE 全表，
+#    而且中途失败会留下一半新名一半旧名；
+# 3. 以后要挂部门级的配置（预算、审批额度）没有地方放。
+#
+# `code` 是给代码用的稳定标识，`name` 是给人看的、可改 —— 和角色同一套思路。
+# ===========================================================================
+class Department(Base):
+    """部门。账号分成"部门"来管理，是分级授权的组织基础。"""
+
+    __tablename__ = "departments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    #: 稳定标识，如 ``ops``。代码和配置里引用它，改名不影响
+    code: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    description: Mapped[str] = mapped_column(Text, default="")
+
+    #: 停用的部门不再出现在新建账号的下拉里，但已归属的人不动 ——
+    #: 直接删部门会让一批人瞬间变成"无部门"，那是更大的事故
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    def __repr__(self) -> str:
+        return f"<Department {self.code}>"
+
+
+# ===========================================================================
 # 1. 用户
 # ===========================================================================
 class User(Base):
@@ -94,6 +134,15 @@ class User(Base):
     status: Mapped[str] = mapped_column(String(32), default=USER_STATUS_ACTIVE, index=True)
     #: 超级管理员绕过所有权限检查。**只应该有一个**，用于系统初始化。
     is_superuser: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    #: 所属部门。**可空**：系统初始管理员、外部对接账号不属于任何部门，
+    #: 强迫他们选一个部门只会逼出一个叫"其它"的假部门。
+    #:
+    #: ondelete 用 SET NULL 而不是 CASCADE：删部门不该连带删人 ——
+    #: 人的任务、审计、发件记录都还挂在那个 user_id 上。
+    department_id: Mapped[int | None] = mapped_column(
+        ForeignKey("departments.id", ondelete="SET NULL"), index=True
+    )
 
     #: 连续失败次数与锁定截止时间。用于防暴力破解。
     failed_login_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -333,6 +382,7 @@ __all__ = [
     "USER_STATUS_LOCKED",
     "USER_STATUS_PENDING",
     "APIKey",
+    "Department",
     "ExternalIdentity",
     "Permission",
     "RefreshToken",

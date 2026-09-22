@@ -51,10 +51,17 @@ class Scope:
     ASSET_WRITE = "asset:write"
     MAIL_SEND = "mail:send"
 
+    #: 外部办公能力（由 mcp-servers 项目提供，经网关接入）。
+    #: 只读动作给 office:read，会改变外部世界的（发信 / 建日程 / 写文件）给 office:write。
+    #: 这样「谁能发邮件、谁能改日程」由平台 RBAC 统一管，而不是每个办公服务器各搞一套。
+    OFFICE_READ = "office:read"
+    OFFICE_WRITE = "office:write"
+
     ALL = frozenset(
         {
             ERP_READ, ERP_WRITE, ECOM_READ, ECOM_WRITE,
             AD_READ, AD_WRITE, KB_READ, ASSET_WRITE, MAIL_SEND,
+            OFFICE_READ, OFFICE_WRITE,
         }
     )
 

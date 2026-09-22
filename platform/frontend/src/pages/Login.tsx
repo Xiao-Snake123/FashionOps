@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import { saveSession, type TokenPair, type User } from '../auth'
+import { Icon } from '../ui'
 
 /**
  * 登录页。
@@ -73,6 +74,11 @@ export default function Login({
   return (
     <div className="login-page">
       <form className="login-card" onSubmit={submit}>
+        <div className="login-brand">
+          <div className="brand-logo">
+            <Icon name="sparkle" size={21} />
+          </div>
+        </div>
         <h1>服装电商多 Agent 运营中台</h1>
         <p className="login-sub">FashionOps · 请登录后使用</p>
 

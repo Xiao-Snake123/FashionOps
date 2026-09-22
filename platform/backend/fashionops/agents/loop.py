@@ -76,6 +76,7 @@ from fashionops.db.models import (
 )
 from fashionops.gateway.core import CallContext, ToolGateway
 from fashionops.gateway.registry import from_llm_name, registry
+from fashionops.skills import skill_for_kind
 
 logger = logging.getLogger("fashionops.agents.loop")
 
@@ -135,38 +136,34 @@ KIND_TOOLS: dict[str, tuple[str, ...]] = {
     ),
 }
 
-_KIND_GUIDE: dict[str, str] = {
-    "selection": (
-        "先调 erp.query_candidates 拉候选商品（按用户给的条件传参，limit 用默认值即可），"
-        "再把返回的 candidates **原样**传给 selection.rank_candidates 打分排序"
-        "（top_n 按用户要求的款数）。\n"
-        "结论里列出选中的款式：spu_code、总分、一两句推荐理由。"
-        "理由必须引用打分返回里的具体数字（销量、毛利率、库存），**不要自己造数字**。"
-        "如果有商品被硬约束挡掉，简单说明挡掉的原因。"
-    ),
-    "analytics": (
-        "先调 erp.query_sales_summary 分别按 group_by=category 和 group_by=channel 查一次"
-        "（days 用用户说的时间范围，没说就用 30）。\n"
-        "把 totals 和两个 groups 传给 analytics.detect_alerts 拿告警结论，"
-        "再调 analytics.render_business_report 生成 Excel 报表（把两次查询结果原样传进去）。\n"
-        "结论里必须包含：整体 GMV、订单数、最值得注意的一到两条告警（引用工具给的数值和 level）、"
-        "以及报表的 asset_no 和下载地址。**严重程度以工具返回的 level 为准，不要自己判断**。"
-    ),
-    "notification": (
-        "用中文起草一封给相关人的邮件：说清楚背景、结论，有报表就把 asset_no / URL 写进去。\n"
-        "**必须调 mail.send 真正发送** —— 只把邮件内容写出来不算完成这一步"
-        "（实测过：模型写了一封措辞完整的邮件就说「已起草」，任务被标成成功，"
-        "而收件人什么也没收到，用户以为发出去了）。\n"
-        "正文里的**每个数字都必须来自前面步骤的结论或工具返回**；"
-        "这一步手上没有数据，就如实写「本次没有需要核对的数据」，**不要编数字**。\n"
-        "系统会在这次发送真正执行前拦下等人工确认 —— 那是设计，不是出错："
-        "不要谎报「已经发出」，也不要向读者解释这个机制。"
-    ),
-    "generic": (
-        "用只读工具查到用户要的信息，然后用两三句中文给出结论。"
-        "数字必须来自工具返回，查不到就如实说查不到。"
-    ),
-}
+#: 认不出意图时的兜底提示。
+#:
+#: **它刻意不是一个技能文档**：`generic` 是"关键词一个都没命中"的降级路径，
+#: 没有业务 SOP 可讲 —— 写成 md 只是把这两句话换个地方放，还多一次文件读取。
+#: 技能文档的门槛是"这里有一套值得被 review 和版本管理的业务规范"。
+_GENERIC_GUIDE = (
+    "用只读工具查到用户要的信息，然后用两三句中文给出结论。"
+    "数字必须来自工具返回，查不到就如实说查不到。"
+)
+
+
+def _guide_for(kind: str) -> str:
+    """这一步的操作规范。
+
+    规范本身在 ``fashionops/skills/content/*.md``，按 frontmatter 的
+    ``todo_kind`` 匹配。搬出去之后它有了三样以前没有的东西：
+    **版本控制与 code review**、**唯一的存放位置**，以及
+    **从代码现取的阈值**（文档里写 ``{{ min_stock }}``，渲染时取
+    `scoring.py` 的默认值 —— 改代码不会让文档变成假的）。
+
+    这里**注入正文**而不是让模型用 `skill.load` 按需拉，和对话链不同：
+    这一步该用哪个技能由 `kind` 决定，题面已知，没有"要不要读"这个决策，
+    多一次工具调用纯粹浪费一轮 token。
+    """
+    skill = skill_for_kind(kind)
+    if skill is not None:
+        return skill.body
+    return _GENERIC_GUIDE
 
 SYSTEM_PROMPT = """你是「服装电商多 Agent 运营中台」的任务执行 Agent。
 你正在执行一个任务中的**一个步骤**，这个步骤的目标在下面会告诉你。
@@ -867,7 +864,7 @@ def _todo_messages(
     parts = [
         f"## 任务的原始需求\n{user_request}",
         f"## 当前这一步（第 {seq} 步，共 {len(carry) + 1} 步起）\n{goal}",
-        f"## 这一步怎么做\n{_KIND_GUIDE.get(kind, _KIND_GUIDE['generic'])}",
+        f"## 这一步怎么做\n{_guide_for(kind)}",
     ]
     if carry:
         # 前面几步的结论要带进来 —— 出报表那步得知道"选品选了什么"，

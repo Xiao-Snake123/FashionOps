@@ -1,51 +1,55 @@
 /*
- * 设计 token —— 浅色近单色。
+ * 设计 token —— 现代 SaaS 运营中台风。
  *
- * 参照 ChatGPT 的那套语言，核心就三条：
- *
- * 1. **整页只有黑白灰**，彩色只用在"语义必须区分"的地方（状态徽标、错误）。
- *    颜色一多就会有"仪表盘 / AI 生成"的味道，这是"AI 感"最大的来源之一。
- * 2. **弱边框强留白**。原来到处是 1px 边框 + 底色，看起来像配置面板；
- *    改成用留白分组，分隔线只留发丝级。
- * 3. **强调色是黑，不是蓝**。主按钮黑底白字，选中项浅灰底深色字。
- *    蓝底白字是后台管理系统的典型长相。
+ * 三条主线：
+ * 1. **浅灰蓝底 + 白色卡片**。页面底色退后，内容卡片浮起来，
+ *    靠"卡片"而不是"边框"划分区域 —— 这是参考稿最直观的特征。
+ * 2. **蓝色是唯一主色**（#2563eb）。主按钮、选中态、链接、关键数字都走它；
+ *    语义色（成功/警告/危险）只出现在状态芯片上，饱和度压到最低。
+ * 3. **弱边框 + 柔和阴影 + 大圆角**。卡片 14px 圆角、发丝级边框、
+ *    一层几乎看不见的投影，替代过去"到处 1px 实线"的配置面板感。
  */
 :root {
   color-scheme: light;
 
-  --bg: #ffffff;
-  --sidebar: #f9f9f9;
+  --bg: #f1f5fb; /* 页面底：浅灰蓝 */
+  --sidebar: #ffffff; /* 侧栏：纯白，和内容区拉开层次 */
   --panel: #ffffff;
-  --panel-2: #f7f7f8; /* hover 底色 */
-  --panel-3: #ececec; /* 选中/更实的次级底色 */
+  --panel-2: #f6f8fc; /* hover / 次级底 */
+  --panel-3: #eef2f9; /* 选中 / 更实的次级底 */
 
-  --border: #e8e8e8; /* 发丝级分隔线：够看清就行，不要重 */
-  --border-strong: #d9d9d9;
+  --border: #e7edf6; /* 发丝级分隔线 */
+  --border-strong: #d8e1ef;
 
-  --text: #0d0d0d;
-  --text-soft: #5d5d5d;
-  --text-dim: #8f8f8f;
+  --text: #0f172a;
+  --text-soft: #475569;
+  --text-dim: #8a97ab;
 
-  /* 强调色 = 黑。主按钮、选中态、进度条都走它 */
-  --accent: #0d0d0d;
+  /* 主色 = 蓝。主按钮、选中态、进度条、关键数字都走它 */
+  --accent: #2563eb;
+  --accent-strong: #1d4ed8;
+  --accent-soft: #e8f0fe; /* 选中项浅蓝底 */
   --accent-ink: #ffffff;
-  /* 蓝色只留给链接。链接是唯一"颜色能帮上忙"的地方 */
-  --link: #0b57d0;
+  --link: #2563eb;
 
-  /* 语义色：降饱和度。原色在浅底上会刺眼，而且一刺眼就像 AI 生成的图标 */
-  --ok: #16794c;
-  --warn: #8a6100;
-  --danger: #bc3b2f;
-  --danger-bg: #fdf3f2;
-  --warn-bg: #fdf8ec;
-  --ok-bg: #f1f8f3;
+  /* 语义色：降饱和、配浅底，只用于状态芯片 */
+  --ok: #16a34a;
+  --ok-bg: #e9f8ef;
+  --warn: #d97706;
+  --warn-bg: #fef4e6;
+  --danger: #dc2626;
+  --danger-bg: #fdecec;
+  --info: #7c3aed;
+  --info-bg: #f2ecfe;
 
-  --radius: 12px;
-  --radius-lg: 26px; /* 输入框那种大圆角 */
-  --content-max: 880px; /* 内容列宽 → 超宽屏上居中限宽 */
+  --radius-sm: 10px;
+  --radius: 14px;
+  --radius-lg: 20px; /* 输入框那种大圆角 */
+  --content-max: 1120px; /* 内容列宽 → 超宽屏居中限宽 */
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
-  --shadow-md: 0 4px 18px rgba(0, 0, 0, 0.08);
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04), 0 6px 20px -12px rgba(15, 23, 42, 0.14);
+  --shadow-md: 0 10px 30px -12px rgba(15, 23, 42, 0.22);
 }
 
 * {
@@ -62,21 +66,21 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* 滚动条也调淡一点。默认的深色滚动条在浅色页面上很跳 */
+/* 滚动条调淡 */
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.14);
+  background: rgba(15, 23, 42, 0.14);
   border-radius: 999px;
   border: 2px solid transparent;
   background-clip: content-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.24);
+  background: rgba(15, 23, 42, 0.26);
   background-clip: content-box;
 }
 
@@ -92,91 +96,126 @@ code,
   min-height: 100vh;
 }
 
+/* ---------- 侧边栏 ---------- */
 .sidebar {
   width: 248px;
   flex: 0 0 248px;
   background: var(--sidebar);
   border-right: 1px solid var(--border);
-  padding: 16px 12px;
+  padding: 16px 14px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
 }
 
 .brand {
-  padding: 0 10px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 6px 18px;
+}
+
+.brand-logo {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--accent), #6d9cf7);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 6px 14px -6px rgba(37, 99, 235, 0.7);
+}
+
+.brand-text {
+  min-width: 0;
 }
 
 .brand h1 {
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 14.5px;
+  font-weight: 700;
   margin: 0;
-  line-height: 1.4;
+  line-height: 1.3;
   letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .brand small {
+  display: block;
   color: var(--text-dim);
-  font-size: 11.5px;
+  font-size: 11px;
+  margin-top: 1px;
 }
 
 .nav-link {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: 8px;
+  gap: 10px;
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
   color: var(--text-soft);
   text-decoration: none;
   font-size: 13.5px;
-  transition: background 0.1s, color 0.1s;
+  font-weight: 500;
+  transition: background 0.12s, color 0.12s;
+}
+
+.nav-link > span:first-of-type {
+  flex: 1;
+  min-width: 0;
+}
+
+.nav-icon {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  color: currentColor;
+  opacity: 0.85;
 }
 
 .nav-link:hover {
-  background: var(--panel-3);
+  background: var(--panel-2);
   color: var(--text);
 }
 
 /*
- * 选中态用**浅灰底 + 深色字**，不用蓝底白字。
- *
- * 蓝底白字是"后台管理系统"的典型长相 —— 而且侧栏上同时出现
- * 蓝色选中块 + 红色角标 + 多种图标色，整页就散了。
- * ChatGPT 的选中项只是比周围深一点的灰。这一处改了，
- * 整页的观感会明显不同。
+ * 选中态：浅蓝底 + 蓝色字。
+ * 整页只有主色蓝，选中项是它最重要的落点 —— 一眼能看出"我在哪"。
  */
 .nav-link.active {
-  background: var(--panel-3);
-  color: var(--text);
-  font-weight: 500;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.nav-link.active .nav-icon {
+  opacity: 1;
 }
 
 .nav-badge {
-  background: var(--text);
-  color: var(--accent-ink);
+  background: #fde8e6;
+  color: #e0473a;
   border-radius: 999px;
-  padding: 0 6px;
+  padding: 0 7px;
   font-size: 11px;
-  line-height: 17px;
+  font-weight: 600;
+  line-height: 18px;
   min-width: 18px;
   text-align: center;
-  font-weight: 500;
 }
 
+/* ---------- 内容区 ---------- */
 .content {
   flex: 1;
   min-width: 0;
-  padding: 32px 40px 80px;
+  padding: 26px 32px 40px;
 }
 
 /*
- * 内容列居中限宽。
- *
- * 铺满超宽屏是"AI 感"的另一大来源：行太长、卡片被拉得很散，
- * 读起来像配置面板而不是产品。
- *
- * 对话页除外 —— 它自己的两栏布局要占满宽度，内部再限宽。
+ * 内容列居中限宽（对话页除外 —— 它自己两栏布局，内部再限宽）。
  */
 .content > *:not(.chat-page) {
   max-width: var(--content-max);
@@ -184,28 +223,71 @@ code,
   margin-right: auto;
 }
 
+/* ---------- 页面头部 ---------- */
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.page-crumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.page-crumb .sep {
+  opacity: 0.6;
+}
+
+.page-crumb .current {
+  color: var(--text-soft);
+}
+
 .page-title {
   margin: 0 0 6px;
-  font-size: 22px;
-  font-weight: 600;
+  font-size: 21px;
+  font-weight: 700;
   letter-spacing: -0.02em;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .page-desc {
-  margin: 0 0 26px;
+  margin: 0 0 20px;
   color: var(--text-dim);
-  font-size: 13.5px;
-  line-height: 1.6;
+  font-size: 13px;
+  line-height: 1.65;
+  max-width: 760px;
+}
+
+.page-header .page-desc {
+  margin-bottom: 0;
+}
+
+.page-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 /* ---------- 卡片与栅格 ---------- */
 .grid {
   display: grid;
-  gap: 14px;
+  gap: 16px;
 }
 
 .grid-4 {
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
 }
 
 .grid-2 {
@@ -215,41 +297,118 @@ code,
 .card {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 18px 20px;
+  border-radius: var(--radius);
+  padding: 20px;
+  box-shadow: var(--shadow-card);
 }
 
 .card h3 {
-  margin: 0 0 12px;
+  margin: 0 0 14px;
   font-size: 14px;
   font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
+/* ---------- 统计 / KPI 卡片 ---------- */
 .stat-label {
   color: var(--text-dim);
   font-size: 12.5px;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+/* 标签前的小圆点：用颜色暗示这个指标的语义（默认主色） */
+.stat-label::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: 0 0 auto;
+}
+
+.stat-card.warn .stat-label::before {
+  background: var(--warn);
+}
+
+.stat-card.danger .stat-label::before {
+  background: var(--danger);
+}
+
+.stat-card.ok .stat-label::before {
+  background: var(--ok);
 }
 
 .stat-value {
-  font-size: 25px;
-  font-weight: 650;
-  letter-spacing: -0.4px;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
 }
 
 .stat-value.small {
-  font-size: 20px;
+  font-size: 22px;
 }
 
 .stat-sub {
   color: var(--text-dim);
   font-size: 12px;
-  margin-top: 4px;
+  margin-top: 6px;
+}
+
+.stat-value .delta {
+  font-size: 12.5px;
+  font-weight: 600;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.stat-value .delta.up {
+  color: var(--danger);
+}
+
+.stat-value .delta.down {
+  color: var(--ok);
+}
+
+/* KPI 卡片的图标块 */
+.stat-icon {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.stat-card.warn .stat-icon {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+
+.stat-card.danger .stat-icon {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.stat-card.ok .stat-icon {
+  background: var(--ok-bg);
+  color: var(--ok);
 }
 
 /* ---------- 表格 ---------- */
 .table-wrap {
   overflow-x: auto;
+  margin: 0 -20px -20px;
+  padding: 0 20px 8px;
 }
 
 table {
@@ -261,16 +420,36 @@ table {
 th {
   text-align: left;
   color: var(--text-dim);
-  font-weight: 500;
-  padding: 9px 12px;
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 10px 12px;
+  background: var(--panel-2);
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
 }
 
+th:first-child {
+  border-top-left-radius: var(--radius-sm);
+}
+
+th:last-child {
+  border-top-right-radius: var(--radius-sm);
+}
+
 td {
-  padding: 11px 12px;
+  padding: 12px;
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
+}
+
+tbody tr:last-child td {
+  border-bottom: none;
+}
+
+tbody tr {
+  transition: background 0.1s;
 }
 
 tbody tr:hover {
@@ -281,18 +460,25 @@ tr.clickable {
   cursor: pointer;
 }
 
-/* ---------- 徽标 ---------- */
 /*
- * 徽标：**去掉了彩色边框**，只留平色底 + 彩色字。
- *
- * 原来一个徽标同时给三种颜色信号（底、边框、字），红黄绿紫一起出现
- * 的时候整张表像看板。平底 + 彩色字就够了，而且安静很多。
+ * 选中行：浅蓝底 + 左侧蓝条。表格里每行都是业务数据，
+ * 高亮只表示"这行被选中了"。
  */
+tr.row-active,
+tr.row-active:hover {
+  background: var(--accent-soft) !important;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+/* ---------- 徽标 / 芯片 ---------- */
 .badge {
-  display: inline-block;
-  padding: 1.5px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
   border-radius: 999px;
   font-size: 11.5px;
+  font-weight: 600;
   line-height: 18px;
   white-space: nowrap;
   background: var(--panel-3);
@@ -319,9 +505,35 @@ tr.clickable {
   color: var(--text-dim);
 }
 
+/* 数据来源 / 分类这类中性标签 */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text-soft);
+}
+
+.tag.accent {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent);
+}
+
+.tag .tag-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
 /* ---------- 进度条 ---------- */
 .progress {
-  background: var(--panel-2);
+  background: var(--panel-3);
   border-radius: 999px;
   height: 6px;
   overflow: hidden;
@@ -344,44 +556,41 @@ tr.clickable {
   background: var(--danger);
 }
 
-/* ---------- 其他 ---------- */
+/* ---------- 工具条 / 筛选 ---------- */
 .toolbar {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
   align-items: center;
-  margin-bottom: 14px;
+  margin-bottom: 16px;
 }
 
 select,
-input[type='text'] {
+input[type='text'],
+input[type='email'],
+input[type='password'],
+input[type='search'] {
   background: var(--panel);
   border: 1px solid var(--border-strong);
   color: var(--text);
-  border-radius: 9px;
-  padding: 7px 11px;
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
   font-size: 13px;
   font-family: inherit;
   outline: none;
+  transition: border-color 0.12s, box-shadow 0.12s;
 }
 
-/* 聚焦只加深边框，不加蓝色光晕 —— 蓝色光晕是"控件库默认值"的味道 */
 select:focus,
-input[type='text']:focus {
-  border-color: var(--text-dim);
+input[type='text']:focus,
+input[type='email']:focus,
+input[type='password']:focus,
+input[type='search']:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 
-/*
- * 按钮 —— 全页**唯一一套**。
- *
- * 之前存在两套：`.btn`（Tasks/TaskDetail 在用）和 `.button`（Chat/Tickets/
- * Login/App 在用）。而 `.button` 只在 `.login-card` 和 `.sidebar-footer`
- * 里有作用域定义，**外层从来没有全局定义** —— 所以对话页和工单页的按钮
- * 一直是浏览器默认样式，跟旁边的按钮长得不一样。
- *
- * 现在统一成 `基础类 + 变体`，`.btn` 保留为别名（老页面不用改）。
- * 主按钮黑底白字，其余白底发丝边框 —— 整页只有主操作是"重"的。
- */
+/* ---------- 按钮 ---------- */
 .btn,
 .button {
   display: inline-flex;
@@ -390,19 +599,22 @@ input[type='text']:focus {
   gap: 6px;
   background: var(--panel);
   border: 1px solid var(--border-strong);
-  color: var(--text);
-  border-radius: 9px;
-  padding: 7px 14px;
+  color: var(--text-soft);
+  border-radius: var(--radius-sm);
+  padding: 8px 15px;
   font-size: 13px;
+  font-weight: 500;
   font-family: inherit;
   line-height: 1.4;
   cursor: pointer;
-  transition: background 0.12s, border-color 0.12s;
+  transition: background 0.12s, border-color 0.12s, color 0.12s, box-shadow 0.12s;
 }
 
 .btn:hover:not(:disabled),
 .button:hover:not(:disabled) {
   background: var(--panel-2);
+  color: var(--text);
+  border-color: var(--border-strong);
 }
 
 .btn.primary,
@@ -410,13 +622,15 @@ input[type='text']:focus {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-ink);
-  font-weight: 500;
+  font-weight: 600;
+  box-shadow: 0 6px 14px -8px rgba(37, 99, 235, 0.9);
 }
 
 .btn.primary:hover:not(:disabled),
 .button.primary:hover:not(:disabled) {
-  background: #262626;
-  border-color: #262626;
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+  color: var(--accent-ink);
 }
 
 .btn.danger,
@@ -430,19 +644,26 @@ input[type='text']:focus {
 .button.danger:hover:not(:disabled) {
   background: var(--danger-bg);
   border-color: var(--danger);
+  color: var(--danger);
 }
 
 .btn.small,
 .button.small {
-  padding: 4px 10px;
+  padding: 5px 11px;
   font-size: 12.5px;
-  border-radius: 8px;
+  border-radius: 9px;
+}
+
+.btn.block,
+.button.block {
+  width: 100%;
 }
 
 .btn:disabled,
 .button:disabled {
-  opacity: 0.45;
+  opacity: 0.5;
   cursor: not-allowed;
+  box-shadow: none;
 }
 
 .muted {
@@ -451,16 +672,17 @@ input[type='text']:focus {
 
 .error-box {
   background: var(--danger-bg);
-  border: 1px solid rgba(188, 59, 47, 0.28);
+  border: 1px solid rgba(220, 38, 38, 0.22);
   color: var(--danger);
   border-radius: var(--radius);
   padding: 12px 16px;
   margin-bottom: 16px;
+  font-size: 13px;
 }
 
 .empty {
   color: var(--text-dim);
-  padding: 26px;
+  padding: 28px;
   text-align: center;
 }
 
@@ -484,7 +706,7 @@ input[type='text']:focus {
 .dag-node {
   background: var(--panel);
   border: 1.5px solid var(--border-strong);
-  border-radius: 9px;
+  border-radius: var(--radius-sm);
   padding: 9px 13px;
   min-width: 128px;
   text-align: center;
@@ -503,8 +725,8 @@ input[type='text']:focus {
 }
 
 .dag-node.running {
-  border-color: var(--text);
-  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.07);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
 }
 
 .dag-node.failed {
@@ -525,12 +747,16 @@ input[type='text']:focus {
   flex-wrap: wrap;
 }
 
+.dag-legend .dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
 /* ---------- 执行步骤（todo 列表） ---------- */
-/*
- * 原来是 ReactFlow 画的 DAG。换成线性列表的理由写在
- * docs/12-AI协作交接.md 里：真实需求就是一条线，画成图只增加阅读成本。
- * 左边框的颜色承担"这一步到哪了"的提示，所以状态色放在这里而不是徽标上。
- */
 .todo-list {
   list-style: none;
   margin: 0;
@@ -543,8 +769,8 @@ input[type='text']:focus {
 .todo-item {
   border: 1px solid var(--border);
   border-left: 3px solid var(--border-strong);
-  border-radius: 8px;
-  padding: 10px 13px;
+  border-radius: var(--radius-sm);
+  padding: 11px 14px;
   background: var(--panel-2);
 }
 
@@ -602,15 +828,6 @@ input[type='text']:focus {
   color: var(--danger);
 }
 
-.dag-legend .dot {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  margin-right: 6px;
-  vertical-align: middle;
-}
-
 /* ---------- 事件流 ---------- */
 .event-list {
   max-height: 430px;
@@ -645,21 +862,23 @@ input[type='text']:focus {
 /* ---------- 表单 ---------- */
 textarea {
   width: 100%;
-  min-height: 78px;
+  min-height: 84px;
   resize: vertical;
   background: var(--panel);
   border: 1px solid var(--border-strong);
   color: var(--text);
-  border-radius: 9px;
-  padding: 9px 11px;
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
   font-size: 13px;
   font-family: inherit;
-  line-height: 1.5;
+  line-height: 1.55;
   outline: none;
+  transition: border-color 0.12s, box-shadow 0.12s;
 }
 
 textarea:focus {
-  border-color: var(--text-dim);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 
 textarea:disabled {
@@ -669,57 +888,47 @@ textarea:disabled {
 
 .field-label {
   display: block;
-  font-size: 12px;
+  font-size: 12.5px;
   color: var(--text-dim);
-  margin-bottom: 6px;
+  margin-bottom: 7px;
 }
 
-/* 示例需求：点一下就填进去，省得用户想不出该怎么问 */
+/* 示例需求：点一下填进去 */
 .prompt-chip {
   display: inline-block;
   background: var(--panel);
   border: 1px solid var(--border-strong);
   border-radius: 999px;
-  padding: 4px 12px;
+  padding: 5px 13px;
   font-size: 12.5px;
   color: var(--text-soft);
   cursor: pointer;
   margin: 0 6px 6px 0;
-  transition: background 0.12s;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
 }
 
 .prompt-chip:hover {
-  background: var(--panel-2);
-  color: var(--text);
+  background: var(--accent-soft);
+  border-color: rgba(37, 99, 235, 0.3);
+  color: var(--accent);
 }
 
-/*
- * 按钮变体已合并到上面的 `.btn, .button` 一节。
- * 原来这里还有 `.btn.primary` / `.btn.danger` / `.btn:disabled`，
- * 分成三处定义同一个按钮的相貌，很容易改漏一处。
- */
-
 /* ---------- 审批横幅 ---------- */
-/*
- * 停在人工闸口时最显眼的一块。用黄色实心边而不是弹窗——
- * 弹窗可以被随手关掉，而"任务正卡在等你点确认"这件事在用户关掉后
- * 就没地方看了，改成一个常驻横幅就不会漏。
- */
 .banner {
   border-radius: var(--radius);
   padding: 16px 20px;
   margin-bottom: 18px;
-  border: 1px solid rgba(138, 97, 0, 0.28);
+  border: 1px solid rgba(217, 119, 6, 0.24);
   background: var(--warn-bg);
 }
 
 .banner.danger {
-  border-color: rgba(188, 59, 47, 0.28);
+  border-color: rgba(220, 38, 38, 0.24);
   background: var(--danger-bg);
 }
 
 .banner.ok {
-  border-color: rgba(22, 121, 76, 0.24);
+  border-color: rgba(22, 163, 74, 0.22);
   background: var(--ok-bg);
 }
 
@@ -736,11 +945,10 @@ textarea:disabled {
   margin-top: 12px;
 }
 
-/* 审批草稿的只读预览：等宽字体 + 可滚动，避免长正文把页面撑开 */
 .draft {
   background: var(--panel-2);
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: 8px;
   padding: 10px 12px;
   margin-top: 10px;
   font-size: 12.5px;
@@ -753,7 +961,7 @@ textarea:disabled {
 .artifact-list {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 8px;
   margin-top: 6px;
 }
 
@@ -763,8 +971,8 @@ textarea:disabled {
   gap: 10px;
   background: var(--panel-2);
   border: 1px solid var(--border);
-  border-radius: 9px;
-  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  padding: 10px 13px;
   font-size: 13px;
 }
 
@@ -782,7 +990,7 @@ textarea:disabled {
   align-items: center;
   gap: 10px;
   font-size: 12.5px;
-  margin-bottom: 7px;
+  margin-bottom: 8px;
 }
 
 .bar-track {
@@ -817,7 +1025,165 @@ textarea:disabled {
   color: var(--text-dim);
 }
 
-/* 活着的连接标记：告诉用户"页面在自己更新，不用手动刷新" */
+/* ---------- 右侧抽屉（账号编辑等） ---------- */
+/* 抽成通用样式而不是各页各写一份：抽屉的遮罩、宽度、进出方向
+   在整套界面里应该只有一种，用户才会形成肌肉记忆 */
+.drawer-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.4);
+  display: flex;
+  justify-content: flex-end;
+  z-index: 60;
+  backdrop-filter: blur(2px);
+}
+
+.drawer {
+  width: 460px;
+  max-width: 94vw;
+  height: 100%;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  box-shadow: -12px 0 40px -12px rgba(15, 23, 42, 0.4);
+}
+
+.drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.drawer-head h3 {
+  margin: 0;
+  font-size: 15px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.drawer-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 20px;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+}
+
+/* 表单字段：标签在上、控件在下 */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field > span {
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+
+.field-row {
+  display: flex;
+  gap: 12px;
+}
+
+.field-row > .field {
+  flex: 1;
+  min-width: 0;
+}
+
+.field input,
+.field select {
+  width: 100%;
+}
+
+/* 角色多选 */
+.checkbox-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.checkbox-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.checkbox-item:hover {
+  background: var(--panel-2);
+}
+
+.checkbox-item:has(input:checked) {
+  border-color: rgba(37, 99, 235, 0.35);
+  background: var(--accent-soft);
+}
+
+.checkbox-item input {
+  margin-top: 3px;
+}
+
+.checkbox-item .ci-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.checkbox-item .ci-desc {
+  font-size: 11.5px;
+  color: var(--text-dim);
+  line-height: 1.5;
+  margin-top: 2px;
+}
+
+/* 一次性密码展示：必须显眼，因为它只出现这一次 */
+.secret-box {
+  border: 1px solid rgba(217, 119, 6, 0.28);
+  background: var(--warn-bg);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+
+.secret-box .secret-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--warn);
+  margin-bottom: 7px;
+}
+
+.secret-box .secret-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  word-break: break-all;
+  background: var(--panel);
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+  padding: 10px 12px;
+  user-select: all;
+}
+
+/* 活着的连接标记 */
 .live-dot {
   display: inline-block;
   width: 7px;
@@ -838,4 +1204,3 @@ textarea:disabled {
     opacity: 0.25;
   }
 }
-

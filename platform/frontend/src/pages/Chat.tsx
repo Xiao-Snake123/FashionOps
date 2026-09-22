@@ -9,6 +9,8 @@ import {
   type ChatMessage,
   type Conversation,
 } from '../api'
+import { Icon, num } from '../ui'
+import { ToolResultView } from '../resultViews'
 
 /**
  * 对话页 —— Agent 的主入口。
@@ -380,11 +382,20 @@ export default function Chat() {
 
   const currentConversation = conversations.find((c) => c.conversation_no === current)
 
+  // 只给"最后一条助手消息"挂快捷操作，避免每条回答下面都堆一排按钮
+  const lastAssistantId = useMemo(() => {
+    for (let i = visible.length - 1; i >= 0; i -= 1) {
+      if (visible[i].role === 'assistant') return visible[i].id
+    }
+    return null
+  }, [visible])
+
   return (
     <div className="chat-page">
       <aside className="chat-list">
         <button className="button primary block" type="button" onClick={newConversation}>
-          ＋ 新对话
+          <Icon name="plus" size={15} />
+          新对话
         </button>
         <div className="chat-filter">
           {(['active', 'archived', 'all'] as const).map((s) => (
@@ -450,13 +461,23 @@ export default function Chat() {
 
       <section className="chat-main">
         <header className="chat-head">
-          <div>
+          <div style={{ minWidth: 0 }}>
             <h2>{currentConversation?.title || '对话'}</h2>
             <div className="chat-head-sub">
               {currentConversation
-                ? `${currentConversation.llm_calls} 次模型调用 · ${currentConversation.tool_calls} 次工具调用 · ${currentConversation.total_tokens} tokens`
+                ? `${currentConversation.message_count} 条消息 · 创建于 ${currentConversation.created_at?.slice(0, 16).replace('T', ' ')}`
                 : '加载中…'}
             </div>
+            {currentConversation && (
+              <div className="chat-head-tags">
+                <span className={`badge ${currentConversation.status === 'archived' ? 'dim' : 'ok'}`}>
+                  {currentConversation.status === 'archived' ? '已归档' : '进行中'}
+                </span>
+                <span className="tag">{currentConversation.llm_calls} 次模型调用</span>
+                <span className="tag">{currentConversation.tool_calls} 次工具调用</span>
+                <span className="tag accent">{num(currentConversation.total_tokens)} tokens</span>
+              </div>
+            )}
           </div>
           <div className="chat-head-actions">
             {currentConversation?.status === 'archived' && (
@@ -465,10 +486,12 @@ export default function Chat() {
                 className="button small"
                 onClick={() => currentConversation && void toggleArchive(currentConversation)}
               >
-                ↩ 取消归档
+                <Icon name="archive" size={14} />
+                取消归档
               </button>
             )}
             <button type="button" className="button small" onClick={() => setMemPanelOpen(true)}>
+              <Icon name="memory" size={14} />
               记忆
             </button>
           </div>
@@ -523,40 +546,56 @@ export default function Chat() {
               toolResult={m.tool_call_id ? toolResults.get(m.tool_call_id) : undefined}
               pending={pendingByMessage.get(m.id)}
               streaming={streaming}
+              showActions={!streaming && m.id === lastAssistantId}
               onDecide={decide}
             />
           ))}
 
           {live.steps.length > 0 && (
             <div className="chat-row assistant">
-              <div className="chat-tool-stack">
-                {live.steps.map((step, index) => (
-                  <div key={`${step.name}-${index}`} className={`tool-chip ${step.state}`}>
-                    <span className="tool-chip-icon">
-                      {step.state === 'running' ? '⏳' : step.ok ? '✓' : '✗'}
-                    </span>
-                    <span className="tool-chip-name">{step.name}</span>
-                    <span className="tool-chip-state">
-                      {step.state === 'running' ? '调用中…' : step.ok ? '成功' : '失败'}
-                    </span>
-                  </div>
-                ))}
+              <div className="msg-avatar assistant-avatar">
+                <Icon name="sparkle" size={15} />
+              </div>
+              <div className="msg-body">
+                <div className="chat-tool-stack">
+                  {live.steps.map((step, index) => (
+                    <div key={`${step.name}-${index}`} className={`tool-chip ${step.state}`}>
+                      <span className="tool-chip-icon">
+                        {step.state === 'running' ? '⏳' : step.ok ? '✓' : '✗'}
+                      </span>
+                      <span className="tool-chip-name">{step.name}</span>
+                      <span className="tool-chip-state">
+                        {step.state === 'running' ? '调用中…' : step.ok ? '成功' : '失败'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           )}
 
           {live.text && (
             <div className="chat-row assistant">
-              <div className="bubble assistant">
-                {live.text}
-                <span className="caret" />
+              <div className="msg-avatar assistant-avatar">
+                <Icon name="sparkle" size={15} />
+              </div>
+              <div className="msg-body">
+                <div className="bubble assistant">
+                  {live.text}
+                  <span className="caret" />
+                </div>
               </div>
             </div>
           )}
 
           {streaming && !live.text && live.steps.length === 0 && (
             <div className="chat-row assistant">
-              <div className="bubble assistant thinking">思考中…</div>
+              <div className="msg-avatar assistant-avatar">
+                <Icon name="sparkle" size={15} />
+              </div>
+              <div className="msg-body">
+                <div className="bubble assistant thinking">思考中…</div>
+              </div>
             </div>
           )}
         </div>
@@ -574,8 +613,8 @@ export default function Chat() {
           <textarea
             ref={inputRef}
             value={input}
-            rows={2}
-            placeholder="说点什么…（Enter 发送，Shift+Enter 换行）"
+            rows={1}
+            placeholder="说点什么…"
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
@@ -586,19 +625,26 @@ export default function Chat() {
             disabled={loading}
           />
           {streaming ? (
-            <button className="button danger" type="button" onClick={stop}>
-              停止
+            <button className="send-button stop" type="button" onClick={stop} title="停止">
+              <Icon name="close" size={17} />
             </button>
           ) : (
             <button
-              className="button primary"
+              className="send-button"
               type="button"
               onClick={() => void send()}
               disabled={!input.trim()}
+              title="发送（Enter）"
             >
-              发送
+              <Icon name="send" size={17} />
             </button>
           )}
+        </div>
+        <div className="composer-foot">
+          <span>Agent 可能会调用工具并产生费用，写操作会先找你确认。</span>
+          <span>
+            <kbd>Enter</kbd> 发送 · <kbd>Shift</kbd> + <kbd>Enter</kbd> 换行
+          </span>
         </div>
       </section>
 
@@ -702,18 +748,23 @@ function MessageRow({
   toolResult,
   pending,
   streaming,
+  showActions,
   onDecide,
 }: {
   message: ChatMessage
   toolResult?: ChatMessage
   pending?: ChatApproval
   streaming: boolean
+  showActions: boolean
   onDecide: (approval: ChatApproval, approved: boolean) => void
 }) {
   if (message.role === 'user') {
     return (
       <div className="chat-row user">
-        <div className="bubble user">{message.content}</div>
+        <div className="msg-avatar user-avatar">我</div>
+        <div className="msg-body">
+          <div className="bubble user">{message.content}</div>
+        </div>
       </div>
     )
   }
@@ -722,59 +773,120 @@ function MessageRow({
 
   return (
     <div className="chat-row assistant">
-      {message.tool_name && (
-        <ToolChip name={message.tool_name} args={message.tool_arguments} result={toolResult} />
-      )}
+      <div className="msg-avatar assistant-avatar">
+        <Icon name="sparkle" size={15} />
+      </div>
+      <div className="msg-body">
+        {message.tool_name && (
+          <ToolChip name={message.tool_name} args={message.tool_arguments} result={toolResult} />
+        )}
 
-      {message.content && <div className="bubble assistant">{message.content}</div>}
+        {/* 工具返回的数据独立渲染成卡片 —— 数字来自 tool_result 本身，
+            不是模型转述的。模型说错话，卡片上的数字照样是对的。 */}
+        {toolResult && (
+          <ToolResultView
+            tool={toolResult.tool_name ?? message.tool_name}
+            data={toolResult.tool_result}
+          />
+        )}
 
-      {pending && (
-        <div className="approval-card">
-          <div className="approval-head">
-            <span className="approval-badge">需要你确认</span>
-            <span className="approval-tool">{pending.tool_name}</span>
+        {message.content && (
+          <>
+            {/* 数据来源就是这条消息真实调用过的工具 —— 不是装饰，
+                让运营一眼看清"这个数字是从哪来的" */}
+            {message.tool_name && (
+              <div className="msg-sources">
+                <span className="msg-sources-label">数据来源</span>
+                <span className="tag accent">
+                  <span className="tag-dot" />
+                  {message.tool_name}
+                </span>
+              </div>
+            )}
+            <div className="bubble assistant">{message.content}</div>
+          </>
+        )}
+
+        {pending && (
+          <div className="approval-card">
+            <div className="approval-head">
+              <span className="approval-badge">需要你确认</span>
+              <span className="approval-tool">{pending.tool_name}</span>
+            </div>
+            {/* 摘要由**工具自己**生成，不是模型编的 —— 让运营去读 JSON 再点
+                "同意"，那不叫审批，叫背锅 */}
+            <pre className="approval-preview">{pending.preview}</pre>
+            <div className="approval-actions">
+              <button
+                className="button primary"
+                type="button"
+                disabled={streaming}
+                onClick={() => onDecide(pending, true)}
+              >
+                确认执行
+              </button>
+              <button
+                className="button"
+                type="button"
+                disabled={streaming}
+                onClick={() => onDecide(pending, false)}
+              >
+                拒绝
+              </button>
+            </div>
           </div>
-          {/* 摘要由**工具自己**生成，不是模型编的 —— 让运营去读 JSON 再点
-              "同意"，那不叫审批，叫背锅 */}
-          <pre className="approval-preview">{pending.preview}</pre>
-          <div className="approval-actions">
-            <button
-              className="button primary"
-              type="button"
-              disabled={streaming}
-              onClick={() => onDecide(pending, true)}
-            >
-              确认执行
-            </button>
-            <button
-              className="button"
-              type="button"
-              disabled={streaming}
-              onClick={() => onDecide(pending, false)}
-            >
-              拒绝
-            </button>
-          </div>
-        </div>
-      )}
+        )}
 
-      {isApprovalCard && !pending && (
-        <div className="approval-done">这张确认卡片已经处理过了</div>
-      )}
+        {isApprovalCard && !pending && (
+          <div className="approval-done">这张确认卡片已经处理过了</div>
+        )}
 
-      {/* 模型自己不确定、问了一句 —— 和审批卡片是两回事：
-          那个要"点确认/拒绝"，这个只要用文字回答。 */}
-      {message.finish_reason === 'awaiting_user' && (
-        <div className="chat-awaiting">等你回答 —— 直接在下面输入即可</div>
-      )}
+        {/* 模型自己不确定、问了一句 —— 和审批卡片是两回事：
+            那个要"点确认/拒绝"，这个只要用文字回答。 */}
+        {message.finish_reason === 'awaiting_user' && (
+          <div className="chat-awaiting">等你回答 —— 直接在下面输入即可</div>
+        )}
 
-      {toolResult?.task_no && (
-        <Link className="task-card" to={`/tasks/${toolResult.task_no}`}>
-          <div className="task-card-title">任务已启动</div>
-          <div className="task-card-no">{toolResult.task_no}</div>
-          <div className="task-card-sub">点这里看 DAG 与实时进度 →</div>
-        </Link>
-      )}
+        {toolResult?.task_no && (
+          <Link className="task-card" to={`/tasks/${toolResult.task_no}`}>
+            <div className="task-card-title">任务已启动</div>
+            <div className="task-card-no">{toolResult.task_no}</div>
+            <div className="task-card-sub">点这里看 DAG 与实时进度 →</div>
+          </Link>
+        )}
+
+        {showActions && message.content && <MessageActions content={message.content} />}
+      </div>
+    </div>
+  )
+}
+
+/** 最后一条回答下面的"接下来可以"。两个动作都是真的：复制、跳转。 */
+function MessageActions({ content }: { content: string }) {
+  const [copied, setCopied] = useState(false)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(content)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1600)
+    } catch {
+      /* 浏览器不给剪贴板权限就静默失败，不值得弹错误 */
+    }
+  }
+  return (
+    <div className="msg-actions">
+      <button type="button" className="msg-action" onClick={() => void copy()}>
+        <Icon name={copied ? 'check' : 'book'} size={14} />
+        {copied ? '已复制' : '复制回答'}
+      </button>
+      <Link className="msg-action" to="/tasks">
+        <Icon name="tasks" size={14} />
+        查看任务进度
+      </Link>
+      <Link className="msg-action" to="/dashboard">
+        <Icon name="dashboard" size={14} />
+        打开数据看板
+      </Link>
     </div>
   )
 }

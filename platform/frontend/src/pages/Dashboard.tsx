@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import ReactECharts from 'echarts-for-react'
 import { api, type DailyMetric, type Health, type LowStockItem, type Summary } from '../api'
-import { pct, StatCard, yuan } from '../ui'
+import { PageHeader, pct, StatCard, yuan } from '../ui'
 
 export default function Dashboard() {
   const [health, setHealth] = useState<Health | null>(null)
@@ -61,8 +61,12 @@ export default function Dashboard() {
 
   return (
     <>
-      <h2 className="page-title">数据看板</h2>
-      <p className="page-desc">近 30 天经营概览 · 假数据已刻意埋入异常，用于演示熔断与转人工</p>
+      <PageHeader
+        crumbs={['运营中台', '数据看板']}
+        title="数据看板"
+        badge={<span className="tag accent">近 30 天</span>}
+        desc="经营概览 · 假数据已刻意埋入异常，用于演示熔断与转人工"
+      />
 
       {error && <div className="error-box">{error}</div>}
 
@@ -88,35 +92,55 @@ export default function Dashboard() {
       )}
 
       <div className="grid grid-4" style={{ marginBottom: 14 }}>
-        <StatCard label="近 30 天 GMV" value={summary ? yuan(summary.gmv_30d) : '—'} sub={`订单 ${summary?.orders ?? '—'} 单`} />
+        <StatCard
+          label="近 30 天 GMV"
+          value={summary ? yuan(summary.gmv_30d) : '—'}
+          sub={`订单 ${summary?.orders ?? '—'} 单`}
+          icon="trend-up"
+        />
         <StatCard
           label="退货率"
           value={summary ? pct(summary.return_rate_30d) : '—'}
           sub="服装行业普遍 25%~40%"
+          icon="alert"
         />
         <StatCard
           label="广告 ROI"
           value={summary ? Number(summary.ad_roi_30d ?? 0).toFixed(2) : '—'}
           sub={`花费 ${summary ? yuan(summary.ad_spend_30d) : '—'}`}
+          icon="campaign"
         />
         <StatCard
           label="库存告急 SKU"
           value={summary?.stockout_skus ?? '—'}
           sub="选品 Agent 会被硬约束过滤掉"
           tone="danger"
+          icon="alert"
         />
-        <StatCard label="商品 / SKU" value={`${summary?.products ?? '—'} / ${summary?.skus ?? '—'}`} />
-        <StatCard label="待处理工单" value={summary?.open_tickets ?? '—'} />
+        <StatCard
+          label="商品 / SKU"
+          value={`${summary?.products ?? '—'} / ${summary?.skus ?? '—'}`}
+          sub="在售 / 全部规格"
+          icon="product"
+        />
+        <StatCard
+          label="待处理工单"
+          value={summary?.open_tickets ?? '—'}
+          sub="等待客服 Agent 接管"
+          icon="ticket"
+        />
         <StatCard
           label="已转人工"
           value={summary?.escalated_tickets ?? '—'}
           sub="情绪激动 / 涉及金额纠纷"
           tone="warn"
+          icon="alert"
         />
         <StatCard
           label="任务"
           value={`${summary?.running_tasks ?? 0} 运行 / ${summary?.failed_tasks ?? 0} 失败`}
           sub="失败任务用于错误归因"
+          icon="tasks"
         />
       </div>
 

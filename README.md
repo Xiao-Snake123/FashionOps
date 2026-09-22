@@ -50,6 +50,52 @@ cd "c:\Users\Administrator\Desktop\Work agent\platform"
 完整说明（页面导览、目录结构、命令速查、排错、设计原则）见
 [`platform/README.md`](platform/README.md)。
 
+### 把 `platform/` 的能力接到 MCP 客户端
+
+平台把自己的**工具网关**暴露成了一个 MCP 服务器。外部 Agent（Claude Desktop /
+Cursor / DeerFlow）能直接调用 ERP 查询、知识库检索、报表导出这些能力，
+而且**调用链和平台内部完全一致** —— 权限 / 限流 / 熔断 / 幂等 / 审计一项不少。
+
+```powershell
+cd "c:\Users\Administrator\Desktop\Work agent\platform"
+
+# 1) 装可选依赖。★ 必须 --all-extras，否则 ruff/pytest 会被卸掉
+uv sync --all-extras
+
+# 2) 给某个用户签一把 key（明文只显示一次，库里只有哈希）
+.venv\Scripts\fashionops-user.exe apikey-create operator `
+    --name "Claude Desktop" --scopes erp:read
+
+# 3) 不启动服务也能先看这把 key 能看到什么
+.venv\Scripts\python.exe -m fashionops.mcp.cli tools
+```
+
+客户端配置（路径换成你自己的）：
+
+```json
+{
+  "mcpServers": {
+    "fashionops": {
+      "command": "D:/path/to/platform/.venv/Scripts/python.exe",
+      "args": ["-m", "fashionops.mcp.cli", "serve"],
+      "cwd": "D:/path/to/platform/backend",
+      "env": { "FASHIONOPS_MCP_API_KEY": "fops_这里填签发的明文" }
+    }
+  }
+}
+```
+
+> **key 是长期凭据**，所以它支持撤销和过期，也记最后使用时间：
+> `fashionops-user apikey-list` / `apikey-revoke <前缀>`。
+> 撤销**立即生效** —— 凭据是每次请求现解析的，不用重启服务端。
+>
+> 一把 key 能做的事恒为**其归属用户权限的子集**：`--scopes` 只能**收窄**，
+> 塞一个用户本人没有的作用域也拿不到 —— 不存在"用 key 提权"。
+>
+> 写 MCP 服务时有一个坑：stdio 模式下 **stdout 是 JSON-RPC 通道**，
+> 所以服务进程里只能用 logger（项目的 `setup_logging` 已经打到 stderr），
+> 不能 `print()` —— 否则客户端会报莫名其妙的 "invalid JSON"。
+
 ---
 
 ## 技术栈

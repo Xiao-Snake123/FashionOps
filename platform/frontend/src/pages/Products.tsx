@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, type Product } from '../api'
-import { StatusBadge, yuan } from '../ui'
+import { PageHeader, StatusBadge, yuan } from '../ui'
 
 export default function Products() {
   const [items, setItems] = useState<Product[]>([])
@@ -43,10 +43,12 @@ export default function Products() {
 
   return (
     <>
-      <h2 className="page-title">商品库</h2>
-      <p className="page-desc">
-        共 {total} 个 SPU。选品 Agent 会按类目 + 季节 + 风格标签找相似竞品，再叠加库存硬约束过滤。
-      </p>
+      <PageHeader
+        crumbs={['运营中台', '商品库']}
+        title="商品库"
+        badge={<span className="tag">共 {total} 个 SPU</span>}
+        desc="选品 Agent 会按类目 + 季节 + 风格标签找相似竞品，再叠加库存硬约束过滤。"
+      />
 
       {error && <div className="error-box">{error}</div>}
 

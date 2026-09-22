@@ -23,7 +23,11 @@ Agent 直接 ``session.query(...)`` 也能跑，但那样就绕过了限流、�
 
 from __future__ import annotations
 
+import logging
+
 from fashionops.gateway.registry import Scope, ToolRegistry
+
+logger = logging.getLogger(__name__)
 
 #: 各 Agent 的默认权限集。写在一处，方便对照和审查 ——
 #: 权限散在各处时，很容易出现"通知 Agent 居然能改广告预算"这种越权。
@@ -78,9 +82,16 @@ def register_all_tools(registry: ToolRegistry | None = None) -> ToolRegistry:
     测试里传一个新建的，避免和别的测试互相污染。
     """
     from fashionops.gateway.registry import registry as default_registry
-    from fashionops.tools import business, erp, kb, mail, report
+
+    # 注意：`tools.skill`（提供 `skill.load` 工具）和 `fashionops.skills`
+    # （技能文档包）是两个东西。前者是工具，后者是文档 —— 别混。
+    from fashionops.tools import business, erp, kb, mail, report, skill
 
     target = registry if registry is not None else default_registry
+    # 技能加载排在最前：它不依赖任何其他工具，也不碰数据库 ——
+    # 只是把一份 markdown 读出来。放前面是为了让下面那些有依赖的模块
+    # 保持原来"基础工具先注册、业务工具最后"的阅读顺序。
+    skill.register(target)
     erp.register(target)
     report.register(target)
     mail.register(target)
@@ -88,6 +99,16 @@ def register_all_tools(registry: ToolRegistry | None = None) -> ToolRegistry:
     # 业务工具（原专用 Agent 的代码部分）：依赖上面先注册好的基础工具模块，
     # 所以放最后。顺序在这里是有意义的，别随手挪。
     business.register(target)
+    # 外部 MCP 服务器（office 等）：默认关闭，开了才接入。放在最后且不抛异常 ——
+    # 接入失败（比如没配 mcp-servers 路径）不能拖垮整个平台启动。
+    try:
+        from fashionops.integrations import office
+
+        n = office.register_office_tools(target)
+        if n:
+            logger.info("接入了 %d 个外部 MCP 工具", n)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("办公 MCP 接入跳过：%s", exc)
     return target
 
 

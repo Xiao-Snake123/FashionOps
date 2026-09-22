@@ -76,13 +76,35 @@ def _mask(url: str) -> str:
     return url if "@" not in url else url.split("://", 1)[0] + "://***@" + url.rsplit("@", 1)[-1]
 
 
+#: 灌库时建立的部门。
+#:
+#: 和迁移 `d3e4f5a6b7c8` 里的种子**必须保持一致**：迁移负责"升级已有库"，
+#: seed 负责"重建演示库"（它会 `drop_all`，迁移插进去的行会一起没掉）。
+#: 只写一处的话，会出现"升级上来的库有部门、重新灌的库一个都没有"这种
+#: 只在别人的机器上复现的环境差异。
+DEMO_DEPARTMENTS: tuple[tuple[str, str, str], ...] = (
+    ("ops", "运营部", "商品运营、活动与日常经营分析"),
+    ("service", "客服部", "售前售后工单与知识库维护"),
+    ("marketing", "市场部", "广告投放与增长"),
+    ("product", "商品部", "选品、供应链与库存"),
+    ("tech", "技术部", "系统维护与数据对接"),
+)
+
+
 #: 灌库后自动建好的演示账号。**密码写在文档里是刻意的** ——
 #: 这是本地演示库；真上生产要用 `fashionops-user` 改掉，
 #: 而"默认账号不存在"会让第一次打开项目的人卡在登录页。
-DEMO_USERS: tuple[tuple[str, str, str, tuple[str, ...], bool], ...] = (
-    ("demo", "FashionOps@2026", "演示管理员", ("admin",), True),
-    ("ops_manager", "FashionOps@2026", "运营主管", ("ops_manager",), False),
-    ("operator", "FashionOps@2026", "运营专员", ("operator",), False),
+#:
+#: 最后一项是**部门 code**（对应 `departments.code`，None 表示不归属部门）。
+#: 演示账号不落到部门上的话，打开"账号管理"看到的全是"未分配"，
+#: 完全看不出分级授权在做什么 —— 而那是这个页面唯一要展示的东西。
+DEMO_USERS: tuple[tuple[str, str, str, tuple[str, ...], bool, str | None], ...] = (
+    ("demo", "FashionOps@2026", "演示管理员", ("admin",), True, None),
+    ("ops_manager", "FashionOps@2026", "运营主管", ("ops_manager",), False, "ops"),
+    ("operator", "FashionOps@2026", "运营专员", ("operator",), False, "ops"),
+    # 两个部门主管：用它们可以直接对比出"部门主管只看得到本部门"这件事
+    ("dept_lead", "FashionOps@2026", "运营部主管", ("dept_manager",), False, "ops"),
+    ("svc_lead", "FashionOps@2026", "客服部主管", ("dept_manager",), False, "service"),
 )
 
 
@@ -93,20 +115,34 @@ def _bootstrap_identity(session: Session) -> dict[str, int]:
     不做这一步，灌完库的第一件事就是"登录 401"，
     而这个现象看起来像鉴权坏了，排查方向会整个跑偏。
     """
+    from fashionops.db.models_identity import Department, User
     from fashionops.security.permissions import sync_identity
     from fashionops.security.service import create_user
 
     sync_identity(session)
     session.flush()
 
-    created = 0
-    for username, password, full_name, roles, is_superuser in DEMO_USERS:
-        from fashionops.db.models_identity import User
+    # 部门先建：演示账号要挂上去，而账号管理是按部门分级的
+    dept_by_code: dict[str, Department] = {}
+    for code, name, description in DEMO_DEPARTMENTS:
+        row = session.scalar(select(Department).where(Department.code == code))
+        if row is None:
+            row = Department(code=code, name=name, description=description)
+            session.add(row)
+            session.flush()
+        dept_by_code[code] = row
 
+    created = 0
+    for username, password, full_name, roles, is_superuser, dept_code in DEMO_USERS:
         exists = session.scalar(select(User).where(User.username == username))
+        department_id = dept_by_code[dept_code].id if dept_code else None
         if exists is not None:
+            # 账号已存在时**只补部门**，不动密码和角色 ——
+            # 重新灌库不该把别人改过的密码覆盖回去
+            if exists.department_id is None and department_id is not None:
+                exists.department_id = department_id
             continue
-        create_user(
+        result = create_user(
             session,
             username=username,
             password=password,
@@ -115,9 +151,10 @@ def _bootstrap_identity(session: Session) -> dict[str, int]:
             is_superuser=is_superuser,
             created_by="seed",
         )
+        result.user.department_id = department_id
         created += 1
     session.flush()
-    return {"users": created}
+    return {"users": created, "departments": len(dept_by_code)}
 
 
 def seed(seed_value: int = DEFAULT_SEED, reset: bool = True) -> dict[str, int]:

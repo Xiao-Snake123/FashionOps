@@ -11,6 +11,7 @@ FastAPI 静默取先注册的那个。
 
 from __future__ import annotations
 
+from fashionops.api.routers.admin import router as admin_router
 from fashionops.api.routers.auth import router as auth_router
 from fashionops.api.routers.business import router as business_router
 from fashionops.api.routers.chat import router as chat_router
@@ -20,6 +21,7 @@ from fashionops.api.routers.system import router as system_router
 from fashionops.api.routers.tasks import router as tasks_router
 
 __all__ = [
+    "admin_router",
     "auth_router",
     "business_router",
     "chat_router",

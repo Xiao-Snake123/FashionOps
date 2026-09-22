@@ -434,6 +434,29 @@ class Settings(BaseSettings):
     otel_endpoint: str | None = None
     otel_service_name: str = "fashionops"
 
+    # ---- 外部 MCP 服务器（office 等，见 integrations/office.py）----
+    # 默认全关：开了才拉起子进程接入。两种方式二选一（见 office.py 说明）：
+    #   1) office_mcp_servers_json 直接给 JSON 数组；
+    #   2) office_mcp_cwd 指向 mcp-servers 目录，按约定拉起三个 office 模块。
+    office_mcp_enabled: bool = Field(
+        default=False, description="是否把外部 MCP 服务器（office 等）接入工具网关"
+    )
+    office_mcp_servers_json: str | None = Field(
+        default=None,
+        description="JSON 数组，描述要接入的 MCP 服务器（command/args/cwd/env/scopes 等）",
+    )
+    office_mcp_cwd: str | None = Field(
+        default=None,
+        description="mcp-servers 目录；设了就按约定拉起 office-docs/email/calendar 三个服务器",
+    )
+    office_mcp_python: str = Field(
+        default="python",
+        description="拉起 office 服务器用的解释器（通常指向 mcp-servers 的 venv 里的 python）",
+    )
+    office_mcp_workspace: str | None = Field(
+        default=None, description="传给 office 服务器的 OFFICE_MCP_WORKSPACE_ROOT"
+    )
+
     # ---- 校验器 ----
 
     @field_validator("data_dir")

@@ -8,7 +8,7 @@ import {
   type TaskEvent,
   type Todo,
 } from '../api'
-import { num, StatusBadge } from '../ui'
+import { num, PageHeader, StatusBadge } from '../ui'
 import { currentUserSnapshot } from '../auth'
 
 /**
@@ -241,18 +241,18 @@ export default function TaskDetail() {
 
   return (
     <>
-      <div className="toolbar" style={{ justifyContent: 'space-between' }}>
-        <div>
-          <h2 className="page-title" style={{ marginBottom: 2 }}>
+      <PageHeader
+        crumbs={['运营中台', '任务工作台']}
+        title={
+          <>
             {task.title} <StatusBadge status={task.status} />
-          </h2>
-          <div className="muted mono" style={{ fontSize: 12.5 }}>
-            {task.task_no}
+          </>
+        }
+        desc={
+          <>
+            <span className="mono">{task.task_no}</span>
             {todos.length > 0 && (
-              <>
-                {' '}
-                · 第 {todos.filter((t) => t.status === 'done').length}/{todos.length} 步
-              </>
+              <> · 第 {todos.filter((t) => t.status === 'done').length}/{todos.length} 步</>
             )}
             {streamState === 'live' && (
               <span style={{ marginLeft: 12, color: 'var(--ok)' }}>
@@ -261,12 +261,14 @@ export default function TaskDetail() {
               </span>
             )}
             {streamState === 'closed' && <span style={{ marginLeft: 12 }}>· 已结束</span>}
-          </div>
-        </div>
-        <Link to="/tasks" className="btn">
-          返回列表
-        </Link>
-      </div>
+          </>
+        }
+        actions={
+          <Link to="/tasks" className="btn">
+            返回列表
+          </Link>
+        }
+      />
 
       {/* 人工闸口：做成常驻横幅而不是弹窗。弹窗可以被随手关掉，
           而“任务正卡在等你点确认”这件事关掉后就没地方看了 */}

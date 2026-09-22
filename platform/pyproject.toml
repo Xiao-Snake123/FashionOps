@@ -79,6 +79,10 @@ integrations = [
 durable = [
     "dbos>=1.0",
 ]
+# MCP 服务端：把工具网关暴露给外部 MCP 客户端（Claude Desktop / Cursor / DeerFlow）
+mcp = [
+    "mcp>=2.0",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
@@ -96,6 +100,8 @@ fashionops-config = "fashionops.config_cli:main"
 fashionops-kb = "fashionops.kb.cli:main"
 fashionops-user = "fashionops.security.cli:main"
 fashionops-ticket = "fashionops.service.cli:main"
+fashionops-skills = "fashionops.skills.cli:main"
+fashionops-mcp = "fashionops.mcp.cli:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -112,6 +118,15 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.isort]
+# 项目从 `src/` 布局改成 `backend/` 之后，ruff 认不出 `fashionops` 是一方包了 ——
+# 于是 `backend/tests/` 下**每个**测试文件都被报 I001（导入块未排序），
+# 30 个文件、30 条一样的错，而它们本来就写得是对的。
+#
+# 显式声明一方包比"去改那 30 个文件"正确得多：改文件只是让报错消失，
+# 下次新建测试文件还会再犯一遍。
+known-first-party = ["fashionops"]
 
 [tool.ruff.lint.flake8-bugbear]
 # FastAPI 依赖注入的标准写法就是 Depends() / Query() 直接写在参数默认值上。

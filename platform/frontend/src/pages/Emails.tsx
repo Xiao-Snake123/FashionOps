@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useState } from 'react'
 import { api, type EmailGateStats, type EmailMessage } from '../api'
-import { num, StatusBadge } from '../ui'
+import { num, PageHeader, StatusBadge } from '../ui'
 
 /**
  * 闸门决策码 → 人能看懂的说法。
@@ -85,11 +85,11 @@ export default function Emails() {
 
   return (
     <>
-      <h2 className="page-title">邮件闸门</h2>
-      <p className="page-desc">
-        每一封邮件（放行的和被拦的都算）都会落库。只展示"发成功的"会让被拦的完全不可见 ——
-        运维看到"这周只发了 12 封"，却不知道还有 8 封被策略挡住、而业务方以为已经通知了。
-      </p>
+      <PageHeader
+        crumbs={['运营中台', '邮件闸门']}
+        title="邮件闸门"
+        desc='每一封邮件（放行的和被拦的都算）都会落库。只展示"发成功的"会让被拦的完全不可见 —— 运维看到"这周只发了 12 封"，却不知道还有 8 封被策略挡住、而业务方以为已经通知了。'
+      />
 
       {error && <div className="error-box">{error}</div>}
 

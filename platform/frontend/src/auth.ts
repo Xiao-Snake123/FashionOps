@@ -43,6 +43,8 @@ export interface User {
   roles: string[]
   permissions: string[]
   is_superuser: boolean
+  /** 所属部门。为 null 表示不属于任何部门（超管、对接账号）。 */
+  department_id?: number | null
 }
 
 export interface TokenPair {

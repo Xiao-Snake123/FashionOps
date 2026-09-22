@@ -19,7 +19,9 @@ import Tickets from './pages/Tickets'
 import Campaigns from './pages/Campaigns'
 import Emails from './pages/Emails'
 import Chat from './pages/Chat'
+import Accounts from './pages/Accounts'
 import Login from './pages/Login'
+import { Icon } from './ui'
 
 type SessionState = 'checking' | 'anonymous' | 'authenticated'
 
@@ -163,33 +165,43 @@ export default function App() {
     <div className="layout">
       <aside className="sidebar">
         <div className="brand">
-          <h1>服装电商多 Agent 运营中台</h1>
-          <small>FashionOps · 阶段 0</small>
+          <div className="brand-logo">
+            <Icon name="sparkle" size={19} />
+          </div>
+          <div className="brand-text">
+            <h1>服装电商 Agent</h1>
+            <small>运营中台 · FashionOps</small>
+          </div>
         </div>
 
         {/* 对话放在第一位 —— 它是现在的主入口：用户先说话，Agent 再决定
             是直接回答还是转成一个任务。其余页面是“看结果/看数据”的地方。 */}
         {hasPermission(user, 'chat:use') && (
           <NavLink to="/chat" className="nav-link">
+            <Icon name="chat" className="nav-icon" />
             <span>对话助手</span>
           </NavLink>
         )}
         <NavLink to="/dashboard" className="nav-link">
+          <Icon name="dashboard" className="nav-icon" />
           <span>数据看板</span>
         </NavLink>
         <NavLink to="/tasks" className="nav-link">
+          <Icon name="tasks" className="nav-icon" />
           <span>任务工作台</span>
           {summary && summary.running_tasks > 0 && (
             <span className="nav-badge">{summary.running_tasks}</span>
           )}
         </NavLink>
         <NavLink to="/tickets" className="nav-link">
+          <Icon name="ticket" className="nav-icon" />
           <span>客服工单</span>
           {summary && summary.escalated_tickets > 0 && (
             <span className="nav-badge">{summary.escalated_tickets}</span>
           )}
         </NavLink>
         <NavLink to="/campaigns" className="nav-link">
+          <Icon name="campaign" className="nav-icon" />
           <span>广告投放</span>
         </NavLink>
 
@@ -198,36 +210,51 @@ export default function App() {
             **这只是体验，后端照样会拦。** */}
         {hasPermission(user, 'mail:send') && (
           <NavLink to="/emails" className="nav-link">
+            <Icon name="mail" className="nav-icon" />
             <span>邮件闸门</span>
           </NavLink>
         )}
 
         <NavLink to="/products" className="nav-link">
+          <Icon name="product" className="nav-icon" />
           <span>商品库</span>
         </NavLink>
 
+        {/* 账号管理。`admin:user`（跨部门）和 `dept:user`（本部门）任一可见 ——
+            部门主管也要能进这个页面，只是里面只看得到自己部门的人。
+            **同样是体验层面的隐藏：后端每个接口都会独立校验。** */}
+        {hasPermission(user, 'admin:user', 'dept:user') && (
+          <NavLink to="/accounts" className="nav-link">
+            <Icon name="users" className="nav-icon" />
+            <span>账号管理</span>
+          </NavLink>
+        )}
+
         <div className="sidebar-footer">
-          <div className="user-chip">
-            <div className="user-name">{user?.full_name || user?.username}</div>
-            <div className="user-roles">
-              {user?.is_superuser ? '超级管理员' : user?.roles.join(' / ') || '（无角色）'}
+          <div className="user-card">
+            <div className="user-avatar">
+              {(user?.full_name || user?.username || '?').slice(0, 1).toUpperCase()}
+            </div>
+            <div className="user-chip">
+              <div className="user-name">{user?.full_name || user?.username}</div>
+              <div className="user-roles">
+                {user?.is_superuser ? '超级管理员' : user?.roles.join(' / ') || '（无角色）'}
+              </div>
             </div>
           </div>
-          <button className="button small" type="button" onClick={logout}>
-            退出登录
-          </button>
-          <div className="sidebar-meta">
-            <div>
-              后端{' '}
-              <span className={backendDown ? 'muted' : ''}>
-                {backendDown ? '未连接' : '已连接'}
-              </span>
-            </div>
-            <div>
-              <a href="/docs" target="_blank" rel="noreferrer">
-                API 文档
-              </a>
-            </div>
+          <div className="footer-status">
+            <span className={`status-dot${backendDown ? ' off' : ''}`} />
+            {backendDown ? '后端未连接' : '服务已连接'}
+          </div>
+          <div className="footer-links">
+            <a className="footer-row" href="/docs" target="_blank" rel="noreferrer">
+              <Icon name="book" size={16} />
+              <span>API 文档</span>
+            </a>
+            <button className="footer-row" type="button" onClick={logout}>
+              <Icon name="logout" size={16} />
+              <span>退出登录</span>
+            </button>
           </div>
         </div>
       </aside>
@@ -254,6 +281,7 @@ export default function App() {
           <Route path="/campaigns" element={<Campaigns />} />
           <Route path="/emails" element={<Emails />} />
           <Route path="/products" element={<Products />} />
+          <Route path="/accounts" element={<Accounts />} />
           {/* 兜底：未知路径回首页，而不是显示一片空白 */}
           <Route path="*" element={<Navigate to="/chat" replace />} />
         </Routes>

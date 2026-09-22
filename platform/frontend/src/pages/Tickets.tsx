@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, ApiError, type Ticket, type TicketEvent, type TicketOutcome, type TicketStats } from '../api'
-import { StatusBadge } from '../ui'
+import { PageHeader, StatusBadge } from '../ui'
 
 const SENTIMENT_TONE: Record<string, string> = {
   angry: 'danger',
@@ -125,12 +125,18 @@ export default function Tickets() {
 
   return (
     <>
-      <h2 className="page-title">客服工单</h2>
-      <p className="page-desc">
-        共 {total} 条，其中 <span style={{ color: 'var(--danger)' }}>{escalatedCount} 条已转人工</span>。
-        转人工由**代码规则**决定（情绪激动 / 涉及金额纠纷 / 知识库没依据）——
-        模型只能提议，不能决定。点「处理」看两层流程怎么跑。
-      </p>
+      <PageHeader
+        crumbs={['运营中台', '客服工单']}
+        title="客服工单"
+        badge={<span className="badge danger">转人工 {escalatedCount}</span>}
+        desc={
+          <>
+            共 {total} 条，其中 <span style={{ color: 'var(--danger)' }}>{escalatedCount} 条已转人工</span>。
+            转人工由**代码规则**决定（情绪激动 / 涉及金额纠纷 / 知识库没依据）——
+            模型只能提议，不能决定。点「处理」看两层流程怎么跑。
+          </>
+        }
+      />
 
       {error && <div className="error-box">{error}</div>}
 

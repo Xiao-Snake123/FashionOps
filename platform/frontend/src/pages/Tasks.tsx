@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, type Task } from '../api'
-import { num, ProgressBar, StatusBadge } from '../ui'
+import { num, PageHeader, ProgressBar, StatusBadge } from '../ui'
 
 /**
  * 示例需求。点一下填进输入框 —— 这是**发现功能的主要入口**：
@@ -65,12 +65,12 @@ export default function Tasks() {
 
   return (
     <>
-      <h2 className="page-title">任务工作台</h2>
-      <p className="page-desc">
-        用一句话交办需求，系统会按关键词把它拆成有序的步骤（选品 → 分析 → 通知）逐步执行；
-        会发邮件这类不可撤销的动作会停下来等你点确认。点任意一行进入详情可以看到
-        每一步的状态、结论与实时事件流。共 {total} 条。
-      </p>
+      <PageHeader
+        crumbs={['运营中台', '任务工作台']}
+        title="任务工作台"
+        badge={<span className="tag">共 {total} 条</span>}
+        desc="用一句话交办需求，系统会按关键词把它拆成有序的步骤（选品 → 分析 → 通知）逐步执行；会发邮件这类不可撤销的动作会停下来等你点确认。点任意一行进入详情可以看到每一步的状态、结论与实时事件流。"
+      />
 
       {error && <div className="error-box">{error}</div>}
 

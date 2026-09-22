@@ -1,26 +1,19 @@
 /* ===========================================================================
    认证相关样式（登录页 / 侧栏用户区 / 审批人显示）
    ---------------------------------------------------------------------------
-   单独一个文件而不是继续堆进 styles.css：styles.css 已经 600+ 行，
-   而这一块是"加了鉴权之后才有"的东西，独立成文件让"认证改了动哪些样式"
-   一眼可见。main.tsx 在 styles.css 之后导入它。
+   独立成文件让"认证改了动哪些样式"一眼可见。main.tsx 在 styles.css 之后导入。
    =========================================================================== */
 
 /* ---------- 登录页 ---------- */
-/*
- * 登录页背景去掉原来的蓝色径向渐变。
- *
- * 那是深色主题下为了“不让整页是死黑”而加的光；换成浅色底之后，
- * 蓝光晕会变成一层脏蓝色，而且是最典型的那种“AI 生成的落地页”长相。
- * 浅色下靠留白就够了。
- */
 .login-page {
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: var(--bg);
+  background:
+    radial-gradient(1200px 500px at 50% -160px, rgba(37, 99, 235, 0.10), transparent 70%),
+    var(--bg);
 }
 
 .login-card {
@@ -28,7 +21,7 @@
   max-width: 400px;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: 18px;
   padding: 34px 30px 26px;
   display: flex;
   flex-direction: column;
@@ -36,9 +29,22 @@
   box-shadow: var(--shadow-md);
 }
 
+/* 登录卡顶部的品牌标：居中、略大 */
+.login-brand {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 2px;
+}
+
+.login-brand .brand-logo {
+  width: 44px;
+  height: 44px;
+  border-radius: 13px;
+}
+
 .login-card h1 {
   font-size: 20px;
-  font-weight: 600;
+  font-weight: 700;
   margin: 0;
   line-height: 1.4;
   text-align: center;
@@ -52,8 +58,7 @@
   font-size: 12.5px;
 }
 
-/* 输入项。用 <label> 包 <span> + <input>，点标签也能聚焦输入框 ——
-   纯 <input placeholder="用户名"> 在中文输入环境下容易和占位符混在一起看 */
+/* 输入项。用 <label> 包 <span> + <input>，点标签也能聚焦输入框 */
 .login-card .field {
   display: flex;
   flex-direction: column;
@@ -64,27 +69,29 @@
 
 .login-card .field input {
   padding: 10px 12px;
-  border-radius: 9px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border-strong);
   background: var(--panel);
   color: var(--text);
   font-size: 14px;
   font-family: inherit;
-  transition: border-color 0.12s;
+  transition: border-color 0.12s, box-shadow 0.12s;
 }
 
 .login-card .field input:focus {
   outline: none;
-  border-color: var(--text-dim);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 
 .login-card .button {
   padding: 11px 14px;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border-strong);
   background: var(--panel);
-  color: var(--text);
+  color: var(--text-soft);
   font-size: 14px;
+  font-weight: 500;
   font-family: inherit;
   cursor: pointer;
   transition: background 0.12s, border-color 0.12s;
@@ -94,14 +101,13 @@
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-ink);
-  font-weight: 500;
+  font-weight: 600;
+  box-shadow: 0 8px 18px -10px rgba(37, 99, 235, 0.95);
 }
 
-/* 原来用 filter: brightness(1.08) 做悬停 —— 在纯黑底上亮度提 8% 看不出来，
-   而且 filter 会让文字跟着一起失真。直接指定色值 */
 .login-card .button.primary:hover:not(:disabled) {
-  background: #262626;
-  border-color: #262626;
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
 }
 
 .login-card .button:disabled {
@@ -146,25 +152,48 @@
   padding: 1px 4px;
 }
 
-/* ---------- 侧栏底部：当前用户 + 退出 ---------- */
+/* ---------- 侧栏底部：当前用户 + 状态 + 链接 ---------- */
 .sidebar-footer {
   margin-top: auto;
   padding-top: 14px;
-  border-top: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
+/* 用户卡：头像 + 名字 + 角色 */
+.user-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+}
+
+.user-avatar {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), #6d9cf7);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .user-chip {
-  padding: 0 4px;
-  line-height: 1.5;
+  min-width: 0;
+  line-height: 1.4;
 }
 
 .user-name {
   font-size: 13px;
   font-weight: 600;
-  /* 长用户名不换行撑破侧栏 */
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -178,43 +207,66 @@
   white-space: nowrap;
 }
 
-.sidebar-footer .button {
-  padding: 7px 10px;
-  border-radius: 7px;
-  border: 1px solid var(--border);
-  background: var(--panel-2);
+/* 连接状态行 */
+.footer-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 6px;
+  font-size: 12px;
   color: var(--text-dim);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.14);
+}
+
+.status-dot.off {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.14);
+}
+
+.footer-links {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.footer-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-soft);
   font-size: 12.5px;
   font-family: inherit;
+  text-decoration: none;
   cursor: pointer;
+  text-align: left;
+  transition: background 0.12s, color 0.12s;
 }
 
-.sidebar-footer .button:hover {
+.footer-row:hover {
+  background: var(--panel-2);
   color: var(--text);
-  border-color: var(--accent);
-}
-
-.sidebar-meta {
-  font-size: 11.5px;
-  color: var(--text-dim);
-  line-height: 1.8;
-  padding: 0 4px;
-}
-
-.sidebar-meta a {
-  color: var(--accent);
 }
 
 /* ---------- 审批横幅里的“审批人”标识 ---------- */
-/* 显示当前登录用户，不可编辑 —— 审批人由后端从令牌取，
-   让前端输入等于把审计变成自证。样式上做成"标签"而不是输入框，
-   避免用户以为可以改。 */
+/* 显示当前登录用户，不可编辑 —— 审批人由后端从令牌取 */
 .approver-chip {
   display: inline-flex;
   align-items: center;
   padding: 6px 11px;
-  border-radius: 7px;
-  border: 1px dashed var(--border);
+  border-radius: 8px;
+  border: 1px dashed var(--border-strong);
   background: transparent;
   color: var(--text-dim);
   font-size: 12.5px;

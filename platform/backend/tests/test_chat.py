@@ -21,6 +21,9 @@
 from __future__ import annotations
 
 import pytest
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
 from fashionops.chat import store
 from fashionops.config import Settings
 from fashionops.db import base as db_base
@@ -34,8 +37,6 @@ from fashionops.db.models_chat import (
     Conversation,
 )
 from fashionops.security.permissions import sync_identity
-from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 
 def conversation_id_of(session: Session, conversation_no: str) -> int:
@@ -1420,10 +1421,11 @@ class TestMemoryAPI:
         assert [i["content"] for i in items] == ["抖音"]
 
     def test_cannot_delete_someone_elses_memory(self, session):  # noqa: ANN001
+        from fastapi import HTTPException
+
         from fashionops.api.routers.memory import forget_memory
         from fashionops.chat import longterm
         from fashionops.security.service import Principal
-        from fastapi import HTTPException
 
         uid_z = self._make_user(session, "z")
         uid_w = self._make_user(session, "w")
@@ -1540,9 +1542,10 @@ class TestConversationArchive:
         assert restored["status"] == "active"
 
     def test_cannot_archive_someone_elses_conversation(self, session):  # noqa: ANN001
+        from fastapi import HTTPException
+
         from fashionops.api.routers.chat import archive_conversation
         from fashionops.security.service import Principal
-        from fastapi import HTTPException
 
         uid_z = self._make_user(session, "z")
         uid_w = self._make_user(session, "w")

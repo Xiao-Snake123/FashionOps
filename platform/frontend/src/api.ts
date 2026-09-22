@@ -750,6 +750,72 @@ export interface AgentMemory {
   updated_at: string | null
 }
 
+// ---------------------------------------------------------------------------
+// 账号管理（分级授权）
+// ---------------------------------------------------------------------------
+export interface AdminAccount {
+  user_id: number
+  username: string
+  full_name: string
+  email: string | null
+  phone: string | null
+  status: string
+  is_superuser: boolean
+  department_id: number | null
+  roles: string[]
+  permissions: string[]
+  last_login_at: string | null
+  created_at: string | null
+  /** 我能不能管这个账号。**不是安全边界** —— 后端每次写操作都会重判 */
+  can_manage: boolean
+  /** 不能管的原因（给人看的一句话）。`can_manage` 为真时为 null */
+  manage_blocked_reason: string | null
+  is_self: boolean
+}
+
+export interface AdminDepartment {
+  department_id: number
+  code: string
+  name: string
+  description: string
+  is_active: boolean
+}
+
+export interface AdminRole {
+  code: string
+  name: string
+  description: string
+  permissions: string[]
+}
+
+export interface AdminScopeInfo {
+  global: boolean
+  department_id: number | null
+  label: string
+  is_superuser: boolean
+  can_create: boolean
+}
+
+export interface AdminStats {
+  total: number
+  active: number
+  disabled: number
+  locked: number
+  pending: number
+  superusers: number
+}
+
+export interface AdminAccountsResponse {
+  scope: AdminScopeInfo
+  total: number
+  /** 整个作用域的状态统计（不受 status 筛选影响）。前端算不出来 —— 只有当前页 */
+  stats: AdminStats
+  items: AdminAccount[]
+  departments: AdminDepartment[]
+  /** 我**能授予**的角色。超出自己权限范围的角色不会出现在这里 */
+  assignable_roles: AdminRole[]
+}
+
 export const api = {
   health: () => request<Health>('/health'),
   summary: () => request<Summary>('/api/v1/summary'),
@@ -883,6 +949,73 @@ export const api = {
   memories: () => request<{ items: AgentMemory[] }>('/api/v1/memories'),
   deleteMemory: (id: number) =>
     request<{ ok: boolean; id: number }>(`/api/v1/memories/${id}`, { method: 'DELETE' }),
+
+  // ---- 账号管理 ----
+  /**
+   * 账号列表。**不需要传"我能管哪些部门"** —— 范围由后端按访问令牌里的
+   * 身份判定（部门主管自动只见本部门）。前端传范围参数等于让它自己申报权限。
+   *
+   * 响应里顺带带上部门与可授予角色，避免那次请求拿到的是过期的角色列表。
+   */
+  adminAccounts: (
+    p: { q?: string; status?: string; department_id?: number; limit?: number; offset?: number } = {},
+  ) => request<AdminAccountsResponse>(`/api/v1/admin/accounts${qs(p)}`),
+
+  adminCreateAccount: (body: {
+    username: string
+    password?: string | null
+    full_name?: string
+    email?: string | null
+    phone?: string | null
+    department_id?: number | null
+    role_codes?: string[]
+    is_superuser?: boolean
+  }) =>
+    request<{
+      account: AdminAccount
+      /** 自动生成的初始密码，**只在这一次响应里出现** */
+      generated_password: string | null
+      warnings: string[]
+    }>('/api/v1/admin/accounts', { method: 'POST', body: JSON.stringify(body) }),
+
+  /** 部分更新。只有传了的字段会被改 —— 传 `null` 是"清空"，不传是"不动"。 */
+  adminUpdateAccount: (
+    userId: number,
+    body: {
+      full_name?: string
+      email?: string | null
+      phone?: string | null
+      department_id?: number | null
+      status?: string
+      role_codes?: string[]
+    },
+  ) =>
+    request<{ account: AdminAccount; notes: string[] }>(`/api/v1/admin/accounts/${userId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+
+  /** 重置密码。不传密码就生成一个随机强密码，**只返回一次**。 */
+  adminResetPassword: (userId: number, password?: string) =>
+    request<{ username: string; generated_password: string | null; message: string }>(
+      `/api/v1/admin/accounts/${userId}/reset-password`,
+      { method: 'POST', body: JSON.stringify({ password: password ?? null }) },
+    ),
+
+  adminCreateDepartment: (body: { code: string; name: string; description?: string }) =>
+    request<{ department: AdminDepartment }>('/api/v1/admin/departments', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  adminUpdateDepartment: (
+    departmentId: number,
+    body: { name?: string; description?: string; is_active?: boolean },
+  ) =>
+    request<{ department: AdminDepartment }>(`/api/v1/admin/departments/${departmentId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
 
   /** 发一条消息，流式接收 Agent 的回答。 */
   sendChatMessage: (

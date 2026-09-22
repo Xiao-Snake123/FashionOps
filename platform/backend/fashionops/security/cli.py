@@ -14,6 +14,9 @@
     fashionops-user kick zhang                # 全部踢下线
     fashionops-user roles                     # 看角色及其权限
     fashionops-user sync                      # 把代码里的权限码同步进库
+    fashionops-user apikey-create zhang --name "Claude Desktop"
+    fashionops-user apikey-list
+    fashionops-user apikey-revoke fops_ab12cd
 
 ## 为什么 `create-admin` 要把密码打印到终端
 
@@ -42,6 +45,7 @@ from sqlalchemy import func, select
 
 from fashionops.config import get_settings
 from fashionops.db import session_scope
+from fashionops.db.base import utcnow
 from fashionops.db.models_identity import (
     USER_STATUS_ACTIVE,
     USER_STATUS_DISABLED,
@@ -49,7 +53,7 @@ from fashionops.db.models_identity import (
     User,
     UserRole,
 )
-from fashionops.security import service
+from fashionops.security import apikeys, service
 from fashionops.security.permissions import (
     PERMISSIONS,
     ROLE_PRESETS,
@@ -456,6 +460,90 @@ def cmd_sync(args: Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# API Key（MCP / 脚本 / 外部系统调用用）
+# ---------------------------------------------------------------------------
+def cmd_apikey_create(args: Namespace) -> int:
+    """签发一把 API Key。**明文只在这里出现一次** —— 库里只有哈希。
+
+    `--scopes` 是**收窄**用的：不传就等价于该用户的全部权限。
+    想给外部系统一把只读的 key，就显式传 `erp:read`。
+    """
+    with session_scope() as session:
+        user = _require_user(session, args.username)
+        scopes = [item.strip() for item in (args.scopes or "").split(",") if item.strip()] or None
+
+        raw, row = apikeys.issue(
+            session,
+            name=args.name,
+            owner_id=user.id,
+            owner_username=user.username,
+            scopes=scopes,
+            expires_days=args.expires_days,
+            created_by="cli",
+        )
+        _audit(
+            session,
+            action="apikey.issue",
+            target=row.key_prefix,
+            detail={"name": row.name, "owner": user.username, "scopes": scopes},
+        )
+
+        print("API Key 已签发，明文**只显示这一次**（库里只存哈希）：")
+        print()
+        print(f"    {raw}")
+        print()
+        print(f"    名称    : {row.name}")
+        print(f"    归属    : {user.username}")
+        print(
+            f"    作用域  : {'、'.join(scopes) if scopes else '（不收紧，等于该用户的全部权限）'}"
+        )
+        print(f"    有效期  : {row.expires_at or '长期'}")
+        print()
+        print("    给 MCP 客户端配置：")
+        print(f'        "env": {{ "{apikeys.ENV_API_KEY}": "{raw}" }}')
+        print()
+        print("    丢了只能重新签发一把；怀疑泄漏就用 `apikey-revoke <前缀>` 撤销。")
+    return 0
+
+
+def cmd_apikey_list(_args: Namespace) -> int:
+    with session_scope() as session:
+        rows = apikeys.list_keys(session)
+        if not rows:
+            print("（还没有 API Key）`fashionops-user apikey-create <用户名> --name ...`")
+            return 0
+
+        now = utcnow()
+        for row in rows:
+            if row.revoked_at is not None:
+                state = "已撤销"
+            elif row.expires_at is not None and row.expires_at <= now:
+                state = "已过期"
+            else:
+                state = "有效"
+            print(f"[{row.key_prefix}] {row.name}  · {state}  · owner={row.owner_username or '（归属账号已删除）'}")
+            print(f"    作用域    : {'、'.join(row.scopes) if row.scopes else '（不收紧）'}")
+            print(f"    创建      : {row.created_at}")
+            print(f"    最后使用  : {row.last_used_at or '从未使用'}")
+            if row.expires_at:
+                print(f"    过期      : {row.expires_at}")
+            print()
+    return 0
+
+
+def cmd_apikey_revoke(args: Namespace) -> int:
+    with session_scope() as session:
+        if not apikeys.revoke(session, args.prefix):
+            _fail(f"没有找到可撤销的 key：{args.prefix}（前缀不对，或已被撤销过）")
+            return 1
+        _audit(session, action="apikey.revoke", target=args.prefix, detail={})
+        _ok(f"已撤销 {args.prefix}")
+        print("  撤销**立即生效**，不需要重启 MCP 服务端 ——")
+        print("  凭据是每次请求现解析的（见 `mcp/server.py` 的模块说明）。")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # 入口
 # ---------------------------------------------------------------------------
 def build_parser() -> ArgumentParser:
@@ -529,6 +617,24 @@ def build_parser() -> ArgumentParser:
         ),
     )
     p.set_defaults(func=cmd_sync)
+
+    p = sub.add_parser("apikey-create", help="签发一把 API Key（MCP / 脚本用，明文只打印一次）")
+    p.add_argument("username", help="归属用户 —— **拿到的权限恒为该用户权限的子集**")
+    p.add_argument("--name", default="未命名", help="给人看的备注，比如 'Claude Desktop'")
+    p.add_argument(
+        "--scopes",
+        default=None,
+        help="逗号分隔，用于**收窄**（如 erp:read）。留空=等于该用户的全部权限",
+    )
+    p.add_argument("--expires-days", type=int, default=None, help="多少天后过期，留空长期有效")
+    p.set_defaults(func=cmd_apikey_create)
+
+    p = sub.add_parser("apikey-list", help="列出已签发的 API Key（含最后使用时间与是否失效）")
+    p.set_defaults(func=cmd_apikey_list)
+
+    p = sub.add_parser("apikey-revoke", help="撤销一把 API Key（按前缀，立即生效）")
+    p.add_argument("prefix", help="key 前缀，见 apikey-list 的第一列")
+    p.set_defaults(func=cmd_apikey_revoke)
 
     return parser
 

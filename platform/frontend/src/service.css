@@ -50,11 +50,11 @@
 
 /* ---- 选中行 ---- */
 /* 只靠背景色区分在长表格里太弱，再加一条左边框。
-   高亮用黑色而不是蓝色 —— 表格里每行都是业务数据，
-   高亮只该表示“这行被选中了”，不该额外投放一种颜色 */
+   高亮走主色蓝，和侧栏/会话列表的选中态保持一致 ——
+   "选中"在全站应该是同一个视觉语言。 */
 tr.row-active {
-  background: var(--panel-2) !important;
-  box-shadow: inset 3px 0 0 var(--text);
+  background: var(--accent-soft) !important;
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 /* ---- 详情面板 ---- */

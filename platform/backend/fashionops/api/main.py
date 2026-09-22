@@ -22,6 +22,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from fashionops import __version__
 from fashionops.api.routers import (
+    admin_router,
     auth_router,
     business_router,
     chat_router,
@@ -74,6 +75,7 @@ def create_app() -> FastAPI:
 
     app.include_router(system_router)
     app.include_router(auth_router)
+    app.include_router(admin_router)
     app.include_router(business_router)
     app.include_router(tasks_router)
     app.include_router(chat_router)

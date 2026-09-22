@@ -77,6 +77,10 @@ class Principal:
     permissions: frozenset[str] = frozenset()
     roles: tuple[str, ...] = ()
     is_superuser: bool = False
+    #: 所属部门。**带在主体上是有意的**：账号管理要判"这个人归不归我管"，
+    #: 每个请求都回表查一次部门既慢又多一处可能忘记查的地方。
+    #: None 表示不属于任何部门（超管、对接账号）。
+    department_id: int | None = None
     #: `password` / `api_key` / `oauth:dingtalk`。审计里要记"他是怎么进来的"
     auth_method: str = "password"
 
@@ -105,6 +109,7 @@ class Principal:
             "roles": list(self.roles),
             "permissions": sorted(self.permissions),
             "is_superuser": self.is_superuser,
+            "department_id": self.department_id,
             "auth_method": self.auth_method,
         }
 
@@ -215,6 +220,7 @@ def load_principal(session: Session, user_id: int, *, auth_method: str = "passwo
         permissions=user_permission_codes(user),
         roles=tuple(user.role_codes()),
         is_superuser=user.is_superuser,
+        department_id=user.department_id,
         auth_method=auth_method,
     )
 

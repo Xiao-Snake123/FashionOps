@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, type Campaign } from '../api'
-import { num, StatusBadge, yuan } from '../ui'
+import { num, PageHeader, StatusBadge, yuan } from '../ui'
 
 export default function Campaigns() {
   const [items, setItems] = useState<Campaign[]>([])
@@ -22,11 +22,17 @@ export default function Campaigns() {
 
   return (
     <>
-      <h2 className="page-title">广告投放</h2>
-      <p className="page-desc">
-        共 {total} 个计划，其中 <span style={{ color: 'var(--danger)' }}>{losingCount} 个 ROI 低于 1.0（亏损）</span>。
-        广告投放 Agent 的自动停投规则就是抓这个信号；改预算属于高危操作，必须走人工确认闸口。
-      </p>
+      <PageHeader
+        crumbs={['运营中台', '广告投放']}
+        title="广告投放"
+        badge={<span className="badge danger">{losingCount} 个亏损</span>}
+        desc={
+          <>
+            共 {total} 个计划，其中 <span style={{ color: 'var(--danger)' }}>{losingCount} 个 ROI 低于 1.0（亏损）</span>。
+            广告投放 Agent 的自动停投规则就是抓这个信号；改预算属于高危操作，必须走人工确认闸口。
+          </>
+        }
+      />
 
       {error && <div className="error-box">{error}</div>}
 

@@ -88,6 +88,7 @@ from fashionops.gateway.core import CallContext, ToolGateway
 from fashionops.gateway.registry import from_llm_name, registry
 from fashionops.llm import ToolLoopPaused, get_model_client, run_tool_loop
 from fashionops.security.service import Principal, effective_scopes
+from fashionops.skills import index_block as skills_index_block
 
 logger = logging.getLogger("fashionops.chat")
 
@@ -576,6 +577,13 @@ def _drive(
     ):
         if block:
             system_prompt = f"{system_prompt}\n\n{block}"
+
+    # 技能索引：**只给技能名和一句话说明**，正文让模型自己用 `skill.load` 拉。
+    #
+    # 为什么不把正文直接拼进来：四份正文加起来是每个回合都要付的固定开销，
+    # 而绝大多数回合一份都用不上（用户可能只是问个库存）。索引只有几十个 token。
+    # 任务链那边相反 —— 它由 `todo_kind` 直接注入正文，因为题面已知。
+    system_prompt = f"{system_prompt}\n\n{skills_index_block()}"
 
     messages = store.to_llm_messages(rows, system_prompt=system_prompt)
 

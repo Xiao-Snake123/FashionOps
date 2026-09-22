@@ -57,6 +57,7 @@ from fashionops.db.models_chat import Approval, ChatMessage, Conversation
 # 不导入就等于"这些表不存在"。
 from fashionops.db.models_identity import (
     APIKey,
+    Department,
     ExternalIdentity,
     Permission,
     RefreshToken,
@@ -933,6 +934,10 @@ class AuditLog(Base):
 # ---------------------------------------------------------------------------
 ALL_MODELS: tuple[type[Base], ...] = (
     # ---- 身份域（models_identity.py）----
+    # `Department` 必须排在 `User` **之前**：`users.department_id` 指向它，
+    # 反过来的话按序删数据时会被外键挡住（"顺序即依赖顺序"在这条上有实际后果，
+    # 不是风格问题）。
+    Department,
     User,
     Role,
     Permission,
@@ -971,7 +976,7 @@ ALL_MODELS: tuple[type[Base], ...] = (
     # 上面"对话域父表在前"那一组的阅读顺序。
     AgentMemory,
 )
-"""28 张表：8 张身份表 + 16 张业务表 + 3 张对话表 + 1 张长期记忆表，
+"""29 张表：9 张身份表 + 16 张业务表 + 3 张对话表 + 1 张长期记忆表，
 顺序即依赖顺序（父表在前）。"""
 
 __all__ = [
@@ -987,6 +992,7 @@ __all__ = [
     "ChatMessage",
     "Competitor",
     "Conversation",
+    "Department",
     "EmailMessage",
     "ExternalIdentity",
     "Inventory",

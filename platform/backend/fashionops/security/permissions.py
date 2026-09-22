@@ -73,10 +73,25 @@ PERM_KB_READ: Final = "kb:read"
 PERM_ASSET_WRITE: Final = "asset:write"
 PERM_MAIL_SEND: Final = "mail:send"
 
+#: 外部办公能力（office MCP 服务器经网关接入）。
+#: 字符串与网关的 `Scope.OFFICE_READ` / `Scope.OFFICE_WRITE` 同名同义 ——
+#: 按本模块顶部「共用一套词表」的原则故意保持一致。
+PERM_OFFICE_READ: Final = "office:read"
+PERM_OFFICE_WRITE: Final = "office:write"
+
 # ---- 管理面 ----
-PERM_ADMIN_USER: Final = "admin:user"  # 增删用户、改状态、重置密码
+PERM_ADMIN_USER: Final = "admin:user"  # 增删用户、改状态、重置密码（**跨部门**）
 PERM_ADMIN_ROLE: Final = "admin:role"  # 建角色、改授权
 PERM_ADMIN_AUDIT: Final = "admin:audit"  # 看审计日志
+
+#: **范围受限**的账号管理：只能管本部门的账号。
+#:
+#: 为什么和 `admin:user` 拆成两个码，而不是共用一个码再判断"他是不是主管"：
+#: 权限码回答的是"有没有这个资格"，这个问题的答案应该只有一个来源。
+#: 合用一个码的话，每个账号相关接口都要自己记得再查一次部门，
+#: **漏掉一个就是一次跨部门越权**；而漏掉的接口在 review 时看起来完全正常。
+#: 拆开之后，"只能管本部门"这件事由角色授权决定，接口只需要认码。
+PERM_DEPT_USER: Final = "dept:user"
 
 
 @dataclass(frozen=True)
@@ -122,7 +137,31 @@ PERMISSIONS: Final[tuple[PermissionDef, ...]] = (
     PermissionDef(PERM_KB_READ, "检索知识库", "data", "客服知识库语义检索"),
     PermissionDef(PERM_ASSET_WRITE, "生成产物", "asset", "导出报表、生成图片视频等产物"),
     PermissionDef(PERM_MAIL_SEND, "发送邮件", "mail", "**对外发信**。默认只有主管及以上有"),
-    PermissionDef(PERM_ADMIN_USER, "管理用户", "admin", "增删用户、停用、重置密码"),
+    PermissionDef(
+        PERM_OFFICE_READ,
+        "使用办公能力（读）",
+        "office",
+        "经网关接入的办公 MCP 服务器里的只读动作（查邮件、看日程、读文档）",
+    ),
+    PermissionDef(
+        PERM_OFFICE_WRITE,
+        "使用办公能力（写）",
+        "office",
+        "**对外动作**：发邮件、建/改日程、写文件。默认只有主管及以上有",
+    ),
+    PermissionDef(
+        PERM_ADMIN_USER,
+        "管理全部账号",
+        "admin",
+        "**跨部门**新建/修改/停用账号、重置密码。不能操作超级管理员账号",
+    ),
+    PermissionDef(
+        PERM_DEPT_USER,
+        "管理本部门账号",
+        "admin",
+        "只对本部门账号生效：新建/修改/停用、重置密码。"
+        "**不能跨部门，也不能授予自己没拥有的权限**",
+    ),
     PermissionDef(PERM_ADMIN_ROLE, "管理角色", "admin", "创建角色、分配权限"),
     PermissionDef(PERM_ADMIN_AUDIT, "查看审计", "admin", "查看操作审计与登录记录"),
 )
@@ -136,6 +175,13 @@ ALL_PERMISSIONS: Final[frozenset[str]] = PERMISSION_CODES
 # ===========================================================================
 ROLE_ADMIN: Final = "admin"
 ROLE_OPS_MANAGER: Final = "ops_manager"
+
+#: 部门主管。和 `ops_manager`（运营主管）是两种不同的"主管"：
+#: 前者管的是**人**（本部门账号），后者管的是**事**（审批业务动作）。
+#: 合成一个角色会让"谁有权批邮件"和"谁有权建账号"绑死在一起 ——
+#: 而这两件事在企业里通常不是同一批人定的。
+ROLE_DEPT_MANAGER: Final = "dept_manager"
+
 ROLE_OPERATOR: Final = "operator"
 ROLE_ANALYST: Final = "analyst"
 ROLE_VIEWER: Final = "viewer"
@@ -182,6 +228,29 @@ ROLE_PRESETS: Final[tuple[RoleDef, ...]] = (
                 PERM_TICKET_HANDLE,
                 PERM_ASSET_WRITE,
                 PERM_MAIL_SEND,
+                PERM_OFFICE_READ,
+                PERM_OFFICE_WRITE,
+            }
+        ),
+    ),
+    RoleDef(
+        ROLE_DEPT_MANAGER,
+        "部门主管",
+        "管理**本部门**的账号；能发起任务、用对话助手，但**不能审批、不能对外发信**",
+        # 为什么刻意不给 `task:approve` / `mail:send` —— 这两个权限**没有部门维度**。
+        # 本系统的人工闸口是全局的：有审批权的人能批**任何**部门提交的任务。
+        # 把审批权给部门主管，实际效果是"给了他全公司的审批权"，
+        # 而不是"他能批本部门的事"。在没有做出部门级审批隔离之前，
+        # 宁可他做不了，也不要他做过了 —— 后者出事时没人能追溯清楚。
+        frozenset(
+            _READONLY
+            | {
+                PERM_DEPT_USER,
+                PERM_CHAT_USE,
+                PERM_TASK_SUBMIT,
+                PERM_TICKET_HANDLE,
+                PERM_ASSET_WRITE,
+                PERM_OFFICE_READ,
             }
         ),
     ),
@@ -190,20 +259,21 @@ ROLE_PRESETS: Final[tuple[RoleDef, ...]] = (
         "运营专员",
         "能发起任务、生成报表、用对话助手、处理客服工单，**不能审批、不能对外发信**",
         frozenset(
-            _READONLY | {PERM_TASK_SUBMIT, PERM_CHAT_USE, PERM_TICKET_HANDLE, PERM_ASSET_WRITE}
+            _READONLY
+            | {PERM_TASK_SUBMIT, PERM_CHAT_USE, PERM_TICKET_HANDLE, PERM_ASSET_WRITE, PERM_OFFICE_READ}
         ),
     ),
     RoleDef(
         ROLE_ANALYST,
         "数据分析",
         "能发起任务并导出报表、用对话助手，不能审批",
-        frozenset(_READONLY | {PERM_TASK_SUBMIT, PERM_CHAT_USE, PERM_ASSET_WRITE}),
+        frozenset(_READONLY | {PERM_TASK_SUBMIT, PERM_CHAT_USE, PERM_ASSET_WRITE, PERM_OFFICE_READ}),
     ),
     RoleDef(
         ROLE_VIEWER,
         "只读访客",
         "只能看，不能发起任何任务",
-        _READONLY,
+        _READONLY | {PERM_OFFICE_READ},
     ),
 )
 
@@ -390,6 +460,7 @@ __all__ = [
     "ROLE_ANALYST",
     "ROLE_ADMIN",
     "ROLE_CODES",
+    "ROLE_DEPT_MANAGER",
     "ROLE_OPERATOR",
     "ROLE_OPS_MANAGER",
     "ROLE_PRESETS",
@@ -397,6 +468,7 @@ __all__ = [
     "PERM_ADMIN_AUDIT",
     "PERM_ADMIN_ROLE",
     "PERM_ADMIN_USER",
+    "PERM_DEPT_USER",
     "PERM_AD_WRITE",
     "PERM_AD_READ",
     "PERM_ASSET_WRITE",
@@ -406,6 +478,8 @@ __all__ = [
     "PERM_ERP_WRITE",
     "PERM_KB_READ",
     "PERM_MAIL_SEND",
+    "PERM_OFFICE_READ",
+    "PERM_OFFICE_WRITE",
     "PERM_TASK_APPROVE",
     "PERM_TASK_CANCEL",
     "PERM_TASK_READ",
