@@ -46,9 +46,11 @@ import logging
 from typing import Any
 
 from fashionops.vectors.base import (
+    KB_DENSE_VECTOR_NAME,
     PAYLOAD_ID,
     CollectionInfo,
     Filter,
+    SparseVector,
     VectorHit,
     VectorRecord,
 )
@@ -91,7 +93,14 @@ class QdrantVectorStore:
     # ------------------------------------------------------------------
     # collection 管理
     # ------------------------------------------------------------------
-    def ensure_collection(self, name: str, *, dimension: int, distance: str = "cosine") -> bool:
+    def ensure_collection(
+        self,
+        name: str,
+        *,
+        dimension: int,
+        distance: str = "cosine",
+        sparse_vector_names: list[str] | None = None,
+    ) -> bool:
         from qdrant_client import models
 
         if self._client.collection_exists(name):
@@ -106,25 +115,70 @@ class QdrantVectorStore:
                     f"  2. 删掉重建（会丢掉全部已有向量，需重新建索引）：\n"
                     f"     fashionops-kb drop --yes && fashionops-kb index"
                 )
+            # 混合检索要用命名向量 + 稀疏向量。旧版 KB 集合是"无命名向量"建的，
+            # 无法原地升级（Qdrant 不允许 collection 在命名/未命名向量间切换），
+            # 必须删了重建 —— 给出明确可执行的报错，而不是静默建出错的索引。
+            if sparse_vector_names:
+                self._require_named_vectors(info, name)
+                self._ensure_sparse_config(name, sparse_vector_names)
             self._dims[name] = existing_dim or dimension
             self._distances[name] = _extract_distance(info)
             return False
 
-        self._client.create_collection(
-            collection_name=name,
-            vectors_config=models.VectorParams(
-                size=dimension,
-                distance=_to_qdrant_distance(distance),
-                # 显式建 payload 索引：过滤条件在这些字段上时
-                # 会走索引而不是全表扫
-                on_disk=False,
-            ),
-        )
+        if sparse_vector_names:
+            # 命名向量：稠密叫 "dense"，外加列出的稀疏向量（默认 "bm25"）。
+            vectors_config = {
+                KB_DENSE_VECTOR_NAME: models.VectorParams(
+                    size=dimension,
+                    distance=_to_qdrant_distance(distance),
+                    on_disk=False,
+                )
+            }
+            sparse_cfg = {sname: models.SparseVectorParams() for sname in sparse_vector_names}
+            self._client.create_collection(
+                collection_name=name,
+                vectors_config=vectors_config,
+                sparse_vectors_config=sparse_cfg,
+            )
+        else:
+            self._client.create_collection(
+                collection_name=name,
+                vectors_config=models.VectorParams(
+                    size=dimension,
+                    distance=_to_qdrant_distance(distance),
+                    # 显式建 payload 索引：过滤条件在这些字段上时
+                    # 会走索引而不是全表扫
+                    on_disk=False,
+                ),
+            )
         self._ensure_payload_indexes(name)
         self._dims[name] = dimension
         self._distances[name] = distance
         logger.info("已创建 Qdrant collection %s（%d 维，距离=%s）", name, dimension, distance)
         return True
+
+    def _require_named_vectors(self, info, name: str) -> None:
+        """旧版（无命名向量）的 collection 不能升级成混合检索，必须重建。"""
+        vectors = getattr(getattr(info, "config", None), "params", None)
+        vecs = getattr(vectors, "vectors", None)
+        if not isinstance(vecs, dict):
+            raise RuntimeError(
+                f"collection {name!r} 是用旧版（无命名向量）建的，无法原地升级为混合检索。\n"
+                f"请先删除再重建索引：fashionops-kb drop --yes && fashionops-kb index"
+            )
+
+    def _ensure_sparse_config(self, name: str, names: list[str]) -> None:
+        """给已存在的 collection 补上稀疏向量配置（幂等，已存在则忽略）。"""
+        from qdrant_client import models
+
+        for sname in names:
+            try:
+                self._client.create_sparse_vector_config(
+                    name, {sname: models.SparseVectorParams()}
+                )
+            except Exception as exc:  # noqa: BLE001
+                # 已存在会报冲突，忽略；其它异常降级为告警，不让建索引整体失败
+                logger.warning("给 %s 补稀疏向量 %s 失败（若已存在可忽略）：%s", name, sname, exc)
 
     def _ensure_payload_indexes(self, name: str) -> None:
         """给常用过滤字段建 keyword 索引。
@@ -169,16 +223,27 @@ class QdrantVectorStore:
                     f"FASHIONOPS_EMBEDDING_DIM 是否匹配。"
                 )
 
-        points = [
-            models.PointStruct(
-                id=_to_point_id(r.id),
-                vector=r.vector,
-                # 把调用方给的逻辑 id 也写进 payload —— 检索时要原样还回去。
-                # 不存的话，返回的就只能是转换后的 UUID（见 PAYLOAD_ID 的说明）
-                payload={**r.payload, PAYLOAD_ID: r.id},
+        points = []
+        for r in records:
+            # 有稀疏向量时，稠密向量走命名 "dense"，稀疏向量各自按名挂上；
+            # 没有（如历史工单）则保持旧的未命名稠密向量写法，零影响。
+            if r.sparse:
+                vector: Any = {KB_DENSE_VECTOR_NAME: r.vector}
+                for sname, svec in r.sparse.items():
+                    vector[sname] = models.SparseVector(
+                        indices=list(svec.indices), values=list(svec.values)
+                    )
+            else:
+                vector = r.vector
+            points.append(
+                models.PointStruct(
+                    id=_to_point_id(r.id),
+                    vector=vector,
+                    # 把调用方给的逻辑 id 也写进 payload —— 检索时要原样还回去。
+                    # 不存的话，返回的就只能是转换后的 UUID（见 PAYLOAD_ID 的说明）
+                    payload={**r.payload, PAYLOAD_ID: r.id},
+                )
             )
-            for r in records
-        ]
 
         # 分批提交：一次几千个点会让单次请求体积过大而超时。
         # 批量大小取 256 是个经验值 —— 再大收益不明显，失败时重试代价更高。
@@ -201,6 +266,7 @@ class QdrantVectorStore:
         *,
         limit: int = 5,
         filter: Filter | None = None,  # noqa: A002
+        using: str | None = None,
         with_payload: bool = True,
     ) -> list[VectorHit]:
 
@@ -211,6 +277,7 @@ class QdrantVectorStore:
             collection_name=name,
             query=vector,
             query_filter=query_filter,
+            using=using,
             limit=limit,
             with_payload=with_payload,
         )
@@ -221,6 +288,63 @@ class QdrantVectorStore:
             payload = dict(point.payload or {})
             # 取出写入时存的逻辑 id，并**从 payload 里摘掉** ——
             # 它是我们的内部约定，露给调用方只会造成困惑（为什么多了个下划线字段）
+            logical_id = payload.pop(PAYLOAD_ID, None)
+            hits.append(
+                VectorHit(
+                    id=str(logical_id) if logical_id is not None else str(point.id),
+                    score=_normalize_score(point.score, distance),
+                    payload=payload,
+                )
+            )
+        return hits
+
+    # ------------------------------------------------------------------
+    # 混合检索：稠密 + 稀疏，库内 RRF 融合
+    # ------------------------------------------------------------------
+    def search_hybrid(
+        self,
+        name: str,
+        dense_vector: list[float],
+        sparse_vectors: dict[str, SparseVector],
+        *,
+        limit: int = 5,
+        filter: Filter | None = None,  # noqa: A002
+        with_payload: bool = True,
+    ) -> list[VectorHit]:
+        """用 Qdrant 的 ``FusionQuery(RRF)`` 在库内把多路向量融合。
+
+        每路检索写成一个 ``Prefetch``：稠密走命名 ``dense``，各稀疏向量走自己的名字
+        （默认 ``bm25``）。融合交给 Qdrant，返回的分数已经是 RRF 融合分（越大越相似）。
+        """
+        from qdrant_client import models
+
+        prefetches = [
+            models.Prefetch(query=dense_vector, using=KB_DENSE_VECTOR_NAME, limit=limit)
+        ]
+        for sname, svec in sparse_vectors.items():
+            prefetches.append(
+                models.Prefetch(
+                    query=models.SparseVector(
+                        indices=list(svec.indices), values=list(svec.values)
+                    ),
+                    using=sname,
+                    limit=limit,
+                )
+            )
+
+        response = self._client.query_points(
+            collection_name=name,
+            query=models.FusionQuery(fusion=models.Fusion.RRF, query=prefetches),
+            query_filter=_to_qdrant_filter(filter),
+            limit=limit,
+            with_payload=with_payload,
+        )
+
+        distance = self._distances.get(name, "cosine")
+        hits: list[VectorHit] = []
+        for point in response.points:
+            payload = dict(point.payload or {})
+            # 取出写入时存的逻辑 id，并**从 payload 里摘掉**
             logical_id = payload.pop(PAYLOAD_ID, None)
             hits.append(
                 VectorHit(

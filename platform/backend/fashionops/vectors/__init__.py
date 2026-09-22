@@ -12,21 +12,27 @@ store.search("kb_articles", vector, limit=5, filter=Filter(must={"category": "é€
 """
 
 from fashionops.vectors.base import (
+    KB_DENSE_VECTOR_NAME,
+    KB_SPARSE_VECTOR_NAME,
     PAYLOAD_ID,
     PAYLOAD_MODEL,
     PAYLOAD_SOURCE_ID,
     PAYLOAD_TEXT,
     CollectionInfo,
     Filter,
+    SparseVector,
     VectorHit,
     VectorRecord,
     VectorStore,
+    rrf_fuse,
 )
 from fashionops.vectors.factory import build_vector_store, get_vector_store, reset_vector_store
 from fashionops.vectors.memory_store import MemoryVectorStore
 from fashionops.vectors.qdrant_store import QdrantVectorStore
 
 __all__ = [
+    "KB_DENSE_VECTOR_NAME",
+    "KB_SPARSE_VECTOR_NAME",
     "PAYLOAD_ID",
     "PAYLOAD_MODEL",
     "PAYLOAD_SOURCE_ID",
@@ -35,10 +41,12 @@ __all__ = [
     "Filter",
     "MemoryVectorStore",
     "QdrantVectorStore",
+    "SparseVector",
     "VectorHit",
     "VectorRecord",
     "VectorStore",
     "build_vector_store",
     "get_vector_store",
     "reset_vector_store",
+    "rrf_fuse",
 ]

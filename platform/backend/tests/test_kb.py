@@ -35,8 +35,9 @@ from fashionops.kb.chunking import (
     normalize,
 )
 from fashionops.kb.indexer import article_chunks
+from fashionops.kb.sparse import encode
 from fashionops.llm.embeddings import MockEmbeddingClient
-from fashionops.vectors import MemoryVectorStore, VectorRecord
+from fashionops.vectors import Filter, MemoryVectorStore, SparseVector, VectorRecord
 
 # ===========================================================================
 # 测试数据
@@ -782,3 +783,54 @@ class TestSearchKB:
         )
         assert all(h["article_no"] != "KB-9999" for h in hits), "下架文章被召回了"
         assert hits[0]["article_no"] == "KB-0001"
+
+
+class TestHybridRetrieval:
+    """Phase 3：把稠密 + 稀疏收进向量库的混合检索。
+
+    全部离线（内存向量库 + 离线向量化），验证：
+    1. 默认开启混合检索时 ``search_kb`` 走 ``search_hybrid``（返回形状不变、分数降序）
+    2. 关闭 ``retrieval_hybrid`` 能正确退回纯稠密检索（与改造前一致）
+    3. 直接调 ``MemoryVectorStore.search_hybrid`` 时，稀疏这一路确实参与了融合
+    """
+
+    def test_hybrid_is_default_and_works(self, indexed):
+        store, embedder, settings = indexed
+        hits = search_kb(
+            "尺码怎么选", store=store, embedder=embedder, settings=settings,
+            collection=COLLECTION, top_k=3,
+        )
+        assert hits, "混合检索没有命中"
+        # 形状必须和改之前完全一致，工具层才不会崩
+        assert set(hits[0]) == {"article_no", "title", "category", "content", "score"}
+        scores = [h["score"] for h in hits]
+        assert scores == sorted(scores, reverse=True)
+
+    def test_falls_back_to_dense_when_hybrid_disabled(self, kb_env, store, embedder):
+        # 关掉混合检索后，应当退回纯稠密向量检索，行为与改造前一致
+        kb_env.retrieval_hybrid = False
+        build_index(store=store, embedder=embedder, settings=kb_env, collection=COLLECTION)
+        hits = search_kb(
+            "退款要多久到账", store=store, embedder=embedder, settings=kb_env,
+            collection=COLLECTION, top_k=1,
+        )
+        assert hits[0]["article_no"] == "KB-0001"
+
+    def test_search_hybrid_fuses_sparse_signal(self, indexed):
+        """稀疏这一路要真的参与融合，而不只是稠密结果的装饰。
+
+        用一组只出现在 KB-0003 retrieval_text 里的词做查询，验证
+        ``search_hybrid`` 能把 KB-0003 的 chunk 召回到前排。
+        """
+        store, embedder, settings = indexed
+        q = "尺码 尺寸 测量"
+        sparse = {"bm25": encode(q)}  # idf=None → 纯 TF，足以验证融合链路
+        hits = store.search_hybrid(
+            COLLECTION,
+            embedder.embed_one(q),
+            sparse,
+            filter=Filter(must={"is_active": True}),
+            limit=5,
+        )
+        ids = [h.id for h in hits]
+        assert any(i.startswith("KB-0003#") for i in ids), "稀疏路没把 KB-0003 召回到前排"

@@ -35,6 +35,7 @@ from fashionops.config import Settings, get_settings
 from fashionops.db import session_scope
 from fashionops.db.models import KBArticle
 from fashionops.kb.chunking import build_chunks, normalize
+from fashionops.kb.sparse import build_idf, encode, load_idf, save_idf
 from fashionops.llm.embeddings import EmbeddingClient, get_embedding_client
 from fashionops.vectors import (
     PAYLOAD_MODEL,
@@ -125,7 +126,16 @@ def build_index(
     store = store or build_vector_store(settings)
     embedder = embedder or get_embedding_client(settings)
 
-    store.ensure_collection(collection, dimension=embedder.dimension)
+    # 混合检索开关。开时，KB collection 建成"稠密(dense) + 稀疏(bm25)"命名向量，
+    # 并额外写一份 IDF 到 data_dir 供检索侧复用。
+    use_sparse = bool(settings.retrieval_hybrid)
+    sparse_name = settings.kb_sparse_vector_name
+
+    store.ensure_collection(
+        collection,
+        dimension=embedder.dimension,
+        sparse_vector_names=[sparse_name] if use_sparse else None,
+    )
 
     stats = IndexStats(
         collection=collection,
@@ -184,26 +194,37 @@ def build_index(
 
     vectors = embedder.embed(pending_texts, batch_size=batch_size)
 
-    records = [
-        VectorRecord(
-            id=chunk_id(article_no, index),
-            vector=vector,
-            payload={
-                PAYLOAD_TEXT: text,
-                PAYLOAD_SOURCE_ID: article_no,
-                "title": article.title,
-                "category": article.category,
-                "chunk_index": index,
-                "is_active": True,
-                PAYLOAD_MODEL: embedder.model_name,
-                "version": article.version,
-                **({"tags": list(article.tags)} if article.tags else {}),
-            },
+    # 稀疏（词法）向量：用全量 chunk 文本算 IDF 并落盘，检索侧复用同一套权重，
+    # 这样 Qdrant 里稀疏向量的点积才近似"词项重合度"。关掉混合检索就不算、不写。
+    idf: dict[str, float] = {}
+    if use_sparse:
+        idf = build_idf(pending_texts)
+        save_idf(settings.data_dir, idf)
+
+    records = []
+    for text, (article_no, index, article), vector in zip(
+        pending_texts, pending_meta, vectors, strict=True
+    ):
+        payload = {
+            PAYLOAD_TEXT: text,
+            PAYLOAD_SOURCE_ID: article_no,
+            "title": article.title,
+            "category": article.category,
+            "chunk_index": index,
+            "is_active": True,
+            PAYLOAD_MODEL: embedder.model_name,
+            "version": article.version,
+            **({"tags": list(article.tags)} if article.tags else {}),
+        }
+        rec_sparse = {sparse_name: encode(text, idf)} if use_sparse else {}
+        records.append(
+            VectorRecord(
+                id=chunk_id(article_no, index),
+                vector=vector,
+                payload=payload,
+                sparse=rec_sparse,
+            )
         )
-        for text, (article_no, index, article), vector in zip(
-            pending_texts, pending_meta, vectors, strict=True
-        )
-    ]
 
     stats.chunks = store.upsert(collection, records)
     logger.info(
@@ -259,7 +280,28 @@ def search_kb(
         must={"is_active": True}
     )
 
-    hits = store.search(collection, embedder.embed_one(query), limit=top_k, filter=flt)
+    query_vec = embedder.embed_one(query)
+
+    # 混合检索：稠密走语义向量，稀疏走词法向量，两路在库内/本地做 RRF 融合。
+    # 关掉 retrieval_hybrid（或向量后端不支持 search_hybrid）时退回纯稠密检索。
+    # 查询侧复用建索引时落盘的 IDF，保证两路权重口径一致。
+    use_sparse = bool(settings.retrieval_hybrid)
+    if use_sparse and hasattr(store, "search_hybrid"):
+        idf = load_idf(settings.data_dir)
+        sparse_vec = encode(query, idf)
+        if sparse_vec:
+            hits = store.search_hybrid(
+                collection,
+                query_vec,
+                {settings.kb_sparse_vector_name: sparse_vec},
+                filter=flt,
+                limit=top_k,
+            )
+        else:
+            # 查询没有任何可编码的词项（全标点/空白）时，稀疏路无意义，退回稠密
+            hits = store.search(collection, query_vec, limit=top_k, filter=flt)
+    else:
+        hits = store.search(collection, query_vec, limit=top_k, filter=flt)
 
     return [
         {

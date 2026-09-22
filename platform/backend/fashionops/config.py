@@ -154,6 +154,19 @@ class Settings(BaseSettings):
     )
     embedding_timeout: float = Field(default=30.0, description="单次向量化请求超时秒数")
 
+    # ---- 检索增强（RAG 召回）----
+    # 混合检索：稠密（语义向量）+ 稀疏（词法 BM25 风格）通过 Qdrant 的
+    # ``FusionQuery(RRF)`` 在库内融合，专门补"精确词 / 编号 / 罕见术语"这类
+    # 纯语义向量召回不力的盲区。关掉则退回纯稠密向量检索（与改造前一致）。
+    retrieval_hybrid: bool = Field(
+        default=True,
+        description="是否启用混合检索（稠密 + 稀疏 RRF 融合）。False 则退回纯稠密向量检索",
+    )
+    kb_sparse_vector_name: str = Field(
+        default="bm25",
+        description="KB 集合里稀疏向量的名字，需与建索引时一致（见 vectors.base.KB_SPARSE_VECTOR_NAME）",
+    )
+
     # ---- 对象存储 ----
     storage_backend: str = Field(
         default="local",

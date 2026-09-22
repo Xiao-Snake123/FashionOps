@@ -27,8 +27,10 @@ from typing import Any
 from fashionops.vectors.base import (
     CollectionInfo,
     Filter,
+    SparseVector,
     VectorHit,
     VectorRecord,
+    rrf_fuse,
 )
 
 
@@ -47,7 +49,16 @@ class MemoryVectorStore:
         self._dims: dict[str, int] = {}
         self._distances: dict[str, str] = {}
 
-    def ensure_collection(self, name: str, *, dimension: int, distance: str = "cosine") -> bool:
+    def ensure_collection(
+        self,
+        name: str,
+        *,
+        dimension: int,
+        distance: str = "cosine",
+        sparse_vector_names: list[str] | None = None,
+    ) -> bool:
+        # 内存实现不做稀疏向量，sparse_vector_names 直接忽略（签名对齐 Qdrant 适配器）
+        del sparse_vector_names
         if name in self._data:
             existing = self._dims[name]
             if existing != dimension:
@@ -78,8 +89,10 @@ class MemoryVectorStore:
         *,
         limit: int = 5,
         filter: Filter | None = None,  # noqa: A002
+        using: str | None = None,
         with_payload: bool = True,
     ) -> list[VectorHit]:
+        del using  # 内存实现只有一种向量，命名无意义
         self._require(name)
         distance = self._distances[name]
 
@@ -100,6 +113,54 @@ class MemoryVectorStore:
                 payload=dict(record.payload) if with_payload else {},
             )
             for score, record in scored[:limit]
+        ]
+
+    def search_hybrid(
+        self,
+        name: str,
+        dense_vector: list[float],
+        sparse_vectors: dict[str, SparseVector],
+        *,
+        limit: int = 5,
+        filter: Filter | None = None,  # noqa: A002
+        with_payload: bool = True,
+    ) -> list[VectorHit]:
+        """混合检索：稠密排名 + 各路稀疏排名，用 RRF 在本地融合。
+
+        内存实现没有 Qdrant 的 ``FusionQuery``，所以自己算 RRF。
+        逻辑和 Qdrant 端保持一致（RRF，k=60），保证两层测试结论一致。
+        """
+        self._require(name)
+        distance = self._distances[name]
+
+        dense_ranked: list[tuple[float, VectorRecord]] = []
+        sparse_ranked: list[tuple[float, VectorRecord]] = []
+        for record in self._data[name].values():
+            if filter is not None and not _matches(record.payload, filter):
+                continue
+            dense_ranked.append((_similarity(dense_vector, record.vector, distance), record))
+            sparse_ranked.append((_sparse_score(sparse_vectors, record.sparse), record))
+
+        dense_ids = [r.id for _, r in sorted(dense_ranked, key=lambda p: (-p[0], p[1].id))]
+
+        rank_lists = [dense_ids]
+        # 只有某路稀疏向量真的有信号时才纳入融合，避免全 0 排名为所有项
+        # 平添一个常数偏移、干扰稠密排序
+        if any(score > 0.0 for score, _ in sparse_ranked):
+            sparse_ids = [r.id for _, r in sorted(sparse_ranked, key=lambda p: (-p[0], p[1].id))]
+            rank_lists.append(sparse_ids)
+
+        fused = rrf_fuse(rank_lists)
+        by_id = {r.id: r for _, r in dense_ranked}
+        ordered = sorted(fused.items(), key=lambda kv: (-kv[1], kv[0]))
+
+        return [
+            VectorHit(
+                id=rid,
+                score=round(score, 4),
+                payload=dict(by_id[rid].payload) if with_payload else {},
+            )
+            for rid, score in ordered[:limit]
         ]
 
     def delete(self, name: str, *, ids: list[str] | None = None) -> int:
@@ -168,6 +229,22 @@ def _matches(payload: dict[str, Any], flt: Filter) -> bool:
         if payload.get(key) not in values:
             return False
     return all(payload.get(key) != value for key, value in flt.must_not.items())
+
+
+def _sparse_score(query_sparse: dict[str, SparseVector], record_sparse: dict[str, SparseVector]) -> float:
+    """查询稀疏向量与某条记录的稀疏向量之间的点积（按向量名对齐后求和）。
+
+    两边用相同的词项→下标映射（见 ``fashionops.kb.sparse``），所以同名下标可直接对齐。
+    """
+    total = 0.0
+    for name, qvec in query_sparse.items():
+        rvec = record_sparse.get(name)
+        if not qvec or not rvec:
+            continue
+        q_map = dict(zip(qvec.indices, qvec.values))
+        for idx, val in zip(rvec.indices, rvec.values):
+            total += q_map.get(idx, 0.0) * val
+    return total
 
 
 def _similarity(a: list[float], b: list[float], distance: str) -> float:

@@ -56,6 +56,36 @@ PAYLOAD_MODEL = "embedding_model"
 #: 内存返回 ``"near"``、Qdrant 返回一串 UUID。只看一个后端永远发现不了。
 PAYLOAD_ID = "_id"
 
+#: 知识库混合检索用的向量名。Qdrant 里 KB collection 用**命名向量**：
+#: 稠密语义向量叫 ``dense``，词法/稀疏向量叫 ``bm25``（默认，可由配置覆盖）。
+#: 用命名向量是因为 Qdrant 的 ``FusionQuery``（RRF 融合）只能按名字引用各路向量。
+KB_DENSE_VECTOR_NAME = "dense"
+KB_SPARSE_VECTOR_NAME = "bm25"
+
+
+@dataclass(frozen=True)
+class SparseVector:
+    """一条稀疏向量（词法检索用）。
+
+    只存非零项：``indices`` 是词项哈希后的整数下标，``values`` 是对应的权重
+    （BM25 风格的 TF-IDF）。空稀疏向量（没有任何词项）用 ``empty()`` 表示，
+    在融合时直接跳过，不会贡献分数。
+
+    下标的取法见 ``fashionops.kb.sparse``：用 blake2b 哈希词项再取模，
+    得到一个稳定且跨进程一致的整数空间，这样建索引和检索两侧算出来的
+    稀疏向量能对得上。
+    """
+
+    indices: tuple[int, ...] = ()
+    values: tuple[float, ...] = ()
+
+    @classmethod
+    def empty(cls) -> "SparseVector":
+        return cls((), ())
+
+    def __bool__(self) -> bool:
+        return bool(self.indices)
+
 
 @dataclass(frozen=True)
 class VectorRecord:
@@ -63,11 +93,15 @@ class VectorRecord:
 
     ``id`` 由调用方给定而不是自动生成：检索结果的 id 要能反推回源数据，
     自动生成的话就得再查一次 payload 才知道命中的是哪篇文章。
+
+    ``sparse`` 是可选的稀疏向量集合，键是向量名（如 ``"bm25"``）。
+    建混合检索索引时才填；普通稠密检索（如历史工单）留空即可。
     """
 
     id: str
     vector: list[float]
     payload: dict[str, Any] = field(default_factory=dict)
+    sparse: dict[str, SparseVector] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -107,7 +141,7 @@ class CollectionInfo:
     extra: dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass(frozen=True)
+@dataclass
 class Filter:
     """payload 过滤条件。
 
@@ -129,6 +163,32 @@ class Filter:
         return not (self.must or self.any_of or self.must_not)
 
 
+def rrf_fuse(
+    rank_lists: list[list[str]],
+    *,
+    k: int = 60,
+    weights: list[float] | None = None,
+) -> dict[str, float]:
+    """Reciprocal Rank Fusion，把多路排名融合成一个分数表。
+
+    每个列表里排第 ``rank``（从 1 开始）的 id 贡献 ``weight / (k + rank)``，
+    各列表累加。``k`` 默认 60（标准值），越大越偏向"各列表头部一致"的项。
+
+    用 id 字符串而不是对象：融合与具体存储后端解耦，内存 / Qdrant 都能复用。
+    Qdrant 后端其实在库内做融合（``FusionQuery``），这个函数主要给
+    内存后端用，也方便单测直接验证融合逻辑。
+    """
+    if not rank_lists:
+        return {}
+    if weights is None:
+        weights = [1.0] * len(rank_lists)
+    scores: dict[str, float] = {}
+    for weight, rank_list in zip(weights, rank_lists, strict=True):
+        for rank, item in enumerate(rank_list, start=1):
+            scores[item] = scores.get(item, 0.0) + weight / (k + rank)
+    return scores
+
+
 @runtime_checkable
 class VectorStore(Protocol):
     """向量库适配器协议。"""
@@ -136,11 +196,15 @@ class VectorStore(Protocol):
     #: 后端名字（qdrant / memory），写进日志和健康检查
     backend: str
 
-    def ensure_collection(self, name: str, *, dimension: int, distance: str = "cosine") -> bool:
+    def ensure_collection(self, name: str, *, dimension: int, distance: str = "cosine", sparse_vector_names: list[str] | None = None) -> bool:
         """确保 collection 存在且维度正确。已存在且维度一致时返回 False（没动它）。
 
         **维度不一致必须报错，不能静默重建** —— 重建会丢掉全部已有向量，
         而调用方（比如一次普通的服务启动）根本没想到会触发数据丢失。
+
+        ``sparse_vector_names`` 非空时，collection 会建成**命名向量**
+        （稠密默认叫 ``dense``，外加列出的稀疏向量名），用于混合检索。
+        内存后端直接忽略这个参数。
         """
         ...
 
@@ -159,9 +223,34 @@ class VectorStore(Protocol):
         *,
         limit: int = 5,
         filter: Filter | None = None,  # noqa: A002 —— 这里就是"过滤条件"的意思
+        using: str | None = None,
         with_payload: bool = True,
     ) -> list[VectorHit]:
-        """相似度检索。结果按相关度**从高到低**排（不管底层距离方向）。"""
+        """相似度检索。结果按相关度**从高到低**排（不管底层距离方向）。
+
+        ``using`` 指定命名向量（KB 的稠密向量叫 ``dense``）；
+        留空用默认（未命名的）向量，历史工单集合走这条。
+        """
+        ...
+
+    def search_hybrid(
+        self,
+        name: str,
+        dense_vector: list[float],
+        sparse_vectors: dict[str, SparseVector],
+        *,
+        limit: int = 5,
+        filter: Filter | None = None,  # noqa: A002
+        with_payload: bool = True,
+    ) -> list[VectorHit]:
+        """混合检索：多路向量（稠密 + 若干稀疏）按 RRF 融合后返回。
+
+        具体怎么融由后端决定：内存实现在本地做 RRF，
+        Qdrant 用 ``FusionQuery`` 在库内做。调用方不关心，拿到融合结果即可。
+
+        ``sparse_vectors`` 的键必须和建索引时 ``VectorRecord.sparse`` 的键一致
+        （默认 ``"bm25"``），否则对应那路检索会失配。
+        """
         ...
 
     def delete(self, name: str, *, ids: list[str] | None = None) -> int:
