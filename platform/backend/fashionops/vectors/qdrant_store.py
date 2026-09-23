@@ -332,9 +332,13 @@ class QdrantVectorStore:
                 )
             )
 
+        # 注意：qdrant-client 1.19 里 FusionQuery 只接收 ``fusion`` 一个参数，
+        # 要融合的多路检索写在 ``query_points`` 的 **顶层** ``prefetch=`` 上（不是 FusionQuery 的参数）。
+        # 早期写法 ``FusionQuery(fusion=..., query=prefetches)`` 在该版本会直接抛 ValidationError。
         response = self._client.query_points(
             collection_name=name,
-            query=models.FusionQuery(fusion=models.Fusion.RRF, query=prefetches),
+            query=models.FusionQuery(fusion=models.Fusion.RRF),
+            prefetch=prefetches,
             query_filter=_to_qdrant_filter(filter),
             limit=limit,
             with_payload=with_payload,
