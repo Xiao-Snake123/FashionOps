@@ -274,6 +274,10 @@
 
 .chat-row.user .msg-body {
   align-items: flex-end;
+  /* 最大宽度约束放这里、不放 bubble：82% 要相对 chat-row 这个确定宽度
+     （100%）来算才对。放到 bubble 上时，82% 会相对"被内容撑开"的 msg-body
+     来算，短消息反而被压得比内容还窄 → 换行甚至一个字一行的竖排。 */
+  max-width: min(560px, 82%);
 }
 
 .bubble {
@@ -283,14 +287,16 @@
   font-size: 14.5px;
 }
 
-/* 用户消息：小气泡，右对齐 */
+/* 用户消息：小气泡，右对齐。宽度由 msg-body 约束（见上方），
+   这里只要 max-width: 100% 承接即可；min-width 兜底"好/嗯"这类两字消息。 */
 .bubble.user {
   background: var(--accent-soft);
   color: var(--text);
   border-radius: 16px 16px 4px 16px;
   padding: 11px 15px;
   line-height: 1.65;
-  max-width: min(560px, 82%);
+  max-width: 100%;
+  min-width: 52px;
 }
 
 /* 助手消息：浮起的白色卡片，正文直接铺在里面 */
@@ -311,8 +317,154 @@
   box-shadow: none;
 }
 
-/* 流式光标 */
-.caret {
+/* ---------------------------------------------------------------------------
+   助手正文的 Markdown 渲染（组件见 src/Markdown.tsx）
+   --------------------------------------------------------------------------- */
+
+/* 这一条是**必需的**：.bubble 上写着 white-space: pre-wrap，那是为纯文本准备的。
+   正文一旦变成块级结构（<p>/<ul>/<table>），继承下来的 pre-wrap 会把块之间的
+   换行也照原样渲染，结果是每一段之间多出空行、列表项之间也被撑开。 */
+.md {
+  white-space: normal;
+}
+
+/* 首尾不要留白：气泡本身已经有 padding，再加段间距会显得上下很空 */
+.md > :first-child {
+  margin-top: 0;
+}
+
+.md > :last-child {
+  margin-bottom: 0;
+}
+
+.md p {
+  margin: 0 0 10px;
+}
+
+.md h1,
+.md h2,
+.md h3,
+.md h4 {
+  margin: 16px 0 8px;
+  line-height: 1.4;
+  font-weight: 650;
+}
+
+.md h1 {
+  font-size: 18px;
+}
+
+.md h2 {
+  font-size: 16.5px;
+}
+
+.md h3,
+.md h4 {
+  font-size: 15.5px;
+}
+
+.md ul,
+.md ol {
+  margin: 0 0 10px;
+  padding-left: 22px;
+}
+
+.md li {
+  margin: 3px 0;
+}
+
+/* 列表项里若再包一层 <p>（松散列表），不要再叠一层段间距 */
+.md li > p {
+  margin: 0;
+}
+
+.md strong {
+  font-weight: 650;
+}
+
+.md a {
+  color: var(--link);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* 行内代码 */
+.md code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 1px 5px;
+}
+
+/* 代码块：深底，和浅色页面拉开层次 */
+.md pre {
+  margin: 0 0 10px;
+  padding: 12px 14px;
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+}
+
+.md pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font-size: 12.8px;
+}
+
+.md blockquote {
+  margin: 0 0 10px;
+  padding: 2px 0 2px 12px;
+  border-left: 3px solid var(--border-strong);
+  color: var(--text-soft);
+}
+
+.md hr {
+  margin: 14px 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+/* 表格：外层容器负责横向滚动（组件里那道 .md-table-wrap），
+   单元格不换行 —— 换行会把表头挤成两行，反而更难读。 */
+.md-table-wrap {
+  overflow-x: auto;
+  margin: 0 0 10px;
+}
+
+.md-table-wrap table {
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+
+.md-table-wrap th,
+.md-table-wrap td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.md-table-wrap th {
+  background: var(--bg);
+  font-weight: 600;
+}
+
+.md-table-wrap td {
+  color: var(--text-soft);
+}
+
+/* 流式光标：挂在**最后一个块级元素**的行尾。
+
+   为什么不按老写法在 JSX 里放 <span className="caret" />：Markdown 渲染出来是
+   块级的，那个 span 会掉到最后一个 <p> 的下面，独立占一行，看着像光标掉下去了。
+   用 ::after 才能保证它贴在最后一个字后面。（.caret 那条规则已随之删除。） */
+.md-streaming > :last-child::after {
+  content: '';
   display: inline-block;
   width: 2px;
   height: 1em;
@@ -609,6 +761,16 @@ div.tool-chip {
   background: var(--danger-bg);
   color: var(--danger);
   font-size: 13px;
+}
+
+/* ---- 分析模板条 ---- */
+/* 放在输入框**上方**而不是下方：它是"要问什么"的入口，
+   视线顺序应该是"先挑话题 → 再写/改 → 发送"。放下面会被键盘挡住。 */
+.chat-templates {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 0 20px 8px;
 }
 
 /* ---- 输入区 ---- */
@@ -1122,6 +1284,134 @@ div.tool-chip {
 }
 
 .mem-foot .muted {
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+
+/* ---- 头部费用化 ---- */
+.cost-pill {
+  position: relative;
+  font-size: 12px;
+  color: var(--text-soft);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 10px;
+  cursor: default;
+}
+
+.cost-pill b {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.cost-tip {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: #23272e;
+  color: #e5e6eb;
+  font-size: 11.5px;
+  border-radius: 8px;
+  padding: 9px 12px;
+  width: 240px;
+  line-height: 1.8;
+  z-index: 30;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+}
+
+.cost-pill:hover .cost-tip {
+  display: block;
+}
+
+/* ---- 超长会话时效横幅 ---- */
+.stale-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 20px 0;
+  background: var(--warn-bg);
+  border: 1px solid #ffd591;
+  color: #ad4e00;
+  font-size: 12.5px;
+  border-radius: 8px;
+  padding: 8px 14px;
+}
+
+.stale-banner button {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 12.5px;
+  font-family: inherit;
+}
+
+/* ---- 会话状态点 ---- */
+.conv-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  margin-right: 6px;
+  vertical-align: 1px;
+}
+
+.conv-dot.ok {
+  background: var(--ok);
+}
+
+.conv-dot.dim {
+  background: var(--text-dim);
+}
+
+/* ---- 空态能力清单 ---- */
+.cap-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px;
+  text-align: left;
+  margin-bottom: 16px;
+}
+
+.cap-card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.cap-card:hover {
+  background: var(--accent-soft);
+  border-color: rgba(37, 99, 235, 0.3);
+}
+
+.cap-card b {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.cap-card span {
+  font-size: 11.5px;
+  color: var(--accent);
+}
+
+.cap-card:hover b {
+  color: var(--accent);
+}
+
+.chat-empty-note {
   font-size: 11.5px;
   color: var(--text-dim);
 }

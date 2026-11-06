@@ -7,7 +7,7 @@
 
     from fashionops.gateway import CallContext, ToolGateway, registry
 
-    gw = ToolGateway(registry, audit_sink=SqlAuditSink())
+    gw = ToolGateway(registry)          # 限流 / 熔断 / 审计落库都是默认接好的
     ctx = CallContext(actor="selection_agent", scopes=frozenset({Scope.ERP_READ}))
 
     result = gw.call("erp.query_inventory", {"sku_codes": ["SKU00001"]}, ctx=ctx)
@@ -15,6 +15,9 @@
         print(result.data)
     else:
         print(result.error.code, result.error.hint)   # hint 是给模型的下一步建议
+
+**审计默认落库**（`SqlAuditSink`）。要内存 sink（单测、纯计算脚本）就显式传
+``audit_sink=MemoryAuditSink()`` —— 理由见 `core.ToolGateway.__init__` 里的说明。
 """
 
 from __future__ import annotations

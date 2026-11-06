@@ -35,6 +35,7 @@ from fashionops.db.models import Asset, EmailMessage
 from fashionops.gateway.rate_limit import RateLimiter, get_rate_limiter
 from fashionops.gateway.registry import Scope, ToolRegistry
 from fashionops.mail import AttachmentInfo, MailGate, OutboundMessage, get_sender
+from fashionops.mail.policy_store import current_policy
 from fashionops.storage import get_storage
 
 #: 正文长度上限。不是技术限制，是防止模型把整个上下文倒进邮件正文
@@ -177,7 +178,19 @@ def _record(
 # ---------------------------------------------------------------------------
 def register(registry: ToolRegistry, limiter: RateLimiter | None = None) -> None:
     settings = get_settings()
-    gate = MailGate(settings, limiter=limiter or get_rate_limiter(settings.cache_backend))
+    base_limiter = limiter or get_rate_limiter(settings.cache_backend)
+
+    def _gate() -> MailGate:
+        """**每次调用现取策略**，不在注册时抓一份。
+
+        白名单 / dry_run 可以在运行时被管理员改掉（见 `mail/policy_store.py`）。
+        注册时抓一份的话，改完必须重启进程才生效 ——
+        而"界面上明明关了 dry_run，信还是没发出去"是极难定位的一类问题。
+        闸门本身是无状态的价格判断，现造一个没有成本。
+        """
+        # 传 **register 时抓的那份 settings**（测试会替换模块级的 get_settings）：
+        # 覆盖值仍然是每次现读的，所以运行时改策略照样即时生效
+        return MailGate(current_policy(settings), limiter=base_limiter)
 
     @registry.tool(
         name="mail.policy",
@@ -192,7 +205,7 @@ def register(registry: ToolRegistry, limiter: RateLimiter | None = None) -> None
         tags=("mail",),
     )
     def mail_policy() -> dict[str, Any]:
-        return gate.policy
+        return _gate().policy
 
     @registry.tool(
         name="mail.send",
@@ -224,7 +237,7 @@ def register(registry: ToolRegistry, limiter: RateLimiter | None = None) -> None
         attachments, missing = _load_attachments(list(attachment_asset_nos or []))
 
         # ---- 闸门 ----
-        decision = gate.evaluate(
+        decision = _gate().evaluate(
             to=list(to_addrs),
             cc=list(cc_addrs or []),
             bcc=list(bcc_addrs or []),
@@ -282,7 +295,8 @@ def register(registry: ToolRegistry, limiter: RateLimiter | None = None) -> None
             except (OSError, ValueError) as exc:
                 read_errors.append(f"{att.filename}: {exc}")
 
-        sender = get_sender(settings)
+        # 投递后端也要按**生效**策略选：dry_run 关掉之后必须真的走 SMTP
+        sender = get_sender(current_policy(settings))
         result = sender.send(
             OutboundMessage(
                 from_addr=settings.mail_from,

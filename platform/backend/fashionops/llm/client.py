@@ -125,6 +125,10 @@ def get_model_client(settings: Settings | None = None) -> ModelClient:
         api_key=settings.model_api_key,
         model=settings.model_name,
         base_url=settings.model_base_url or base_urls.get(provider),
+        # 超时和重试都走配置：这一步曾被硬编码成 60 秒且不重试，
+        # 结果一次网络抖动就能把整个任务判失败（真实事故见 openai_compat 的注释）
+        timeout=settings.model_timeout,
+        retries=settings.model_max_retries,
     )
 
 

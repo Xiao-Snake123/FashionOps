@@ -73,6 +73,13 @@ PERM_KB_READ: Final = "kb:read"
 PERM_ASSET_WRITE: Final = "asset:write"
 PERM_MAIL_SEND: Final = "mail:send"
 
+#: 改邮件**策略本身**：白名单 / 黑名单 / 真发开关 / 收件人上限。
+#:
+#: 为什么必须和 `mail:send` 分开：能发信的人如果也能自己放宽白名单，
+#: 那白名单就不是闸门而是装饰 —— 他随时能把 `*` 加进去再发。
+#: "能发"和"能放宽发信规则"得是两拨人，否则策略形同虚设。
+PERM_MAIL_ADMIN: Final = "mail:admin"
+
 #: 外部办公能力（office MCP 服务器经网关接入）。
 #: 字符串与网关的 `Scope.OFFICE_READ` / `Scope.OFFICE_WRITE` 同名同义 ——
 #: 按本模块顶部「共用一套词表」的原则故意保持一致。
@@ -137,6 +144,12 @@ PERMISSIONS: Final[tuple[PermissionDef, ...]] = (
     PermissionDef(PERM_KB_READ, "检索知识库", "data", "客服知识库语义检索"),
     PermissionDef(PERM_ASSET_WRITE, "生成产物", "asset", "导出报表、生成图片视频等产物"),
     PermissionDef(PERM_MAIL_SEND, "发送邮件", "mail", "**对外发信**。默认只有主管及以上有"),
+    PermissionDef(
+        PERM_MAIL_ADMIN,
+        "配置邮件策略",
+        "mail",
+        "改白名单/黑名单、关掉 dry_run 转真发。**比发信更敏感**：放宽规则等于给所有人开对外通道",
+    ),
     PermissionDef(
         PERM_OFFICE_READ,
         "使用办公能力（读）",
@@ -477,6 +490,7 @@ __all__ = [
     "PERM_ERP_READ",
     "PERM_ERP_WRITE",
     "PERM_KB_READ",
+    "PERM_MAIL_ADMIN",
     "PERM_MAIL_SEND",
     "PERM_OFFICE_READ",
     "PERM_OFFICE_WRITE",

@@ -128,6 +128,19 @@ export interface Todo {
   finished_at: string | null
 }
 
+/**
+ * 关联单据：这个任务在别的模块里留下了什么。
+ *
+ * `href` 由后端拼好 —— "哪些模块之间有关联"是业务知识，
+ * 放在前端等于复制一份，而它本来就在后端那几张外键里。
+ */
+export interface RelatedDoc {
+  kind: string
+  label: string
+  ref: string
+  href: string
+}
+
 export interface TaskDetail extends Task {
   /** 非空 = 停在人工闸口，前端据此弹确认框 */
   approval_payload: ApprovalPayload | null
@@ -138,6 +151,8 @@ export interface TaskDetail extends Task {
   started_at: string | null
   /** 有序的 todo 列表。旧任务没有 todo 行，会是空数组 */
   todos: Todo[]
+  /** 关联单据（广告计划 / 邮件 / 商品 / 工单），可直接跳转 */
+  related_docs: RelatedDoc[]
 }
 
 /**
@@ -224,6 +239,22 @@ export interface EmailGateStats {
   total: number
 }
 
+/** 类目退货率。**基准区间由后端给**，前端不写死 25%~40% ——
+ *  否则图表上的基准线和表格里的判定迟早对不上。 */
+export interface CategoryReturnRate {
+  category: string
+  return_rate: number | null
+  gmv: number
+  refund_amount: number
+  over_baseline: boolean
+}
+
+export interface ReturnRateByCategory {
+  days: number
+  baseline: { low: number; high: number }
+  items: CategoryReturnRate[]
+}
+
 export interface Product {
   id: number
   spu_code: string
@@ -236,6 +267,10 @@ export interface Product {
   list_price: string | null
   rating: string | null
   status: string
+  /** 当前可售库存（由库存流水推出，不是余额字段） */
+  stock: number
+  /** 近 30 天销量（动销），已排除退款/取消的订单 */
+  sold_count: number
 }
 
 export interface Ticket {
@@ -260,6 +295,31 @@ export interface Ticket {
   cited_article_nos?: string[] | null
   agent_handled_at?: string | null
   agent_lane?: string | null
+  // ---- 人工侧 ----
+  assignee?: string | null
+  assigned_at?: string | null
+  human_status?: string | null
+  human_note?: string | null
+  human_updated_at?: string | null
+}
+
+/**
+ * 工单**看板**统计。和下面的 `TicketStats`（批量处理的那一轮结果）不是一回事，
+ * 所以名字要分开 —— 两个同名类型在一个文件里会让调用方悄悄用错那个。
+ *
+ * 只看 status 得不到"有没有人在跟"，那是 assignee 的事。
+ */
+export interface TicketBoardStats {
+  total: number
+  unassigned: number
+  by_status: Record<string, number>
+  by_human_status: Record<string, number>
+  by_assignee: Record<string, number>
+}
+
+export interface HumanStatusOption {
+  value: string
+  label: string
 }
 
 /** 一条工单的处理结果（SSE 事件里带的 `outcome`）。 */
@@ -314,6 +374,62 @@ export interface Campaign {
   conversions: number
   revenue: string
   roi: string | null
+}
+
+/** 广告处置结果。**后端是唯一裁判**：状态对不对、能不能改，都由它说了算，
+ *  前端只负责把 message 显示出来。 */
+export interface CampaignActionResult {
+  campaign_no: string
+  status: string
+  budget_daily: string | null
+  approved_by: string | null
+  message: string
+}
+
+/** 邮件策略。**`overrides` 说明哪些值不是 .env 来的** ——
+ *  否则运维看到的白名单和配置里写的不一致，会以为是同步出了 bug。 */
+export interface MailPolicy {
+  enabled: boolean
+  dry_run: boolean
+  from: string
+  allowlist: string[]
+  denylist: string[]
+  max_recipients: number
+  rate_limit_per_minute: number
+  max_attachment_bytes: number
+  attachment_exts: string[]
+  smtp_host: string
+  smtp_configured: boolean
+  overrides: Record<string, unknown>
+  override_source: string
+  overridable_keys?: string[]
+  accepted?: Record<string, unknown>
+  errors?: string[]
+}
+
+export interface MailRetryResult {
+  message_no: string
+  status: string
+  sent: boolean
+  decision: string
+  reason: string
+  hint: string
+  backend: string | null
+  retry_count: number
+}
+
+export interface LoginEvent {
+  id: number
+  username: string
+  user_id: number | null
+  success: boolean
+  reason: string | null
+  auth_method: string
+  ip: string | null
+  user_agent: string | null
+  created_at: string | null
+  anomalies: string[]
+  anomaly_note: string
 }
 
 export interface DailyMetric {
@@ -890,11 +1006,106 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
-  tickets: (p: { page?: number; page_size?: number; only_escalated?: boolean } = {}) =>
-    request<Page<Ticket>>(`/api/v1/tickets${qs(p)}`),
+  /**
+   * 工单列表。
+   *
+   * `only_mine` **不接收用户名** —— 后端按访问令牌里的身份过滤。
+   * 让前端传"我是谁"等于允许任何人改一个参数就看别人的待办。
+   */
+  tickets: (
+    p: {
+      page?: number
+      page_size?: number
+      only_escalated?: boolean
+      assignee?: string
+      only_mine?: boolean
+      only_unassigned?: boolean
+    } = {},
+  ) => request<Page<Ticket>>(`/api/v1/tickets${qs(p)}`),
 
   campaigns: (p: { page?: number; page_size?: number; only_losing?: boolean } = {}) =>
     request<Page<Campaign>>(`/api/v1/campaigns${qs(p)}`),
+
+  /**
+   * 就地批准。只接受 `pending_approval` 的计划 ——
+   * 别的后端会给 409，前端把那条 message 显示出来即可，不要自己判状态。
+   */
+  approveCampaign: (campaignNo: string, reason?: string) =>
+    request<CampaignActionResult>(`/api/v1/campaigns/${encodeURIComponent(campaignNo)}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ reason: reason ?? null }),
+    }),
+  rejectCampaign: (campaignNo: string, reason: string) =>
+    request<CampaignActionResult>(`/api/v1/campaigns/${encodeURIComponent(campaignNo)}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
+  /** 一键止损。亏损按分钟累计，所以它不需要再走一轮审批。 */
+  pauseCampaign: (campaignNo: string, reason?: string) =>
+    request<CampaignActionResult>(`/api/v1/campaigns/${encodeURIComponent(campaignNo)}/pause`, {
+      method: 'POST',
+      body: JSON.stringify({ reason: reason ?? null }),
+    }),
+  changeBudget: (campaignNo: string, budgetDaily: number, reason?: string) =>
+    request<CampaignActionResult>(`/api/v1/campaigns/${encodeURIComponent(campaignNo)}/budget`, {
+      method: 'POST',
+      body: JSON.stringify({ budget_daily: budgetDaily, reason: reason ?? null }),
+    }),
+
+  // ---- 邮件闸门运维 ----
+  mailPolicy: () => request<MailPolicy>('/api/v1/mail/policy'),
+  /** 改策略。传 null 的字段 = 恢复 .env 的值（不是清空）。 */
+  updateMailPolicy: (patch: {
+    mail_enabled?: boolean | null
+    mail_dry_run?: boolean | null
+    mail_send_allowlist?: string | null
+    mail_send_denylist?: string | null
+    mail_max_recipients?: number | null
+    mail_rate_limit_per_minute?: number | null
+  }) => request<MailPolicy>('/api/v1/mail/policy', { method: 'PATCH', body: JSON.stringify(patch) }),
+  resetMailPolicy: () =>
+    request<{ ok: boolean; cleared: Record<string, unknown>; policy: MailPolicy }>(
+      '/api/v1/mail/policy/overrides',
+      { method: 'DELETE' },
+    ),
+  /** 重发。**会重新过一遍闸门** —— 上次被白名单拦下、加完白名单再重发，走的正是这条路。 */
+  retryEmail: (messageNo: string) =>
+    request<MailRetryResult>(`/api/v1/emails/${encodeURIComponent(messageNo)}/retry`, {
+      method: 'POST',
+    }),
+
+  // ---- 工单人工侧 ----
+  ticketBoardStats: () => request<TicketBoardStats>('/api/v1/tickets/stats'),
+  ticketStatuses: () =>
+    request<{ human_statuses: HumanStatusOption[] }>('/api/v1/service/tickets/statuses'),
+  assignTicket: (ticketNo: string, assignee: string | null, note?: string) =>
+    request<{ ticket_no: string; assignee: string | null; changed: boolean; message: string }>(
+      `/api/v1/service/tickets/${encodeURIComponent(ticketNo)}/assign`,
+      { method: 'POST', body: JSON.stringify({ assignee, note: note ?? null }) },
+    ),
+  updateTicketProgress: (ticketNo: string, humanStatus: string, note?: string) =>
+    request<{
+      ticket_no: string
+      human_status: string
+      human_status_label: string
+      assignee: string | null
+      human_note: string | null
+      message: string
+    }>(`/api/v1/service/tickets/${encodeURIComponent(ticketNo)}/progress`, {
+      method: 'POST',
+      body: JSON.stringify({ human_status: humanStatus, note: note ?? null }),
+    }),
+
+  // ---- 登录安全审计 ----
+  loginEvents: (p: { username?: string; only_anomalous?: boolean; limit?: number } = {}) =>
+    request<{
+      items: LoginEvent[]
+      total: number
+      stats: { returned: number; anomalous_in_page: number; failed_in_page: number }
+    }>(`/api/v1/admin/security/logins${qs(p)}`),
+
+  returnRateByCategory: (days = 30) =>
+    request<ReturnRateByCategory>(`/api/v1/metrics/return-rate-by-category${qs({ days })}`),
 
   emails: (p: { page?: number; page_size?: number; status?: string; only_blocked?: boolean } = {}) =>
     request<Page<EmailMessage>>(`/api/v1/emails${qs(p)}`),

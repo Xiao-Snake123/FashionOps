@@ -44,9 +44,10 @@
 
 ```powershell
 cd "c:\Users\Administrator\Desktop\Work agent\platform\deploy\scripts"
-.\start.ps1        # 数据层 → 后端 → 前端，全程幂等，可重复执行
-.\stop.ps1         # 停止（加 -All 连 Redis/Qdrant 一起停）
+.\start.ps1
 ```
+
+> ⚠ **别把 `.\start.ps1` 和下面的 `.\stop.ps1` 复制进同一个代码块一起执行** —— 那样会"刚起完立刻停掉"。停止是独立一步，见下方。
 
 首次运行前还要做一次（建库、灌演示数据）：
 
@@ -56,7 +57,9 @@ cd "c:\Users\Administrator\Desktop\Work agent\platform"
 .venv\Scripts\fashionops-seed.exe                                 # 灌假数据 + 补回演示账号
 ```
 
-自检：<http://127.0.0.1:8000/health>（根路径）· 页面：<http://localhost:3000>
+自检：<http://127.0.0.1:8010/health>（根路径）· 页面：<http://localhost:3000>
+
+> ⚠ 端口刻意避开 **8000 / 8001**：本机另一个股票系统把这两个当默认端口（FastAPI/WebUI 占 8000、Java 占 8001）。完整端口清单与避让理由见 [`platform/docs/14-端口清单.md`](platform/docs/14-端口清单.md)。
 
 完整说明（页面导览、目录结构、命令速查、排错、设计原则）见
 [`platform/README.md`](platform/README.md)。
@@ -116,7 +119,7 @@ uv sync --all-extras
 | Agent 运行时 | **DeerFlow 2.0**（LangGraph + LangChain） | 字节开源，MIT，多智能体编排 / 沙箱 / 记忆 / RBAC |
 | 工具协议 | **MCP**（Model Context Protocol） | 通过 FastMCP 实现，工具可被任意 MCP 客户端复用 |
 | 工具服务 | **Python 3.11+ / FastMCP 4** | 本仓库主体 |
-| 前端 | React / Next.js | 待开发 |
+| 前端 | React + Vite + ECharts（`platform/` 运营中台**已可用**） | `web/`（办公工作台）规划中 |
 | 模型 | DeepSeek / 通义 / 智谱 / Kimi | OpenAI 兼容接口 |
 | 可观测性 | OpenTelemetry（规划中） | 全链路追踪 |
 
@@ -124,14 +127,15 @@ uv sync --all-extras
 
 ```
 Work agent/
-├── mcp-servers/          # ★ 自研：办公能力 MCP 服务器（本仓库核心产出）
+├── platform/             # ★ 主要产出：服装电商多 Agent 运营中台（FastAPI + React+Vite），详见 platform/README.md
+├── mcp-servers/          # 办公能力 MCP 服务器（文档 / 邮件 / 日历）
 │   ├── src/office_mcp/
 │   │   ├── common/       #   配置 / 路径沙箱 / 凭证隔离 / 审计
 │   │   ├── docs/         #   文档处理（已可用）
-│   │   ├── email/        #   邮件（开发中）
-│   │   └── calendar/     #   日历（开发中）
+│   │   ├── email/        #   邮件（四层发送闸门，已可用）
+│   │   └── calendar/     #   日历（空闲时间计算，已可用）
 │   ├── scripts/demo.py   #   端到端演示脚本
-│   └── tests/            #   74 个测试用例
+│   └── tests/            #   测试用例
 ├── agent-core/           # 待开发：自研 Agent 层（模型路由 / 评测）
 ├── web/                  # 待开发：办公工作台前端
 ├── vendor/deer-flow/     # 第三方基座（gitignore，需手动克隆）

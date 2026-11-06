@@ -33,7 +33,7 @@
 - `summary.json` —— 看板汇总接口
 
 ## 测试环境
-后端 `http://127.0.0.1:8000`，前端 `http://localhost:3000`；MySQL / Redis / Qdrant 均在线。
+后端 `http://127.0.0.1:8010`，前端 `http://localhost:3000`；MySQL / Redis / Qdrant 均在线。
 演示账号：`demo` / `FashionOps@2026`。
 
 ## 重要提示

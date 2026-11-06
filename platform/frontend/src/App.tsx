@@ -265,7 +265,7 @@ export default function App() {
             连不上后端（{backendDown}）。请确认后端已启动：
             <span className="mono">
               {' '}
-              uv run uvicorn fashionops.api.main:app --reload --port 8000
+              uv run uvicorn fashionops.api.main:app --reload --port 8010
             </span>
           </div>
         )}

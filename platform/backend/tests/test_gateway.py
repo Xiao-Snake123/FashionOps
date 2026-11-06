@@ -610,6 +610,47 @@ class TestAuditTrail:
         assert entry.trace_id == "tr-1"
         assert entry.task_id == 42
 
+    def test_default_sink_is_durable_not_memory(self):
+        """**不传 ``audit_sink`` 时的默认值必须是落库的。**
+
+        ## 这条守的是什么
+
+        这里原来是 ``MemoryAuditSink()``，也就是"忘记传 audit_sink = 审计重启即丢"。
+        后果是实打实的：只有 MCP 入口显式传了落库 sink，平台自己的三条链路
+        （``agents/loop.py`` / ``service/agent.py`` / ``chat/agent.py``）全落在内存里
+        —— **"Agent 调了哪些工具"在生产上查不到，而代码看起来治理齐全**。
+
+        默认值必须落在"漏配更保守"的那一侧：漏配的代价是"多写一行审计"，
+        而不是"出了事无据可查"。谁把默认改回内存实现，这条会红。
+
+        （conftest 的 ``audit_writes_off`` 只把 ``record`` 改成空操作，
+        保留对象身份，所以这里断言类型仍然有效。）
+        """
+        from fashionops.gateway.audit import SqlAuditSink
+
+        gw = ToolGateway(
+            build_registry(),
+            rate_limiter=MemoryRateLimiter(),
+            breaker=MemoryCircuitBreaker(),
+        )
+        assert isinstance(gw.audit, SqlAuditSink), "默认审计 sink 不能是内存实现"
+
+    def test_memory_sink_still_available_when_asked(self):
+        """想用内存 sink（单测 / 纯计算脚本）必须仍然能**显式**指定。
+
+        默认从严，但不能把另一条路堵死 —— 否则那些不该碰数据库的场景
+        （比如不连库的纯计算脚本）就没法用网关了，人就会去绕过网关，
+        那就是比"审计缺失"更糟的结果。
+        """
+        audit = MemoryAuditSink()
+        gw = ToolGateway(
+            build_registry(),
+            rate_limiter=MemoryRateLimiter(),
+            breaker=MemoryCircuitBreaker(),
+            audit_sink=audit,
+        )
+        assert gw.audit is audit
+
 
 class TestFailOpenFailClosed:
     """限流/熔断组件挂掉时的降级策略 —— 这是设计里最需要想清楚的一块。"""

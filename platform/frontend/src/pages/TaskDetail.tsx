@@ -238,6 +238,7 @@ export default function TaskDetail() {
   const todos = task.todos ?? []
   const artifacts = ((task.result?.artifacts ?? []) as Artifact[]).filter(Boolean)
   const summary = typeof task.result?.summary === 'string' ? (task.result.summary as string) : null
+  const relatedDocs = task.related_docs ?? []
 
   return (
     <>
@@ -269,6 +270,21 @@ export default function TaskDetail() {
           </Link>
         }
       />
+
+      {/* 关联单据：一个任务做完之后，"它动了哪些东西"要能一眼点进去看。
+          列表由后端拼（外键 + result 里扫编号），前端只负责渲染。 */}
+      {relatedDocs.length > 0 && (
+        <div className="run-summary">
+          <strong>关联单据</strong>
+          <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {relatedDocs.map((doc) => (
+              <Link key={`${doc.kind}-${doc.ref}`} className="tag" to={doc.href}>
+                {doc.label} <span className="mono">{doc.ref}</span> →
+              </Link>
+            ))}
+          </span>
+        </div>
+      )}
 
       {/* 人工闸口：做成常驻横幅而不是弹窗。弹窗可以被随手关掉，
           而“任务正卡在等你点确认”这件事关掉后就没地方看了 */}

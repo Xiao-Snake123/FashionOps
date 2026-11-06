@@ -9,6 +9,7 @@ import {
   type ChatMessage,
   type Conversation,
 } from '../api'
+import { Markdown } from '../Markdown'
 import { Icon, num } from '../ui'
 import { ToolResultView } from '../resultViews'
 
@@ -37,6 +38,24 @@ const EMPTY_LIVE: LiveState = { text: '', steps: [] }
 /** 会话列表每页条数。 */
 const CONVERSATION_PAGE_SIZE = 50
 
+/** 输入框占位提示轮换列表。 */
+const PLACEHOLDERS = [
+  '本周退货率环比怎么样？',
+  '选 3 款秋季女装并出报表',
+  '把情绪激动的工单汇总给我',
+  '昨天失败的任务重跑一遍',
+]
+
+/** 空态的能力清单：每个能力一句可点击的示例指令。 */
+const CAPABILITIES = [
+  { title: '查经营', prompt: '本周 GMV 和退货率环比？' },
+  { title: '管工单', prompt: '把情绪激动的工单汇总给我' },
+  { title: '盯广告', prompt: '亏损的计划停掉，先给我确认' },
+  { title: '发周报', prompt: '把退货结论发给运营组' },
+  { title: '做选品', prompt: '选 3 款秋季女装并出报表' },
+  { title: '跑任务', prompt: '昨天失败的任务重跑一遍' },
+]
+
 export default function Chat() {
   const [conversations, setConversations] = useState<Conversation[]>([])
   /** 会话总数（后端真实值），用来判断还有没有下一页 */
@@ -55,6 +74,8 @@ export default function Chat() {
   /** 还有更早的历史可以翻（后端 limit 之后由 has_more 告知）。 */
   const [hasMore, setHasMore] = useState(false)
   const [loadingOlder, setLoadingOlder] = useState(false)
+  /** 输入框占位提示轮换下标。 */
+  const [phIndex, setPhIndex] = useState(0)
 
   const abortRef = useRef<AbortController | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -177,6 +198,12 @@ export default function Chat() {
       if (el) el.scrollTop = el.scrollHeight
     })
   }, [messages, live, pending])
+
+  // 输入框占位提示轮换：每隔几秒换一句示例，让入口始终有"能问什么"的暗示
+  useEffect(() => {
+    const timer = setInterval(() => setPhIndex((i) => (i + 1) % PLACEHOLDERS.length), 4000)
+    return () => clearInterval(timer)
+  }, [])
 
   // ---------------------------------------------------------------- 事件处理
   const handleEvent = useCallback((event: ChatEvent) => {
@@ -382,6 +409,14 @@ export default function Chat() {
 
   const currentConversation = conversations.find((c) => c.conversation_no === current)
 
+  // 会话年龄（天）。超过阈值就提示"早期上下文可能失真"，引导开新对话。
+  const staleDays = currentConversation?.created_at
+    ? Math.max(
+        0,
+        Math.floor((Date.now() - new Date(currentConversation.created_at).getTime()) / 86400000),
+      )
+    : 0
+
   // 只给"最后一条助手消息"挂快捷操作，避免每条回答下面都堆一排按钮
   const lastAssistantId = useMemo(() => {
     for (let i = visible.length - 1; i >= 0; i -= 1) {
@@ -428,7 +463,10 @@ export default function Chat() {
                   loadConversation(c.conversation_no).catch((err: Error) => setError(err.message))
                 }}
               >
-                <div className="chat-list-title">{c.title || '新对话'}</div>
+                <div className="chat-list-title">
+                  <span className={`conv-dot ${c.status === 'archived' ? 'dim' : 'ok'}`} />
+                  {c.title || '新对话'}
+                </div>
                 <div className="chat-list-meta">
                   {c.message_count} 条 · {c.updated_at?.slice(5, 16).replace('T', ' ')}
                 </div>
@@ -473,9 +511,18 @@ export default function Chat() {
                 <span className={`badge ${currentConversation.status === 'archived' ? 'dim' : 'ok'}`}>
                   {currentConversation.status === 'archived' ? '已归档' : '进行中'}
                 </span>
-                <span className="tag">{currentConversation.llm_calls} 次模型调用</span>
-                <span className="tag">{currentConversation.tool_calls} 次工具调用</span>
-                <span className="tag accent">{num(currentConversation.total_tokens)} tokens</span>
+                {/* tokens 这种工程指标对运营没意义，费用才是他们关心的口径。
+                    明细（调用次数 / tokens）收进悬停提示，给管理员看。 */}
+                <div className="cost-pill">
+                  本次费用 <b>¥{currentConversation.total_cost.toFixed(2)}</b>
+                  <div className="cost-tip">
+                    <div>
+                      模型调用 {currentConversation.llm_calls} 次 · 工具调用{' '}
+                      {currentConversation.tool_calls} 次
+                    </div>
+                    <div>{num(currentConversation.total_tokens)} tokens</div>
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -497,6 +544,15 @@ export default function Chat() {
           </div>
         </header>
 
+        {staleDays > 30 && (
+          <div className="stale-banner">
+            此会话已持续 {staleDays} 天，早期上下文可能影响回答准确性。
+            <button type="button" onClick={() => void newConversation()}>
+              开新对话继续 →
+            </button>
+          </div>
+        )}
+
         <div className="chat-scroll" ref={scrollRef}>
           {loading && <div className="chat-hint">正在加载…</div>}
 
@@ -517,24 +573,23 @@ export default function Chat() {
 
           {!loading && visible.length === 0 && (
             <div className="chat-empty">
-              <h3>问点什么</h3>
-              <p>可以直接提问，也可以让它去干一件多步的事。</p>
-              <div className="chat-samples">
-                {[
-                  'SKU00042 还有多少库存？',
-                  '退货流程是怎么规定的？',
-                  '最近 30 天哪个类目卖得最好？',
-                  '帮我选 3 款秋季女装并出一份报表发给运营',
-                ].map((sample) => (
+              <h3>FashionOps 运营助手</h3>
+              <p>我可以直接调用中台的 7 个模块。点一个能力开始：</p>
+              <div className="cap-grid">
+                {CAPABILITIES.map((cap) => (
                   <button
-                    key={sample}
+                    key={cap.title}
                     type="button"
-                    className="prompt-chip"
-                    onClick={() => setInput(sample)}
+                    className="cap-card"
+                    onClick={() => setInput(cap.prompt)}
                   >
-                    {sample}
+                    <b>{cap.title}</b>
+                    <span>{cap.prompt}</span>
                   </button>
                 ))}
+              </div>
+              <div className="chat-empty-note">
+                写操作（停广告、发邮件、改预算）一律先经你确认才执行。
               </div>
             </div>
           )}
@@ -580,9 +635,11 @@ export default function Chat() {
                 <Icon name="sparkle" size={15} />
               </div>
               <div className="msg-body">
+                {/* 流式的这一份也走 Markdown。如果这里用纯文本、落库后才变排版，
+                    回答打到一半是"一堆星号"，打完突然重排，中间会明显闪一下。
+                    流式光标由 .md-streaming 的 ::after 提供（理由见 Markdown.tsx）。 */}
                 <div className="bubble assistant">
-                  {live.text}
-                  <span className="caret" />
+                  <Markdown text={live.text} streaming />
                 </div>
               </div>
             </div>
@@ -609,12 +666,31 @@ export default function Chat() {
           </div>
         )}
 
+        {/* 分析模板：空会话时是那张能力卡片，有会话之后收成这一排 chips ——
+            同一个 CAPABILITIES 常量，不另抄一份，免得两处提示语对不上 */}
+        <div className="chat-templates">
+          {CAPABILITIES.map((cap) => (
+            <button
+              key={cap.title}
+              type="button"
+              className="filter-chip"
+              title={cap.prompt}
+              onClick={() => {
+                setInput(cap.prompt)
+                inputRef.current?.focus()
+              }}
+            >
+              {cap.title}
+            </button>
+          ))}
+        </div>
+
         <div className="chat-composer">
           <textarea
             ref={inputRef}
             value={input}
             rows={1}
-            placeholder="说点什么…"
+            placeholder={PLACEHOLDERS[phIndex]}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
@@ -641,7 +717,9 @@ export default function Chat() {
           )}
         </div>
         <div className="composer-foot">
-          <span>Agent 可能会调用工具并产生费用，写操作会先找你确认。</span>
+          <span>
+            <b>写操作需确认后执行</b> · 调用工具将产生费用
+          </span>
           <span>
             <kbd>Enter</kbd> 发送 · <kbd>Shift</kbd> + <kbd>Enter</kbd> 换行
           </span>
@@ -803,7 +881,11 @@ function MessageRow({
                 </span>
               </div>
             )}
-            <div className="bubble assistant">{message.content}</div>
+            {/* 助手正文按 Markdown 渲染：模型输出本来就是 Markdown，
+                当纯文本显示会把 `**加粗**` 的星号、列表的序号全暴露出来。 */}
+            <div className="bubble assistant">
+              <Markdown text={message.content} />
+            </div>
           </>
         )}
 

@@ -27,10 +27,11 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import Final
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from fashionops.config import get_settings
@@ -38,7 +39,7 @@ from fashionops.db import get_db
 from fashionops.db.models_identity import Department
 from fashionops.security import admin as rules
 from fashionops.security.deps import record_audit, require_permission
-from fashionops.security.permissions import PERM_ADMIN_USER, PERM_DEPT_USER
+from fashionops.security.permissions import PERM_ADMIN_AUDIT, PERM_ADMIN_USER, PERM_DEPT_USER
 from fashionops.security.service import AuthError, Principal
 
 logger = logging.getLogger("fashionops.api.admin")
@@ -415,6 +416,196 @@ def update_department(
             request=request,
         )
         return {"department": _serialize_department(dept)}
+
+
+# ---------------------------------------------------------------------------
+# 读：登录安全审计
+# ---------------------------------------------------------------------------
+#
+# 为什么放在 `admin` 而不是另开一个 `security` router：
+# 它的读者就是账号管理页的那批人，权限码也是 `admin:audit`。
+# 再开一个 router 只会让"哪些接口属于账号管理"这个问题有两个答案。
+_AUDIT_ADMIN = require_permission(PERM_ADMIN_AUDIT)
+
+#: 判定"短时多地"的窗口与阈值。
+#:
+#: 不接外部 IP 库（不做城市/归属地判断）是刻意的：那要引入一个外部依赖
+#: 和一份会过期的离线库，而**能给我们的判断其实只有"是不是同一个 IP"**。
+#: 内部系统里"换了一个 IP"本身就足够可疑，不需要知道它换到了哪个城市。
+_MULTI_IP_WINDOW_HOURS: Final = 24
+#: "爆破后成功"的窗口：失败次数在这个窗口内累计
+_BRUTEFORCE_WINDOW_MINUTES: Final = 30
+_BRUTEFORCE_MIN_FAILURES: Final = 3
+
+
+def _anomaly_note(flags: list[str], event) -> str:  # noqa: ANN001
+    notes = {
+        "new_ip": f"首次从这个 IP（{event.ip}）登录该账号",
+        "multi_ip": f"{_MULTI_IP_WINDOW_HOURS} 小时内出现多个不同 IP",
+        "bruteforce_then_success": f"前面 {_BRUTEFORCE_MIN_FAILURES} 次以上密码错误后成功",
+        "unknown_user": "尝试登录一个不存在的账号（可能是撞库探测）",
+        "locked_out": "账号处于锁定/停用状态仍被尝试登录",
+    }
+    return "；".join(notes.get(f, f) for f in flags)
+
+
+def _detect_anomalies(
+    session: Session,
+    events: list,  # noqa: ANN001
+    *,
+    known_ips: dict[str, set[str]],
+    recent_ips: dict[str, set[str]],
+    recent_failures: dict[str, int],
+) -> dict[int, list[str]]:
+    """给一批登录事件打异常标记，返回 ``{event_id: [flag, ...]}``。
+
+    ## 为什么不做归属地判断
+
+    判断"异地"最直觉的做法是接一个 IP 归属库。但那会引入三样东西：
+    一个外部依赖、一份会静默过期的离线库、以及"内网 IP 全部判不出来"
+    的一大批噪音。而**真正能用的信号只是"IP 变了没有"** ——
+    内部系统里换 IP 本身就值得看一眼，不需要知道换到了哪个城市。
+
+    ## 为什么"新 IP"要看**历史全集**而不是最近几次
+
+    只看最近 N 次的话，一个"周末在家 / 工作日办公室"的正常使用模式
+    会被永久判成异常（两个 IP 反复交替）。用历史全集，
+    只有**真正没见过**的 IP 才会报警。
+    """
+    flags_by_id: dict[int, list[str]] = {}
+    for event in events:
+        flags: list[str] = []
+        if not event.success:
+            if event.reason == "unknown_user":
+                flags.append("unknown_user")
+            elif event.reason in ("locked",) or (event.reason or "").startswith("status:"):
+                flags.append("locked_out")
+            flags_by_id[event.id] = flags
+            continue
+
+        if event.ip:
+            if event.ip not in known_ips.get(event.username, set()):
+                flags.append("new_ip")
+            if len(recent_ips.get(event.username, set())) > 1:
+                flags.append("multi_ip")
+        if recent_failures.get(event.username, 0) >= _BRUTEFORCE_MIN_FAILURES:
+            flags.append("bruteforce_then_success")
+        flags_by_id[event.id] = flags
+    return flags_by_id
+
+
+@router.get("/security/logins", summary="登录事件与异常登录判定（异地/新 IP/爆破后成功）")
+def list_login_events(
+    principal: Principal = Depends(_AUDIT_ADMIN),  # noqa: B008
+    session: Session = Depends(get_db),  # noqa: B008
+    username: str | None = None,
+    only_anomalous: bool = False,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+) -> dict:
+    from datetime import timedelta
+
+    from fashionops.db.base import utcnow
+    from fashionops.db.models import LoginEvent
+
+    stmt = select(LoginEvent).order_by(LoginEvent.created_at.desc(), LoginEvent.id.desc())
+    if username:
+        stmt = stmt.where(LoginEvent.username == username)
+
+    total = session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    # 多取一批再筛：异常判定要在**取出来的这批**上做，
+    # 先过滤再判定会让"只看异常"漏掉那些需要和邻居比较才能发现的事件
+    rows = list(session.scalars(stmt.offset(offset).limit(limit * 3)).all())
+
+    now = utcnow()
+    recent_cut = now - timedelta(hours=_MULTI_IP_WINDOW_HOURS)
+    brute_cut = now - timedelta(minutes=_BRUTEFORCE_WINDOW_MINUTES)
+    usernames = {e.username for e in rows}
+
+    known_ips: dict[str, set[str]] = {}
+    recent_ips: dict[str, set[str]] = {}
+    recent_failures: dict[str, int] = {}
+    if usernames:
+        # 历史**全部**成功登录的 IP：判定 new_ip 的基准
+        for name, ip in session.execute(
+            select(LoginEvent.username, LoginEvent.ip).where(
+                LoginEvent.username.in_(usernames), LoginEvent.success.is_(True)
+            )
+        ).all():
+            if ip:
+                known_ips.setdefault(name, set()).add(ip)
+        # 最近窗口内的成功 IP：判定 multi_ip
+        for name, ip in session.execute(
+            select(LoginEvent.username, LoginEvent.ip).where(
+                LoginEvent.username.in_(usernames),
+                LoginEvent.success.is_(True),
+                LoginEvent.created_at >= recent_cut,
+            )
+        ).all():
+            if ip:
+                recent_ips.setdefault(name, set()).add(ip)
+        # 最近窗口内的失败次数：判定 bruteforce_then_success
+        for name, count in session.execute(
+            select(LoginEvent.username, func.count())
+            .where(
+                LoginEvent.username.in_(usernames),
+                LoginEvent.success.is_(False),
+                LoginEvent.created_at >= brute_cut,
+            )
+            .group_by(LoginEvent.username)
+        ).all():
+            recent_failures[name] = int(count or 0)
+
+    flags_by_id = _detect_anomalies(
+        session,
+        rows,
+        known_ips=known_ips,
+        recent_ips=recent_ips,
+        recent_failures=recent_failures,
+    )
+
+    items: list[dict] = []
+    anomalous = 0
+    for event in rows:
+        flags = flags_by_id.get(event.id, [])
+        if flags:
+            anomalous += 1
+        if only_anomalous and not flags:
+            continue
+        items.append(
+            {
+                "id": event.id,
+                "username": event.username,
+                "user_id": event.user_id,
+                "success": event.success,
+                "reason": event.reason,
+                "auth_method": event.auth_method,
+                "ip": event.ip,
+                "user_agent": event.user_agent,
+                "created_at": event.created_at.isoformat(timespec="seconds")
+                if event.created_at
+                else None,
+                "anomalies": flags,
+                "anomaly_note": _anomaly_note(flags, event),
+            }
+        )
+        if len(items) >= limit:
+            break
+
+    return {
+        "items": items,
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        # 统计放在响应里而不是让前端再调一次：这些数字要在**同一批数据**
+        # 上算才和列表对得上，分开调两次会因为时间推进而对不上
+        "stats": {
+            "returned": len(items),
+            "anomalous_in_page": anomalous,
+            "failed_in_page": sum(1 for i in items if not i["success"]),
+        },
+        "viewer": principal.username,
+    }
 
 
 __all__ = ["router"]

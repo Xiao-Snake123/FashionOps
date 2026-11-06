@@ -22,9 +22,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   api,
+  ApiError,
   type AdminAccount,
   type AdminAccountsResponse,
   type AdminRole,
+  type LoginEvent,
 } from '../api'
 import { Icon, PageHeader, StatCard } from '../ui'
 
@@ -38,6 +40,20 @@ const STATUS_META: Record<string, { label: string; tone: string }> = {
 
 /** 每页条数。和后端默认值一致，改一处要改两处 —— 所以写在显眼的地方。 */
 const PAGE_SIZE = 50
+
+/** 账号资料完整度：缺邮箱/手机/部门/姓名/角色都会扣分，缺什么一目了然。 */
+function completeness(a: AdminAccount): { score: number; missing: string[] } {
+  const checks: Array<[boolean, string]> = [
+    [Boolean(a.email), '邮箱'],
+    [Boolean(a.phone), '手机'],
+    [a.department_id != null, '部门'],
+    [Boolean(a.full_name), '姓名'],
+    [a.roles.length > 0, '角色'],
+  ]
+  const missing = checks.filter(([ok]) => !ok).map(([, label]) => label)
+  const score = Math.round(((checks.length - missing.length) / checks.length) * 100)
+  return { score, missing }
+}
 
 export default function Accounts() {
   const [data, setData] = useState<AdminAccountsResponse | null>(null)
@@ -169,6 +185,22 @@ export default function Accounts() {
         />
       </div>
 
+      <details className="policy-note">
+        <summary>账号安全策略（成文）</summary>
+        <ul>
+          <li>
+            <b>分级授权</b>：主管理员 &gt; 管理员 &gt; 部门主管。可管理范围由后端按令牌判定，
+            前端只负责展示 <span className="mono">can_manage</span>，不自己算权限。
+          </li>
+          <li>
+            <b>密码</b>：以 argon2id 不可逆哈希存储，任何角色只能重置、不能查看；重置会同时撤销该账号全部登录会话。
+          </li>
+          <li>
+            <b>账号生命周期</b>：停用保留历史记录；锁定是连续登录失败触发的临时状态，待激活是新账号未设密码。
+          </li>
+        </ul>
+      </details>
+
       <div className="toolbar">
         <input
           type="search"
@@ -224,6 +256,7 @@ export default function Accounts() {
                   <th>角色</th>
                   <th>状态</th>
                   <th>最近登录</th>
+                  <th>完整度</th>
                   <th>操作</th>
                 </tr>
               </thead>
@@ -232,7 +265,7 @@ export default function Accounts() {
                   const meta = STATUS_META[a.status] ?? { label: a.status, tone: 'dim' }
                   const dept = deptName(a.department_id)
                   return (
-                    <tr key={a.user_id}>
+                    <tr key={a.user_id} className={a.status === 'disabled' ? 'row-disabled' : undefined}>
                       <td>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           <span className="mono">{a.username}</span>
@@ -269,6 +302,22 @@ export default function Accounts() {
                         <span className="muted" style={{ fontSize: 12 }}>
                           {a.last_login_at?.slice(0, 16).replace('T', ' ') ?? '从未登录'}
                         </span>
+                      </td>
+                      <td>
+                        {(() => {
+                          const c = completeness(a)
+                          return c.missing.length === 0 ? (
+                            <span className="badge ok">完整</span>
+                          ) : (
+                            <span
+                              className="badge warn"
+                              title={`待补全：${c.missing.join('、')}`}
+                              style={{ cursor: 'help' }}
+                            >
+                              {c.score}%
+                            </span>
+                          )
+                        })()}
                       </td>
                       <td>
                         {a.can_manage ? (
@@ -351,6 +400,8 @@ export default function Accounts() {
           }}
         />
       )}
+
+      <LoginSecurity />
     </>
   )
 
@@ -365,6 +416,122 @@ export default function Accounts() {
       setError(err instanceof Error ? err.message : String(err))
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+/**
+ * 登录安全审计。
+ *
+ * **没有 `admin:audit` 权限就整块不渲染** —— 靠后端 403 决定，不在前端猜。
+ * 前端那份权限快照可能过期，猜错的结果是给出一块点了必然报错的界面。
+ */
+function LoginSecurity() {
+  const [events, setEvents] = useState<LoginEvent[]>([])
+  const [total, setTotal] = useState(0)
+  const [onlyAnomalous, setOnlyAnomalous] = useState(false)
+  const [forbidden, setForbidden] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const load = useCallback(() => {
+    api
+      .loginEvents({ limit: 30, only_anomalous: onlyAnomalous })
+      .then((r) => {
+        setEvents(r.items)
+        setTotal(r.total)
+        setError(null)
+      })
+      .catch((e: unknown) => {
+        if (e instanceof ApiError && e.status === 403) setForbidden(true)
+        else setError(e instanceof Error ? e.message : String(e))
+      })
+  }, [onlyAnomalous])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  if (forbidden) return null
+
+  return (
+    <div className="card" style={{ marginTop: 16 }}>
+      <h3>
+        登录安全
+        <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>
+          成功失败都记。共 {total} 条，显示最近 {events.length} 条
+        </span>
+      </h3>
+      <p className="muted" style={{ margin: '4px 0 10px', fontSize: 12.5 }}>
+        异常判定不做 IP 归属地：真正有用的信号只是「IP 变了没有」。
+        接一个会过期的离线库换来的只是内网 IP 全判不出来的一批噪音。
+      </p>
+
+      <div className="toolbar" style={{ marginBottom: 10 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          <input
+            type="checkbox"
+            checked={onlyAnomalous}
+            onChange={(e) => setOnlyAnomalous(e.target.checked)}
+          />
+          只看异常
+        </label>
+        <button type="button" className="button" onClick={load}>
+          刷新
+        </button>
+      </div>
+
+      {error && <div className="error-box">{error}</div>}
+
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>时间</th>
+              <th>账号</th>
+              <th>结果</th>
+              <th>IP</th>
+              <th>方式</th>
+              <th>异常</th>
+            </tr>
+          </thead>
+          <tbody>
+            {events.map((e) => (
+              <tr key={e.id} style={e.anomalies.length > 0 ? { background: 'rgba(239,95,107,0.06)' } : undefined}>
+                <td className="muted" style={{ fontSize: 12 }}>
+                  {e.created_at ? new Date(e.created_at).toLocaleString('zh-CN') : '—'}
+                </td>
+                <td className="mono">{e.username}</td>
+                <td>
+                  <span className={`badge ${e.success ? 'ok' : 'danger'}`}>
+                    {e.success ? '成功' : e.reason ?? '失败'}
+                  </span>
+                </td>
+                <td className="mono" style={{ fontSize: 12 }}>
+                  {e.ip ?? '—'}
+                </td>
+                <td className="muted">{e.auth_method}</td>
+                <td>
+                  {e.anomalies.length === 0 ? (
+                    <span className="muted">—</span>
+                  ) : (
+                    <span className="badge danger" title={e.anomaly_note}>
+                      {e.anomaly_note || e.anomalies.join('/')}
+                    </span>
+                  )}
+                </td>
+              </tr>
+            ))}
+            {events.length === 0 && (
+              <tr>
+                <td colSpan={6} className="empty">
+                  还没有登录记录
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
 }
 
 // ---------------------------------------------------------------------------

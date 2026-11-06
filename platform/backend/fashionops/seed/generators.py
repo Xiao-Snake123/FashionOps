@@ -24,6 +24,26 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 # ===========================================================================
+# 时间锚点
+# ===========================================================================
+# **取"今天"，不写死一个日期。**
+#
+# 原来这里到处写的是 `datetime(2026, 9, 11, 21, 0, 0)`。写死之后，
+# 随着日历往前走，"近 30 天"这类窗口会一天天变空 —— 而且**不会报错**，
+# 表现只是页面上的动销、退货率、GMV 全是 0。
+# 这是演示库里最难查的一类问题：代码一点错没有，只是数据过期了。
+#
+# 取整到整点是为了让同一次灌库里所有生成器用同一个锚点
+# （否则跨小时跑会得到互相错开的日期）。
+SEED_NOW: datetime = datetime.now().replace(minute=0, second=0, microsecond=0)
+
+
+def seed_now() -> datetime:
+    """种子数据的时间锚点。见上方 `SEED_NOW` 的说明。"""
+    return SEED_NOW
+
+
+# ===========================================================================
 # 异常注入比例 —— 改这里就能调"业务有多惨"
 # ===========================================================================
 STOCKOUT_RATIO = 0.15  # 15% 的 SKU 库存告急（选品 Agent 必须过滤掉它们）
@@ -324,8 +344,8 @@ def make_inventory(
     会把余额越加越高，想要的"库存告急"根本不会出现 —— 这个 bug
     第一次跑就露馅了（告急 SKU 数量是 0）。
     """
-    start = datetime(2026, 9, 11) - timedelta(days=days)
-    end = datetime(2026, 9, 11, 21, 0, 0)
+    start = seed_now() - timedelta(days=days)
+    end = seed_now()
     stockout_skus = set(
         rng.sample(range(1, sku_count + 1), k=max(1, int(sku_count * STOCKOUT_RATIO)))
     )
@@ -431,7 +451,7 @@ def make_orders(
 ) -> list[dict]:
     """``sku_meta`` 每项需含 ``sku_index / sale_price / product_title / category``。"""
     orders: list[dict] = []
-    now = datetime(2026, 9, 11, 21, 0, 0)
+    now = seed_now()
     for i in range(count):
         sku = rng.choice(sku_meta)
         paid_at = now - timedelta(
@@ -604,7 +624,7 @@ def make_tickets(
     """
     rows: list[dict] = []
     angry_quota = int(count * ANGRY_TICKET_RATIO)
-    now = datetime(2026, 9, 11, 21, 0, 0)
+    now = seed_now()
 
     for i in range(count):
         if i < angry_quota:
@@ -760,7 +780,7 @@ def make_tasks(rng: random.Random, count: int = 20) -> list[dict]:
     """
     from fashionops.agents.workplan import plan_payload, plan_todos
 
-    now = datetime(2026, 9, 11, 21, 0, 0)
+    now = seed_now()
     rows: list[dict] = []
     for i in range(count):
         request, task_type = rng.choice(TASK_REQUESTS)
@@ -1122,7 +1142,7 @@ _KIND_TOOLS: dict[str, list[str]] = {
 
 def make_agent_runs(rng: random.Random, tasks: list[dict]) -> list[dict]:
     rows: list[dict] = []
-    now = datetime(2026, 9, 11, 21, 0, 0)
+    now = seed_now()
     for task_index, task in enumerate(tasks, start=1):
         for _ in range(rng.randrange(2, 7)):
             agent = rng.choice(AGENT_NAMES)
@@ -1183,7 +1203,7 @@ ASSET_SPECS = [
 
 
 def make_assets(rng: random.Random, tasks: list[dict], count: int = 50) -> list[dict]:
-    now = datetime(2026, 9, 11, 21, 0, 0)
+    now = seed_now()
     rows: list[dict] = []
     for i in range(count):
         asset_type, label, mime, width, height, duration = rng.choice(ASSET_SPECS)
@@ -1229,7 +1249,7 @@ def make_ad_campaigns(rng: random.Random, count: int = 12) -> list[dict]:
     ``BAD_ROI_RATIO`` 比例的计划被强制灌成亏损状态（ROI < 1.0），
     广告投放 Agent 跑起来才能真的触发"自动停投"这条规则。
     """
-    now = datetime(2026, 9, 11, 21, 0, 0)
+    now = seed_now()
     bad_quota = max(1, int(count * BAD_ROI_RATIO))
     rows: list[dict] = []
 
@@ -1288,7 +1308,7 @@ def make_email_messages(rng: random.Random, count: int = 30) -> list[dict]:
     ``gate_decision='blocked_*'`` 的记录是面试时的好素材 ——
     可以直接讲"这封邮件为什么被拦下来"，而不是空口说"我做了安全策略"。
     """
-    now = datetime(2026, 9, 11, 21, 0, 0)
+    now = seed_now()
     subjects = [
         "【日报】昨日经营数据与异常提醒",
         "【周报】本周选品与投放复盘",
@@ -1360,7 +1380,7 @@ TOOLS = [
 
 
 def make_audit_logs(rng: random.Random, count: int = 300) -> list[dict]:
-    now = datetime(2026, 9, 11, 21, 0, 0)
+    now = seed_now()
     rows: list[dict] = []
     for _ in range(count):
         tool_name, action, resource = rng.choice(TOOLS)
@@ -1487,7 +1507,7 @@ def make_chat_demo(rng: random.Random, *, now: datetime | None = None) -> dict:
 
     返回的是**纯 dict**，不碰数据库（和别的生成器一样，方便单测）。
     """
-    now = now or datetime(2026, 9, 11, 21, 0, 0)
+    now = now or seed_now()
     conversations: list[dict] = []
 
     for index, script in enumerate(CHAT_SCRIPTS, start=1):

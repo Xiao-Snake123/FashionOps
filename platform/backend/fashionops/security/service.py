@@ -234,6 +234,7 @@ def authenticate(
     username: str,
     password: str,
     ip: str = "",
+    user_agent: str = "",
     max_failures: int = 5,
     lock_minutes: int = 15,
 ) -> User:
@@ -241,6 +242,9 @@ def authenticate(
 
     失败计数写在这里而不是"登录接口"里：不管从哪个入口登录（HTTP / CLI / 测试），
     锁定策略都必须生效。写在路由里的话，加一个新入口就等于开了一个爆破通道。
+
+    登录事件也在每一条退出路径上记 —— 理由同上：**入口可以有多个，
+    但"谁在什么时候试过登录"只能有一个来源**。
     """
     user = find_user(session, username)
 
@@ -249,10 +253,27 @@ def authenticate(
         # 不跑的话，"用户不存在"会在 1ms 内返回，"密码错"要 100ms ——
         # 响应时间直接泄漏出哪些用户名是有效的（时序侧信道）。
         passwords.verify_password(password, None)
+        _record_login_event(
+            session,
+            username=username,
+            success=False,
+            reason="unknown_user",
+            ip=ip,
+            user_agent=user_agent,
+        )
         raise _invalid_credentials()
 
     if user.is_locked_now:
         remaining = int((user.locked_until - utcnow()).total_seconds() // 60) + 1
+        _record_login_event(
+            session,
+            username=username,
+            user=user,
+            success=False,
+            reason="locked",
+            ip=ip,
+            user_agent=user_agent,
+        )
         raise AuthError(
             f"账号已被锁定，请 {remaining} 分钟后再试，或联系管理员解锁",
             reason="locked",
@@ -264,12 +285,30 @@ def authenticate(
         if user.status == USER_STATUS_LOCKED:
             user.status = USER_STATUS_ACTIVE
         else:
+            _record_login_event(
+                session,
+                username=username,
+                user=user,
+                success=False,
+                reason=f"status:{user.status}",
+                ip=ip,
+                user_agent=user_agent,
+            )
             raise AuthError(
                 "账号已被停用，请联系管理员", reason=f"status:{user.status}"
             )
 
     if not passwords.verify_password(password, user.password_hash):
         _record_failure(session, user, max_failures=max_failures, lock_minutes=lock_minutes)
+        _record_login_event(
+            session,
+            username=username,
+            user=user,
+            success=False,
+            reason="bad_password",
+            ip=ip,
+            user_agent=user_agent,
+        )
         raise _invalid_credentials()
 
     # ---- 成功 ----
@@ -287,8 +326,52 @@ def authenticate(
         user.password_changed_at = utcnow()
         logger.info("已升级用户 %s 的密码哈希参数", user.username)
 
+    _record_login_event(
+        session,
+        username=username,
+        user=user,
+        success=True,
+        ip=ip,
+        user_agent=user_agent,
+    )
     session.flush()
     return user
+
+
+def _record_login_event(
+    session: Session,
+    *,
+    username: str,
+    user: User | None = None,
+    success: bool,
+    reason: str | None = None,
+    auth_method: str = "password",
+    ip: str = "",
+    user_agent: str = "",
+) -> None:
+    """写一条登录事件（成功失败都写）。
+
+    **写失败绝不能影响登录本身**：它是旁路的审计数据，
+    为了记一笔日志把正常用户挡在门外是最糟糕的失败模式。
+    所以这里只 `warning`，不往上抛。
+    """
+    from fashionops.db.models import LoginEvent
+
+    try:
+        session.add(
+            LoginEvent(
+                username=(username or "")[:64],
+                user_id=(user.id if user is not None else None),
+                success=success,
+                reason=(reason or None),
+                auth_method=auth_method[:32],
+                ip=(ip or None),
+                user_agent=(user_agent or "")[:255] or None,
+            )
+        )
+        session.flush()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("登录事件落库失败（不影响登录流程）：%s", exc)
 
 
 def _record_failure(
@@ -329,6 +412,7 @@ def login(
         username=username,
         password=password,
         ip=ip,
+        user_agent=user_agent,
         max_failures=max_failures,
         lock_minutes=lock_minutes,
     )

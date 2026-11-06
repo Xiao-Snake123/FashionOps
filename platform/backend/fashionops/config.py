@@ -236,6 +236,22 @@ class Settings(BaseSettings):
         default="deepseek-chat", description="轻量模型（用于模型路由，降本）"
     )
     model_temperature: float = 0.3
+    model_timeout: float = Field(
+        default=120.0,
+        description=(
+            "单次模型请求的读超时（秒）。**别调太小**：工具把候选款回灌之后"
+            "再让模型吐结构化 JSON，那一步实测能跑满 60 秒以上"
+            "（真实事故见 llm/openai_compat.py 的重试说明）。"
+        ),
+    )
+    model_max_retries: int = Field(
+        default=2,
+        description=(
+            "对**判定为可重试**的错误（超时、连接失败、429、5xx）额外重试几次，"
+            "指数退避 + 抖动。401/400 这类【重试也没用】的错误一次就失败，"
+            "不会傻乎乎重试到把配额耗光。"
+        ),
+    )
 
     # ---- 外部系统（全部 Mock 占位）----
     ecom_api_mode: str = Field(
@@ -468,6 +484,37 @@ class Settings(BaseSettings):
     )
     office_mcp_workspace: str | None = Field(
         default=None, description="传给 office 服务器的 OFFICE_MCP_WORKSPACE_ROOT"
+    )
+
+    # ---- DeerFlow（LangGraph 编排层，sidecar @ :8011）----
+    # 对话侧编排引擎的可切换项：`legacy` 走平台自研的 run_tool_loop；
+    # `deerflow` 走 DeerFlow 的 LangGraph 图（作为 sidecar 进程跑在 :8011）。
+    # 用配置开关切换，便于灰度与一键回滚（见 chat/agent.py）。
+    orchestrator_backend: str = Field(
+        default="legacy",
+        description="对话编排引擎：``legacy``（平台自研）/ ``deerflow``（DeerFlow LangGraph sidecar）",
+    )
+    # DeerFlow Gateway 的 LangGraph 兼容 API 基址（不含末尾斜杠）。
+    #
+    # 路径是 `/api` 而**不是** `/api/langgraph`：DeerFlow 把线程与 run 路由挂在
+    # `/api/threads` 下（见 backend/app/gateway/routers/thread_runs.py 的
+    # `APIRouter(prefix="/api/threads")`），本适配层的请求是
+    # `{base}/threads` 和 `{base}/threads/{id}/runs/stream`。
+    # 多写一段 `/langgraph` 会 404，而 404 在流式接口上表现为"连上了但什么都没吐"，
+    # 很难一眼看出是路径配错。DeerFlow README 里的 `langgraph_url` 指的是同一个东西。
+    deerflow_base_url: str = Field(
+        # ⚠ 默认 8011 而非 8001：本机另一个股票系统的 Java 后端常驻 8001。
+        default="http://127.0.0.1:8011/api",
+        description="DeerFlow sidecar 的 LangGraph API 基址（SSE 流与 thread/run 管理）",
+    )
+    # sidecar 间 server-to-server 调用用的内部令牌（对应 DeerFlow 的
+    # DEER_FLOW_INTERNAL_AUTH_TOKEN）。不走 PAT 的 allowlist，也不带 CSRF。
+    deerflow_internal_token: str | None = Field(
+        default=None, exclude=True, repr=False, description="DeerFlow 内部鉴权令牌（X-DeerFlow-Internal-Token）"
+    )
+    # 以哪个平台用户身份在 DeerFlow 侧归属这次编排（用于 DeerFlow 的 owner 维度）。
+    deerflow_owner_user_id: str = Field(
+        default="deerflow", description="DeerFlow 侧归属用户标识（X-DeerFlow-Owner-User-Id）"
     )
 
     # ---- 校验器 ----

@@ -88,6 +88,34 @@ def business_cache_off(monkeypatch):
     disabled = Settings(business_cache_enabled=False)
     monkeypatch.setattr(cache_mod, "get_settings", lambda: disabled)
 
+
+@pytest.fixture(autouse=True)
+def audit_writes_off(monkeypatch):
+    """测试期间把**落库审计**的写入动作关成空操作。
+
+    ## 为什么必须关
+
+    `ToolGateway` 的审计 sink 默认是 `SqlAuditSink`（落库）。单测跑在**临时
+    SQLite** 上，而 `SqlAuditSink` 是**另开一个连接**去写的：调用方会话正处在
+    事务里时，SQLite 会抛 `database is locked` —— 而且是**等 busy timeout
+    （默认 5 秒）之后**才抛。一次工具调用白等 5 秒，全量 600+ 用例会从
+    十几秒涨到几十分钟。生产用 MySQL 不受影响（已在本机 MySQL 上实测落库成功）。
+
+    ## 为什么是"把 record 改空"而不是"换一个 MemoryAuditSink"
+
+    换 sink 的话，`isinstance(gw.audit, SqlAuditSink)` 这类断言就会变成假绿
+    —— 它本来要守的是"**生产接线的默认值是不是落库的**"（见
+    `test_mcp.py::test_audit_sink_persists_instead_of_memory`）。
+    把方法改空则保留了对象身份，只去掉副作用：**被替换的是行为，不是被测对象**。
+
+    需要断言审计内容的用例，显式传 `audit_sink=MemoryAuditSink()` 即可
+    （`test_gateway.py` 一直是这么写的），不受这个夹具影响。
+    """
+    from fashionops.gateway.audit import SqlAuditSink
+
+    monkeypatch.setattr(SqlAuditSink, "record", lambda self, entry: None)
+
+
 #: 测试用户的固定用户名。用固定值而不是随机值，是为了让失败时的报错可读 ——
 #: `pytest_a1b2c3d4` 这种名字出现在报错里会让人以为是数据问题。
 TEST_ADMIN_USERNAME = "pytest_admin"

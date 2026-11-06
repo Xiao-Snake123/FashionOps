@@ -59,6 +59,7 @@ from fashionops.db.models_identity import (
     APIKey,
     Department,
     ExternalIdentity,
+    LoginEvent,
     Permission,
     RefreshToken,
     Role,
@@ -389,6 +390,8 @@ class Ticket(Base):
         # 上面那个复合索引第二列是 priority，覆盖不了这个排序，
         # 于是每次都要 filesort —— 补一个顺序对得上的。
         Index("ix_tickets_status_created", "status", "created_at"),
+        # "我的待办"是客服页最常用的筛选：按负责人过滤 + 按创建时间倒序。
+        Index("ix_tickets_assignee_created", "assignee", "created_at"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -447,6 +450,25 @@ class Ticket(Base):
     #: 走的是哪条路：``fast``（代码快车道，0 次模型调用）/ ``agent``（工具循环）。
     #: 存它是为了能算"快车道占比"—— 那是这套两层架构唯一的核心指标。
     agent_lane: Mapped[str | None] = mapped_column(String(16))
+
+    # ---- 人工侧（2026-10 新增）----
+    #
+    # 为什么 Agent 的痕迹和人的痕迹要分开存：`agent_handled_at` 回答
+    # "机器处理过没有"，`assignee` 回答"现在归谁"。混用一个字段的话，
+    # 页面上就分不清"这条工单没人跟进"和"机器跑过了但没人接" ——
+    # 而这两者的处置完全不同（前者要派单，后者要看 Agent 的草稿）。
+    #: 负责人。**存用户名而不是外键**：工单列表要直接显示"归谁"，
+    #: 用外键的话每次渲染都要 join users，而用户名才是人真正要看的东西。
+    #: 用户被删时它留在那儿，正好也是"当时是谁接的"这份记录。
+    assignee: Mapped[str | None] = mapped_column(String(64), comment="人工处理负责人（用户名）")
+    assigned_at: Mapped[datetime | None] = mapped_column(DateTime)
+    #: 人工处理阶段：``pending``（待接单）/ ``contacted``（已联系客户）/
+    #: ``waiting_customer``（等客户回复）/ ``resolved``（已解决）。
+    #: **和 `status` 分开**：`status` 是工单在客服流程里的位置，
+    #: 这个是"人做到哪一步了"。两者会错位（status=closed 但人还在等退款到账）。
+    human_status: Mapped[str | None] = mapped_column(String(32), comment="人工处理阶段")
+    human_note: Mapped[str | None] = mapped_column(String(255), comment="最新一条人工备注")
+    human_updated_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 # ===========================================================================
@@ -944,6 +966,7 @@ ALL_MODELS: tuple[type[Base], ...] = (
     UserRole,
     RolePermission,
     RefreshToken,
+    LoginEvent,
     ExternalIdentity,
     APIKey,
     # ---- 业务域 ----
@@ -976,7 +999,7 @@ ALL_MODELS: tuple[type[Base], ...] = (
     # 上面"对话域父表在前"那一组的阅读顺序。
     AgentMemory,
 )
-"""29 张表：9 张身份表 + 16 张业务表 + 3 张对话表 + 1 张长期记忆表，
+"""30 张表：10 张身份表 + 16 张业务表 + 3 张对话表 + 1 张长期记忆表，
 顺序即依赖顺序（父表在前）。"""
 
 __all__ = [
@@ -997,6 +1020,7 @@ __all__ = [
     "ExternalIdentity",
     "Inventory",
     "KBArticle",
+    "LoginEvent",
     "Order",
     "Permission",
     "Product",

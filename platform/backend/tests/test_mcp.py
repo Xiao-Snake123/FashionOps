@@ -345,3 +345,127 @@ class TestHandlers:
         )
         result = await server.handle_call_tool(None, params)
         assert result.is_error is False
+
+
+# ===========================================================================
+# 6. ★ 对外审批闸口（外部调用方不豁免人工确认）
+# ===========================================================================
+#: 测试用的收件人。刻意选 **RFC 2606 保留域名** 且不在发信白名单里：
+#: 本机 ``platform/.env`` 里 ``MAIL_ENABLED=true`` + ``MAIL_DRY_RUN=false`` +
+#: SMTP 已配置，也就是**真能发出去**。用一个投不出去、又被白名单拦下的地址，
+#: 才能保证"测试永远不会真的给人发一封邮件"。改动这个常量前先想清楚。
+_SAFE_RECIPIENT = "a@example.com"
+
+_MAIL_ARGS = {
+    "to_addrs": [_SAFE_RECIPIENT],
+    "subject": "s",
+    "body_text": "b",
+}
+
+
+@pytest.fixture
+def sender(session):  # noqa: ANN001
+    """运营主管：**有** mail:send。
+
+    不能用 `operator` 测这个闸口 —— 他连发信权限都没有，调用会先被权限拦下。
+    那样断言到的就不是"闸口拦住了"，而是"权限拦住了"，两件事分不清，
+    测试看着是绿的，实际什么都没验证到。
+    """
+    from conftest import ensure_identity
+
+    from fashionops.security import service
+    from fashionops.security.permissions import ROLE_OPS_MANAGER
+
+    ensure_identity(session)
+    user = service.create_user(
+        session,
+        username="mcp_sender",
+        password=PASSWORD,
+        roles=(ROLE_OPS_MANAGER,),
+        created_by="pytest",
+    ).user
+    session.commit()
+    return user
+
+
+@pytest.fixture
+def mail_key(session, sender):  # noqa: ANN001
+    return _issue(session, sender, name="发信 key")[0]
+
+
+class TestApprovalGateForExternalCallers:
+    """外部调用方（DeerFlow 等）经 MCP 调平台工具时的审批闸口。
+
+    ## 这个闸口存在的意义
+
+    外部 Agent 自己也是个"会自己决定下一步"的东西。如果让它直接发信，
+    平台就失去了"哪些动作需要人点确认"的权威 —— 那条红线会被搬到一个
+    我们看不见、也改不了的提示词里。所以带凭据（``raw_key``）发起的调用，
+    需要确认的工具**不执行**，只回一个 ``needs_approval``，由平台去弹卡片。
+
+    ## 为什么"坏参数"那一条最重要
+
+    外部调用方是模型驱动的，它**会**传错参数。如果先弹卡、再校验，
+    人就会被拉去看一个必然失败的操作：点了"同意"，工具立刻报参数错。
+    审批的价值建立在"人能看懂、且看了有用"之上；拿这种卡片消耗人的注意力，
+    闸口很快就会退化成无脑点"同意" —— 这个项目通篇在防这件事。
+    """
+
+    def test_write_tool_is_gated_and_not_executed(self, mail_key):  # noqa: ANN001
+        payload = server._call_tool_sync("mail.send", dict(_MAIL_ARGS), raw_key=mail_key)
+
+        assert payload["ok"] is False
+        assert payload["needs_approval"] is True
+        assert payload["tool"] == "mail.send"
+        assert payload["error"]["code"] == "NEEDS_APPROVAL"
+        # 摘要必须是**人话**：让人读 JSON 再点"同意"不叫审批，叫背锅。
+        assert "收件人" in payload["preview"]
+        assert _SAFE_RECIPIENT in payload["preview"]
+
+    def test_read_tool_is_never_gated(self, mail_key):  # noqa: ANN001
+        payload = server._call_tool_sync(
+            "erp.query_inventory", {"sku_codes": ["SKU00042"]}, raw_key=mail_key
+        )
+        assert payload["ok"] is True
+        assert "needs_approval" not in payload
+
+    def test_gate_follows_reversibility_not_write_flag(self):  # noqa: ANN001
+        """闸口判据是"做完能不能撤销"，不是"是不是写操作"。
+
+        报表导出是写操作但**免审批**：它只往自己的素材表写一个可重跑、
+        可删除的文件，没有对外可见的副作用。把它也拦下来，只会让
+        "选品 + 出报表"这种纯内部任务停下来等人，红线上的人被淹没在点击里。
+        """
+        from fashionops.approval.policy import needs_approval
+
+        assert needs_approval("mail.send") is True
+        assert needs_approval("report.export_excel") is False
+        assert needs_approval("analytics.render_business_report") is False
+
+    def test_malformed_write_is_rejected_before_the_gate(self, mail_key):  # noqa: ANN001
+        """**本组最重要的一条**：参数不合法 → INVALID_ARGUMENTS，且不弹审批卡。"""
+        payload = server._call_tool_sync(
+            "mail.send", {"to_addrs": "不是数组"}, raw_key=mail_key
+        )
+
+        assert payload["ok"] is False
+        assert "needs_approval" not in payload, "坏参数不该占用人的注意力"
+        assert payload["error"]["code"] == "INVALID_ARGUMENTS"
+        # hint 要给模型留自纠的线索，否则它只会卡死在同一个调用上
+        assert payload["error"]["hint"]
+        # 完整 schema 一起给出去，模型据此能自己把参数改对
+        assert "schema" in payload["error"]["details"]
+
+    def test_internal_caller_gets_no_card(self, monkeypatch, mail_key):  # noqa: ANN001
+        """不带 ``raw_key``（平台内部 / stdio）时，**MCP 这层不弹卡**。
+
+        内部 Agent 有自己的闸口（``chat/agent.py``、``agents/loop.py``）。
+        这里再拦一次就成了两道闸口叠一起 —— 人会开始无脑点同意，
+        闸口退化成形式主义。
+
+        只断言"没有 needs_approval"，不断言 ok：这条测的是**闸口范围**，
+        不是发信策略。收件人不在白名单，所以真走到 handler 也发不出去。
+        """
+        monkeypatch.setenv(auth.ENV_API_KEY, mail_key)
+        payload = server._call_tool_sync("mail.send", dict(_MAIL_ARGS))
+        assert "needs_approval" not in payload

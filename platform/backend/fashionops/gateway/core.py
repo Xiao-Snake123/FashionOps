@@ -68,7 +68,7 @@ from fashionops.config import get_settings
 from fashionops.gateway.audit import (
     AuditEntry,
     AuditSink,
-    MemoryAuditSink,
+    SqlAuditSink,
     sanitize,
     summarize_result,
 )
@@ -273,7 +273,23 @@ class ToolGateway:
             threshold=settings.gateway_circuit_breaker_threshold,
             cooldown_s=settings.gateway_circuit_breaker_cooldown,
         )
-        self.audit = audit_sink or MemoryAuditSink()
+        # ---- 审计 sink 的默认值：**落库**，不是内存 ----
+        #
+        # 这里原来是 `MemoryAuditSink()`，也就是"忘记传 audit_sink = 审计重启即丢"。
+        # 结果是：只有新加的 MCP 入口显式传了落库 sink，
+        # 平台自己的三条链路（任务 / 客服 / 对话）全都落在内存里 ——
+        # `agents/loop.py`、`service/agent.py`、`chat/agent.py` 都没传。
+        # "Agent 调了哪些工具"这件事因此**在生产上查不到**，而代码看起来治理齐全。
+        #
+        # 这个方向必须是默认安全的：漏配的后果应当是"审计留下"（多写一行），
+        # 而不是"审计消失"（出了事无据可查）。和邮件闸门那几个默认值同一条原则
+        # —— 漏配的后果要落在"更保守"的那一侧。
+        #
+        # 想要内存 sink（单测、纯计算脚本）就**显式**传进来：
+        #     ToolGateway(registry, audit_sink=MemoryAuditSink())
+        # 测试里由 conftest 的 `audit_writes_off` 夹具把写库动作关成空操作，
+        # 既不用改这里，也不会撞 SQLite 的写锁。
+        self.audit = audit_sink or SqlAuditSink()
         self.idempotency = idempotency or IdempotencyStore(namespace=settings.redis_key_prefix)
 
         self.rate_limit_per_minute = rate_limit_per_minute or settings.gateway_rate_limit_per_minute
@@ -354,22 +370,11 @@ class ToolGateway:
 
         # ---- 3. 参数校验 ----
         try:
-            payload = self._validate_args(spec, args)
+            payload = self.validate_args(spec, args)
         except ValidationError as exc:
             return self._reject(
                 tool_name, trace_id, started, stats,
-                ToolError(
-                    ErrorCode.INVALID_ARGUMENTS,
-                    f"参数校验失败：{exc.error_count()} 处不合法",
-                    hint=(
-                        "请按 schema 修正参数后重试："
-                        + "; ".join(
-                            f"{'.'.join(str(x) for x in e['loc'])}: {e['msg']}"
-                            for e in exc.errors()[:4]
-                        )
-                    ),
-                    details={"schema": spec.args_model.model_json_schema()},
-                ),
+                self.invalid_args_error(spec, exc),
                 ctx, action="invalid",
             )
 
@@ -452,8 +457,14 @@ class ToolGateway:
         return f"{ctx.idempotency_key}:{digest}"
 
     @staticmethod
-    def _validate_args(spec: ToolSpec, args: dict[str, Any] | BaseModel | None) -> dict[str, Any]:
-        """校验并规范化入参，返回 ``**kwargs`` 形式。
+    def validate_args(spec: ToolSpec, args: dict[str, Any] | BaseModel | None) -> dict[str, Any]:
+        """校验并规范化入参，返回 ``**kwargs`` 形式；不合法时抛 ``ValidationError``。
+
+        **是公开方法（没有 ``_`` 前缀），这一点是刻意的**：
+        ``mcp/server.py`` 必须在「弹审批卡」之前先跑一遍它 —— 参数本身就不合法
+        的调用不该占用人的注意力（详见 ``mcp/server.py`` 里审批闸口那段注释）。
+        如果那边自己抄一份校验，两边迟早会分叉，出现"网关说不合法、
+        MCP 说没问题"这种互相打脸的情况。
 
         注意 ``model_dump()`` 而不是 ``dict()``：``dict()`` 只转换顶层字段，
         嵌套的 Pydantic 模型和 ``Decimal`` 会被原样带出去，
@@ -461,6 +472,30 @@ class ToolGateway:
         """
         raw = args.model_dump() if isinstance(args, BaseModel) else (args or {})
         return spec.args_model(**raw).model_dump()
+
+    @staticmethod
+    def invalid_args_error(spec: ToolSpec, exc: ValidationError) -> ToolError:
+        """把 Pydantic 的校验失败翻成标准 ``ToolError``。
+
+        抽成工厂方法同样是为了**单一来源**：网关自己用它，
+        ``mcp/server.py`` 在审批闸口前也用同一份 —— 两处各写一遍 hint，
+        改一处漏一处，外部调用方拿到的就不是同一个解释了。
+
+        ``details.schema`` 里带上完整 JSON Schema：模型拿到之后可以自己
+        改对参数重试，而不是只看到一句"参数不合法"就卡死。
+        """
+        return ToolError(
+            ErrorCode.INVALID_ARGUMENTS,
+            f"参数校验失败：{exc.error_count()} 处不合法",
+            hint=(
+                "请按 schema 修正参数后重试："
+                + "; ".join(
+                    f"{'.'.join(str(x) for x in e['loc'])}: {e['msg']}"
+                    for e in exc.errors()[:4]
+                )
+            ),
+            details={"schema": spec.args_model.model_json_schema()},
+        )
 
     def _reject(
         self,

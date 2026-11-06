@@ -1,11 +1,18 @@
 ﻿<#
 .SYNOPSIS
-    服装电商多 Agent 运营中台 —— 停止前端 / 后端（可选连数据层一起停）
+    服装电商多 Agent 运营中台 —— 停止应用层四个（可选连数据层一起停）
 
 .DESCRIPTION
     按**端口**找到占用它的进程并停掉：
       - 3000 → 前端（Vite / node）
-      - 8000 → 后端（uvicorn / python）
+      - 8010 → 后端（uvicorn / python）
+      - 8100 → MCP 服务（平台工具对外暴露，python）
+      - 8011 → DeerFlow sidecar（可选编排后端，python）
+
+    四个都属于**应用层**，默认一起停。数据层（Redis / Qdrant）要用 -All 才停。
+
+    ⚠ 默认端口刻意避开 8000 / 8001 —— 那两个是本机另一个股票系统的默认端口。
+       端口表与避让理由见 platform/docs/14-端口清单.md。
 
     ## 为什么按端口找，而不是记 PID
 
@@ -15,10 +22,16 @@
     避免把占着 8000 的别的项目的服务杀掉（这台机器上真发生过）。
 
 .PARAMETER BackendPort
-    后端端口，默认 8000。
+    后端端口，默认 8010（避开股票系统的 8000）。
 
 .PARAMETER FrontendPort
     前端端口，默认 3000。
+
+.PARAMETER McpPort
+    MCP 服务端口，默认 8100。
+
+.PARAMETER DeerFlowPort
+    DeerFlow sidecar 端口，默认 8011（避开股票系统的 8001）。
 
 .PARAMETER All
     连 Redis / Qdrant 一起停（等于再调一次 services.ps1 stop）。
@@ -29,8 +42,12 @@
 #>
 [CmdletBinding()]
 param(
-    [int]$BackendPort = 8000,
+    # ⚠ 默认端口刻意避开 8000 / 8001 —— 那两个是本机另一个股票系统的默认端口。
+    #   端口表与避让理由见 platform/docs/14-端口清单.md。
+    [int]$BackendPort = 8010,
     [int]$FrontendPort = 3000,
+    [int]$McpPort = 8100,
+    [int]$DeerFlowPort = 8011,
     [switch]$All
 )
 
@@ -70,8 +87,12 @@ function Stop-OnPort([int]$Port, [string]$Label, [string[]]$ExpectNames) {
 
 Write-Head '停止 FashionOps'
 
+# 顺序：先停"消费方"，再停"被消费方"。
+# DeerFlow 会反过来连 MCP（:8100），先停它能少一批"连接被拒"的报错日志。
 Stop-OnPort -Port $FrontendPort -Label 'front' -ExpectNames @('node*')
+Stop-OnPort -Port $DeerFlowPort -Label 'flow ' -ExpectNames @('python*')
 Stop-OnPort -Port $BackendPort  -Label 'back ' -ExpectNames @('python*')
+Stop-OnPort -Port $McpPort      -Label 'mcp  ' -ExpectNames @('python*')
 
 if ($All) {
     Write-Head '数据层（Redis + Qdrant）'

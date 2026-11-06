@@ -17,9 +17,11 @@ DeepSeek、通义千问、智谱 GLM、以及 OpenAI 本身都提供 OpenAI 兼�
 
 ## 几个真实踩过的点
 
-1. **``max_retries`` 自己控**：SDK 自带重试会和我们的重试叠加，
-   一次调用实际发好几次请求，成本和延迟都翻倍且难排查。这里关掉 SDK 重试，
-   统一由上层决定。
+1. **重试自己做，不用 SDK 自带的**：SDK 的 ``max_retries`` 会和我们的策略叠加，
+   一次调用实际发好几次请求，成本和延迟都翻倍且难排查。所以这里把 SDK 重试关掉，
+   改由 :meth:`OpenAICompatClient._create` 按 :func:`_classify` 的 ``retryable``
+   判定重试 —— 关键是**只有值得重试的错误才重试**：超时 / 连接失败 / 429 / 5xx
+   会退避重试，401（Key 错了）/ 400（参数错了）一次就失败，不会把配额耗光。
 2. **``response_format`` 的支持度不一致**：``json_object`` 各家都支持，
    但严格的 json_schema 模式（``strict: true``）并不是。所以这里只用
    ``json_object``，把 schema 写进 system prompt 里 —— 通用性优先。
@@ -31,6 +33,8 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
+import random
 import time
 from collections.abc import Iterator
 from typing import Any
@@ -48,6 +52,8 @@ from fashionops.llm.types import (
     ToolCall,
     Usage,
 )
+
+logger = logging.getLogger("fashionops.llm")
 
 #: 上游的 ``finish_reason`` → 我们自己的枚举。
 #: 抽成模块级常量是因为 ``complete`` 和 ``stream`` 两条路径都要用 ——
@@ -70,6 +76,7 @@ class OpenAICompatClient:
         model: str,
         base_url: str | None = None,
         timeout: float = 60.0,
+        retries: int = 0,
     ) -> None:
         if not api_key:
             raise ValueError("缺少 model_api_key。要零成本开发请把 provider 设为 mock。")
@@ -77,6 +84,8 @@ class OpenAICompatClient:
         from openai import OpenAI
 
         self.model = model
+        #: 可重试错误的额外重试次数（不含首次调用）
+        self.retries = retries
         self._client = OpenAI(
             api_key=api_key,
             base_url=base_url or None,
@@ -85,6 +94,39 @@ class OpenAICompatClient:
             # 一次调用实际发好几次请求，成本和延迟都翻倍，而且日志里看不出来
             max_retries=0,
         )
+
+    def _create(self, payload: dict[str, Any], **kwargs: Any) -> Any:
+        """发一次请求，对**值得重试**的错误做指数退避重试。
+
+        ## 为什么必须区分 "retryable"
+
+        把 429（限流）当成不可重试 → 一次抖动白白失败掉整个任务；
+        把 401（Key 错了）当成可重试 → 会一直重试到把配额耗尽。
+        判定交给 :func:`_classify`，这里只负责退避。
+
+        ## 退避为什么要带抖动
+
+        纯指数退避会让同一批并发请求在**同一时刻**集体重试，
+        把刚恢复的上游再打垮一次（惊群）。加一点随机让重试散开。
+        """
+        attempts = 0
+        while True:
+            try:
+                return self._client.chat.completions.create(**payload, **kwargs)
+            except Exception as exc:  # noqa: BLE001
+                error = _classify(exc)
+                if not error.retryable or attempts >= self.retries:
+                    raise error from exc
+                attempts += 1
+                delay = min(8.0, 0.5 * (2 ** (attempts - 1))) * (0.75 + random.random() * 0.5)
+                logger.warning(
+                    "模型调用失败（%s），%.1fs 后第 %d/%d 次重试",
+                    str(error),
+                    delay,
+                    attempts,
+                    self.retries,
+                )
+                time.sleep(delay)
 
     def complete(
         self,
@@ -112,11 +154,7 @@ class OpenAICompatClient:
             payload["response_format"] = {"type": "json_object"}
 
         started = time.perf_counter()
-        try:
-            raw = self._client.chat.completions.create(**payload, **kwargs)
-        except Exception as exc:  # noqa: BLE001
-            raise _classify(exc) from exc
-
+        raw = self._create(payload, **kwargs)
         latency_ms = int((time.perf_counter() - started) * 1000)
         return self._parse(raw, used_model, latency_ms)
 
@@ -171,10 +209,11 @@ class OpenAICompatClient:
             payload["response_format"] = {"type": "json_object"}
 
         started = time.perf_counter()
-        try:
-            stream = self._client.chat.completions.create(**payload, **kwargs)
-        except Exception as exc:  # noqa: BLE001
-            raise _classify(exc) from exc
+        # 这里重试是**安全的**：生成器函数的 body 要等调用方第一次 next() 才执行，
+        # 所以此刻还没有任何分片吐出去，失败后整轮重来不会重复内容。
+        # （反过来，下面 ``for chunk in stream`` 那一段失败**绝不重试** ——
+        #   调用方已经收到半段正文，重来会把内容重复一段。）
+        stream = self._create(payload, **kwargs)
 
         content_parts: list[str] = []
         #: index -> 该工具调用的分片累积

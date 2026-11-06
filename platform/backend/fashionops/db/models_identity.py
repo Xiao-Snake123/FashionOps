@@ -306,6 +306,66 @@ class RefreshToken(Base):
 
 
 # ===========================================================================
+# 6.5 登录事件（安全审计）
+# ===========================================================================
+class LoginEvent(Base):
+    """每一次登录尝试，成功失败都记。
+
+    ## 为什么不是只在 `users` 上留 `last_login_at`
+
+    `users.last_login_at` / `last_login_ip` 只能回答"**最后一次**"，
+    而异常登录的判断必需**序列**：
+
+    * "一小时内从两个城市登录" —— 只看最后一次永远看不出来
+    * "连续 5 次密码错误之后突然成功了" —— 成功那次会把失败覆盖掉
+
+    ## 为什么不用 `audit_logs`
+
+    审计表是**通用**的（工具调用、接口操作、登录混在一起），
+    按"登录"这个维度查要全表扫 `tool_name`，而且它没有
+    `success` / `reason` 这类登录专用语义。登录是安全事件，值得单独一张表。
+
+    ## 用户名即使不存在也要记
+
+    `username` 是**非空**且没有外键的：探测账号名的行为本身就是信号
+    （一堆 unknown_user 事件 = 有人在撞库）。只记"登录成功"的话，
+    这一类攻击在数据上完全隐形。
+    """
+
+    __tablename__ = "login_events"
+    __table_args__ = (
+        # "按人看最近 N 次" —— 最常用
+        Index("ix_login_events_username_created", "username", "created_at"),
+        Index("ix_login_events_user", "user_id"),
+        # "按时间倒序看全部" —— 审计页
+        Index("ix_login_events_created", "created_at"),
+        # "扫失败登录" —— 安全排查，不该全表扫
+        Index("ix_login_events_success_created", "success", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    #: 登录时**填的**用户名（用户不存在也要记，见类文档）
+    #: 不单独建单列索引：查询总是"这个人 + 按时间倒序"，
+    #: 上面的复合索引 (username, created_at) 已经覆盖，再加一个单列的是浪费
+    username: Mapped[str] = mapped_column(String(64))
+    #: 只有登录成功才有。SET NULL：用户被删后事件仍保留（审计不能跟着消失）
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    success: Mapped[bool] = mapped_column(Boolean, default=False)
+    #: bad_password / disabled / locked / unknown_user / mfa_required
+    reason: Mapped[str | None] = mapped_column(String(64))
+    #: password / api_key / oauth:dingtalk
+    auth_method: Mapped[str] = mapped_column(String(32), default="password")
+    ip: Mapped[str | None] = mapped_column(String(64))
+    #: 客户端完全可控的字段，截到 255 就好 —— 存全文等于给别人一个
+    #: 往库里塞超长字符串的地方
+    user_agent: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    def __repr__(self) -> str:
+        return f"<LoginEvent user={self.username} ok={self.success} ip={self.ip}>"
+
+
+# ===========================================================================
 # 7. 外部身份（钉钉 / 企业微信 / OIDC）
 # ===========================================================================
 class ExternalIdentity(Base):

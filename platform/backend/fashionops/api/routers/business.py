@@ -18,8 +18,9 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
+from typing import Any, Final
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -50,6 +51,7 @@ from fashionops.db.models import (
     EmailMessage,
     Inventory,
     KBArticle,
+    Order,
     Product,
     Ticket,
 )
@@ -111,8 +113,66 @@ def list_products(
     stmt = stmt.order_by(Product.id)
 
     rows, total = _paginate(session, stmt, page, page_size)
+
+    # 库存和动销都是"按 SKU 聚合到 SPU"。这里刻意用**两条分组查询 + 在
+    # Python 里合并**，而不是写成相关子查询 ——
+    # 相关子查询要逐行扫 inventory（流水表，行数远大于商品数），
+    # 数据量一上来就是全表扫；两条分组查询的代价与分页大小无关。
+    product_ids = [r.id for r in rows]
+
+    # ① 库存：流水线里每个 SKU 取**最新一条**，其余额才是当前可售量。
+    #    直接 sum 所有流水行会把历史进出全加一遍，得出一个毫无意义的数。
+    latest = (
+        select(Inventory.sku_id, func.max(Inventory.occurred_at).label("ts"))
+        .group_by(Inventory.sku_id)
+        .subquery()
+    )
+    stock_rows = (
+        session.execute(
+            select(SKU.product_id, func.sum(Inventory.quantity_after))
+            .join(
+                latest,
+                (Inventory.sku_id == latest.c.sku_id) & (Inventory.occurred_at == latest.c.ts),
+            )
+            .join(SKU, SKU.id == Inventory.sku_id)
+            .where(SKU.product_id.in_(product_ids))
+            .group_by(SKU.product_id)
+        ).all()
+        if product_ids
+        else []
+    )
+
+    # ② 动销：近 30 天**实际成交**订单数。
+    #    刻意排除退款/退款中 —— 服装退货率 25%~40%，
+    #    把退款单算进"动销"会把滞销款衬得很好卖。
+    since_30d = date.today() - timedelta(days=30)
+    sold_rows = (
+        session.execute(
+            select(SKU.product_id, func.count(Order.id))
+            .join(SKU, SKU.id == Order.sku_id)
+            .where(
+                SKU.product_id.in_(product_ids),
+                Order.paid_at >= since_30d,
+                Order.status.notin_(("refunding", "refunded", "cancelled")),
+            )
+            .group_by(SKU.product_id)
+        ).all()
+        if product_ids
+        else []
+    )
+
+    stock_map = {pid: int(v or 0) for pid, v in stock_rows}
+    sold_map = {pid: int(v or 0) for pid, v in sold_rows}
+
+    items: list[ProductOut] = []
+    for r in rows:
+        out = ProductOut.model_validate(r)
+        out.stock = stock_map.get(r.id, 0)
+        out.sold_count = sold_map.get(r.id, 0)
+        items.append(out)
+
     return Page[ProductOut](
-        items=[ProductOut.model_validate(r) for r in rows],
+        items=items,
         total=total,
         page=page,
         page_size=page_size,
@@ -199,18 +259,30 @@ def low_stock(
 # ---------------------------------------------------------------------------
 @router.get("/tickets", response_model=Page[TicketOut], summary="客服工单列表")
 def list_tickets(
-    _: Principal = Depends(require_permission(PERM_KB_READ)),  # noqa: B008
+    principal: Principal = Depends(require_permission(PERM_KB_READ)),  # noqa: B008
     session: Session = Depends(get_db),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     status: str | None = None,
     only_escalated: bool = False,
+    assignee: str | None = None,
+    only_mine: bool = Query(False, description="只看派给我的"),
+    #: 未派单 = 没人认领。这是"待接单"看板的基础，也是最容易积压的地方
+    only_unassigned: bool = Query(False, description="只看还没派人的"),
 ) -> Page[TicketOut]:
     stmt = select(Ticket)
     if status:
         stmt = stmt.where(Ticket.status == status)
     if only_escalated:
         stmt = stmt.where(Ticket.escalated.is_(True))
+    if assignee:
+        stmt = stmt.where(Ticket.assignee == assignee)
+    if only_mine:
+        # "我的待办"用**当前登录名**过滤，不接受前端传用户名 ——
+        # 让它传等于允许任何人看别人的待办列表（只是把 URL 改一下）
+        stmt = stmt.where(Ticket.assignee == principal.username)
+    if only_unassigned:
+        stmt = stmt.where(Ticket.assignee.is_(None))
     stmt = stmt.order_by(Ticket.created_at.desc())
 
     rows, total = _paginate(session, stmt, page, page_size)
@@ -220,6 +292,47 @@ def list_tickets(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get("/tickets/stats", summary="工单看板统计（未派单 / 待接单 / 各人工阶段）")
+def ticket_stats(
+    _: Principal = Depends(require_permission(PERM_KB_READ)),  # noqa: B008
+    session: Session = Depends(get_db),
+) -> dict[str, object]:
+    """统计**不缓存**：派单是一个高频动作，缓存会让"刚派出去的活"还显示在待接单里。
+
+    界面真正需要的是两个数字：`unassigned`（没人认领）和 `by_human_status`
+    （人做到哪一步了）。只看 `status` 得不到它们 —— `status` 说的是工单在
+    **客服流程**里的位置，不是有没有人在跟。
+    """
+    total = session.scalar(select(func.count()).select_from(Ticket)) or 0
+    unassigned = (
+        session.scalar(select(func.count()).where(Ticket.assignee.is_(None))) or 0
+    )
+    by_status = dict(
+        session.execute(select(Ticket.status, func.count()).group_by(Ticket.status)).all()
+    )
+    by_human = dict(
+        session.execute(
+            select(Ticket.human_status, func.count())
+            .where(Ticket.human_status.is_not(None))
+            .group_by(Ticket.human_status)
+        ).all()
+    )
+    by_assignee = dict(
+        session.execute(
+            select(Ticket.assignee, func.count())
+            .where(Ticket.assignee.is_not(None))
+            .group_by(Ticket.assignee)
+        ).all()
+    )
+    return {
+        "total": total,
+        "unassigned": unassigned,
+        "by_status": by_status,
+        "by_human_status": by_human,
+        "by_assignee": by_assignee,
+    }
 
 
 @router.get("/campaigns", response_model=Page[AdCampaignOut], summary="广告投放计划")
@@ -281,6 +394,68 @@ def daily_metrics(
     items = [BIMetricOut.model_validate(r) for r in rows]
     write_cached_json(key, [i.model_dump(mode="json") for i in items])
     return items
+
+
+#: 行业基准带（服装电商大类，退货率的合理区间）。
+#:
+#: **刻意写在后端**：基准是"业务口径"，不是"显示样式"。
+#: 放前端会散落成多份（图表一份、表格一份），改一处漏一处 ——
+#: 然后就会出现"图和表对不上"这种最难查的问题。
+INDUSTRY_RETURN_RATE_BAND: Final[tuple[float, float]] = (0.25, 0.40)
+
+
+@router.get(
+    "/metrics/return-rate-by-category",
+    summary="各品类退货率（含行业基准带，用来定位到底是哪一类在拖高整体退货）",
+)
+def return_rate_by_category(
+    _: Principal = Depends(require_permission(PERM_AD_READ)),  # noqa: B008
+    session: Session = Depends(get_db),  # noqa: B008
+    days: int = Query(30, ge=1, le=180),
+) -> dict[str, Any]:
+    """按品类汇总退款率。
+
+    ## 为什么是"汇总后再除"，而不是把每天的 return_rate 直接平均
+
+    直接平均会让**数据极少的一天**和**旺季的一天**权重相同 ——
+    某天只退了 1 单、金额占比却很大，平均出来的结论会被小样本带偏。
+    这里先分别汇总退款额与 GMV，再相除，权重自然按规模分配。
+    """
+    since = date.today() - timedelta(days=days)
+
+    rows = session.execute(
+        select(
+            BIMetric.category,
+            func.sum(BIMetric.refund_amount).label("refund"),
+            func.sum(BIMetric.gmv).label("gmv"),
+        )
+        # "全部"是汇总行，混进来会让每个品类都算进整体，结论失真
+        .where(BIMetric.metric_date >= since, BIMetric.category != "全部").group_by(BIMetric.category)
+    ).all()
+
+    items: list[dict[str, Any]] = []
+    for category, refund, gmv in rows:
+        gmv_f = float(gmv or 0)
+        if gmv_f <= 0:
+            continue
+        rate = float(refund or 0) / gmv_f
+        items.append(
+            {
+                "category": category,
+                "return_rate": round(rate, 4),
+                "gmv": round(gmv_f, 2),
+                "refund_amount": round(float(refund or 0), 2),
+                # 超过基准上沿 = 这个类目正在拖高整体退货
+                "over_baseline": rate > INDUSTRY_RETURN_RATE_BAND[1],
+            }
+        )
+    items.sort(key=lambda x: x["return_rate"], reverse=True)
+
+    return {
+        "days": days,
+        "baseline": {"low": INDUSTRY_RETURN_RATE_BAND[0], "high": INDUSTRY_RETURN_RATE_BAND[1]},
+        "items": items,
+    }
 
 
 @router.get("/assets", response_model=Page[AssetOut], summary="素材列表")

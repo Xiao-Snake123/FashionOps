@@ -95,6 +95,11 @@ class ProductOut(ORMBase):
     list_price: Decimal | None = None
     rating: Decimal | None = None
     status: str
+    #: 当前可售库存 = 该 SPU 下所有 SKU 的最新流水余额之和。
+    #: **库存是流水推出来的，不是一个余额字段** —— 见 db/models 里 Inventory 的注释。
+    stock: int = 0
+    #: 近 30 天销量（动销）。用来判断"这个款走不走得动"。
+    sold_count: int = 0
 
 
 class TaskOut(ORMBase):
@@ -199,6 +204,12 @@ class TaskDetailOut(TaskOut):
     #: 有序的 todo 列表。旧任务（还没有 todo 行）给空列表，
     #: 前端据此知道"这个任务是用旧架构跑的"，不用靠形状猜。
     todos: list[TaskTodoOut] = []
+    #: **关联单据**：这个任务在别的模块里留下了什么（广告计划号、邮件号、商品…）。
+    #:
+    #: 由后端拼而不是让前端去 `result` 里猜键名：`result` 是模型自由写的 JSON，
+    #: 键名随模型心情变；而"要能点进去看"是一个稳定的产品需求。
+    #: 每项形如 ``{kind, label, ref, href}``。
+    related_docs: list[dict] = Field(default_factory=list)
 
 
 class TaskEventOut(ORMBase):
@@ -241,6 +252,16 @@ class TicketOut(ORMBase):
     agent_handled_at: datetime | None = None
     #: 走的是哪条路：fast（代码快车道，0 次模型调用）/ agent（工具循环）
     agent_lane: str | None = None
+
+    # ---- 人工侧 ----
+    # 和 Agent 侧分开是有意的：页面要能区分"没人跟进"和"机器跑过但没人接"，
+    # 这两者的下一步动作完全不同（前者要派单，后者要看 Agent 的草稿）。
+    assignee: str | None = None
+    assigned_at: datetime | None = None
+    #: 人工处理阶段：pending/contacted/waiting_customer/resolved
+    human_status: str | None = None
+    human_note: str | None = None
+    human_updated_at: datetime | None = None
 
 
 class AdCampaignOut(ORMBase):

@@ -41,13 +41,20 @@ MCP 客户端把服务端当子进程拉起，JSON-RPC 帧走**标准输出**。
 from __future__ import annotations
 
 from fashionops.mcp.auth import ENV_API_KEY, McpIdentity, resolve
-from fashionops.mcp.server import SERVER_NAME, build_server, exposed_tools, serve
+from fashionops.mcp.server import (
+    SERVER_NAME,
+    build_server,
+    create_sse_app,
+    exposed_tools,
+    serve,
+)
 
 __all__ = [
     "ENV_API_KEY",
     "McpIdentity",
     "SERVER_NAME",
     "build_server",
+    "create_sse_app",
     "exposed_tools",
     "resolve",
     "serve",

@@ -21,28 +21,86 @@ cd "c:\Users\Administrator\Desktop\Work agent\platform\deploy\scripts"
 1. 数据层：Redis + Qdrant（复用 `services.ps1`）
 2. 校验数据库迁移版本（库里没有迁移记录就自动 `fashionops-db init`）
 3. 后端 uvicorn（后台进程，日志在 `D:\develop\logs\backend.out.log`）
-4. 前端 Vite（<http://localhost:3000>）
+4. MCP 服务：把平台工具以 MCP/SSE 对外暴露（`:8100`）
+5. DeerFlow sidecar（**可选，默认不起**，见下）
+6. 前端 Vite（<http://localhost:3000>）
 
-跑完会打印：健康检查状态（`ok` / `degraded` + 哪个依赖没起）、访问地址、
-演示账号、以及怎么停。
+日志统一写在 `D:\develop\logs\`：`backend.out.log` / `mcp.out.log` /
+`deerflow.out.log` / `frontend.out.log`。
+
+| 服务 | 地址 | 说明 |
+|---|---|---|
+| 前端 | <http://localhost:3000> | **只能**用 `localhost`（走 IPv6 `::1`） |
+| 后端 | <http://127.0.0.1:8010/docs> | 接口文档 |
+| 健康检查 | <http://127.0.0.1:8010/health> | 三个依赖是否都通 |
+| MCP/SSE | <http://127.0.0.1:8100/mcp/sse> | 外部 Agent 连这里用平台工具 |
+| DeerFlow | <http://127.0.0.1:8011> | 可选编排后端，默认不起 |
+
+> ⚠ 端口刻意避开 **8000 / 8001**：本机另一个股票系统把这两个当默认端口
+> （FastAPI/WebUI 占 8000、Java Spring Boot 占 8001）。清单见
+> [`docs/14-端口清单.md`](docs/14-端口清单.md)。
 
 常用参数：
 
 ```powershell
-.\start.ps1 -BackendPort 8010     # 8000 被别的程序占了时
+.\start.ps1 -BackendPort 8020     # 8010 被别的程序占了时
 .\start.ps1 -NoFrontend           # 只起后端（前端你自己开）
+.\start.ps1 -NoMcp                # 不起 MCP 服务
 .\start.ps1 -SkipData             # Redis/Qdrant 由外部管理（比如跑在 Docker 里）
+.\start.ps1 -WithDeerFlow         # 连 DeerFlow sidecar（:8011）一起起
 ```
 
-**停止**：
+**停止**（只停应用层）：
 
 ```powershell
-.\stop.ps1          # 停前端 + 后端（按端口找，只对 node / python 进程下手，不会误杀别的服务）
-.\stop.ps1 -All     # 连 Redis + Qdrant 一起停
+.\stop.ps1
+```
+
+要连 Redis / Qdrant 一起停：
+
+```powershell
+.\stop.ps1 -All
 ```
 
 > ⚠ `stop.ps1` 是**按端口**定位进程的（没记 PID —— PID 文件在机器重启后就是
 > 过期数据，还会误杀）。找到占用者后会校验进程名，名字不对就不动它。
+
+> ⚠ 同一个坑在**启动侧**也存在，而且更隐蔽：只探端口会被别的程序骗过，
+> 于是"服务起来了吗"的答案永远是"起来了"，脚本跳过启动，**什么都不做还不报错**。
+> 本机实测撞到过两次：
+>
+> - `:8001` 常驻那个股票系统的 Java 后端（`dsa-server.jar`）；
+> - `:8000` 被那个股票系统的 **python** 占着（`main.py --webui-only`）——
+>   这种情况下连"进程名是不是 python"都救不了，**冒名者同样叫 python.exe**。
+>
+> 所以 `start.ps1` 对后端 / MCP / DeerFlow / 前端四处都查**命令行特征**
+> （分别是 `fashionops.api.main` / `fashionops.mcp.server` / `app.gateway.app` / `vite`），
+> 对不上就红字报「被 xxx (PID n) 占着，不是 XXX」并把它**的命令行打出来**，
+> 同时**不再打印该服务的访问地址** —— 免得你去访问一个其实是别人的端口，
+> 然后对着 404 查半天。
+>
+> **这也是本项目默认端口从 8000/8001 挪到 8010/8011 的原因** ——
+> 跟那个股票系统的默认端口彻底错开，两边可以同时跑。
+
+### 可选：DeerFlow 编排后端（默认不启用）
+
+平台默认用**自研编排**（代码规划 + 显式 todo），**不依赖** DeerFlow。
+DeerFlow 是可选的第二种编排后端：
+
+```powershell
+.\start.ps1 -WithDeerFlow
+```
+
+或者把 `platform/.env` 里的 `FASHIONOPS_ORCHESTRATOR_BACKEND` 改成 `deerflow`
+（脚本会读到，自动跟着起）。
+
+链路是**双向**的：平台 → DeerFlow（`:8011`）→ 平台 MCP（`:8100`）→ 平台工具。
+外部 Agent 调写操作（如 `mail.send`）时走审批闸口，工具**不会被执行**，
+只回 `needs_approval` —— 平台始终掌握"哪些动作需要人点确认"。
+
+默认不起的两个理由：① 它有自己的 venv / `config.yaml` / `.env`，不是每台机器都有；
+② 默认 `orchestrator_backend=legacy`，这时候起了也**没人调它**。
+DeerFlow 不在 `platform/` 同级目录时，用 `-DeerFlowRoot` 指定位置。
 
 ### 首次运行前要做的两件事
 
@@ -128,14 +186,14 @@ cd "c:\Users\Administrator\Desktop\Work agent\platform"
 # ⚠ 必须用 Start-Process 起：直接在前台跑的话，终端会话一结束进程就被带走，
 #    表现是"刚才还好好的，一会儿接口全 404"
 Start-Process -FilePath ".venv\Scripts\python.exe" `
-  -ArgumentList "-m","uvicorn","fashionops.api.main:app","--host","127.0.0.1","--port","8000" `
+  -ArgumentList "-m","uvicorn","fashionops.api.main:app","--host","127.0.0.1","--port","8010" `
   -WindowStyle Hidden
 
 # 改代码调试时加 --reload（前台跑就行，反正要盯着日志）
-.venv\Scripts\python.exe -m uvicorn fashionops.api.main:app --reload --port 8000
+.venv\Scripts\python.exe -m uvicorn fashionops.api.main:app --reload --port 8010
 ```
 
-自检：**<http://127.0.0.1:8000/health>**（注意是根路径，不是 `/api/v1/health`）
+自检：**<http://127.0.0.1:8010/health>**（注意是根路径，不是 `/api/v1/health`）
 
 ```json
 {"status": "degraded", "dependencies": [
@@ -148,7 +206,7 @@ Start-Process -FilePath ".venv\Scripts\python.exe" `
 - `degraded`：Redis / Qdrant 没起 —— **项目照样能跑**，只是限流熔断走降级、
   知识库检索用不了（见"排错"）
 
-接口文档：<http://127.0.0.1:8000/docs>
+接口文档：<http://127.0.0.1:8010/docs>
 
 ### 4. 起前端
 
@@ -159,8 +217,8 @@ npm run dev      # http://localhost:3000
 ```
 
 - 前端**只能用 `http://localhost:3000`**（走 IPv6 `::1`），`127.0.0.1` 连不上
-- `/api` 与 `/health` 由 Vite 代理到 `http://127.0.0.1:8000`；
-  后端不在 8000 时用 `VITE_API_TARGET` 改：`$env:VITE_API_TARGET="http://127.0.0.1:8010"`
+- `/api` 与 `/health` 由 Vite 代理到 `http://127.0.0.1:8010`（默认值，见 `vite.config.ts`）；
+  后端换了端口时用 `VITE_API_TARGET` 改：`$env:VITE_API_TARGET="http://127.0.0.1:8020"`
 - 生产构建：`npm run build`（= `tsc --noEmit` + `vite build`）
 
 ### 5. 打开看效果
@@ -216,8 +274,10 @@ cd deploy\scripts
 | 生成新迁移 | `.venv\Scripts\fashionops-db.exe revision` |
 | 灌假数据 | `.venv\Scripts\fashionops-seed.exe`（`--keep` 追加、`--seed 42` 换数据） |
 | 起 Redis / Qdrant | `deploy\scripts\services.ps1 start` |
-| 起后端 | `uvicorn fashionops.api.main:app --port 8000` |
+| 起后端 | `uvicorn fashionops.api.main:app --port 8010` |
 | 起前端 | `npm run dev`（3000） |
+| 起 MCP 服务 | `uvicorn fashionops.mcp.server:create_sse_app --factory --port 8100` |
+| 起 DeerFlow | `deploy\scripts\start.ps1 -WithDeerFlow`（可选，`:8011`） |
 | 建用户 / 改密 / 看权限 | `.venv\Scripts\fashionops-user.exe create\|passwd\|show` |
 | 补角色预设权限 | `.venv\Scripts\fashionops-user.exe sync --apply-presets` |
 | 知识库建索引 | `.venv\Scripts\fashionops-kb.exe index` |
@@ -230,12 +290,17 @@ cd deploy\scripts
 
 | 页面 | 看什么 |
 |---|---|
-| **对话助手** | 说一句话直接问（"SKU00042 还有多少库存？"）—— 流式回答 + 工具调用过程 |
+| **对话助手** | 说一句话直接问（"SKU00042 还有多少库存？"）—— 流式回答 + 工具调用过程；底部**分析模板**一键触发常见分析（库存 / 退货 / 广告 ROI） |
 | 对话里说"给 x@y.com 发封邮件…" | **停下来弹一张确认卡片**，点了才真发（人工闸口） |
 | 对话里说"帮我选 3 款秋季女装并出报表" | 转成**真实任务**，给一张能点进任务页的卡片 |
-| **任务工作台** → 点任务 | **有序的步骤列表**（每步的状态 / 结论 / 用过的工具 / 耗时 / 产出），SSE 实时事件流 |
+| **任务工作台** → 点任务 | **有序的步骤列表**（每步的状态 / 结论 / 用过的工具 / 耗时 / 产出），SSE 实时事件流；**关联单据**区直接跳到它动过的广告计划 / 邮件 / 商品 / 工单 |
 | 任务停在闸口时 | 审批横幅显示"第几步 / 哪个工具 / 审批单号 + 人话摘要（收件人、主题、正文）" |
-| 客服工单 / 商品库 / 广告投放 / 邮件闸门 | 业务数据；邮件闸门页能看到被拦下的邮件及拦截原因 |
+| **数据看板** | GMV / 退货率 / 广告 ROI / 库存告急 + Redis·Qdrant 连通状态；**类目退货率图带行业基准带**，一眼看出哪类在拖高整体 |
+| **商品库** | SKU 与库存；冬款缺货**高亮预警**；可从商品一键发起"补货"任务（跨模块联动） |
+| **广告投放** | 亏损计划标红；**就地批准 / 驳回 / 一键止损 / 改预算**（改预算属高危，走人工确认闸口；止损是唯一免审批的写操作） |
+| **客服工单** | 情绪 / 金额风险标注；**派单 / 改派 / 人工进度**（阶段 + 备注），看板按未派单 / 待接单 / 各人工阶段分组 |
+| **邮件闸门** | 被拦下的邮件及拦截原因；**改白名单 / 演练转真发 / 重发**（重发会重新过一遍闸门） |
+| **账号管理** | 分级授权；**异常登录审计**（异地 / 新 IP / 爆破后成功），只看 IP 是否变化、不做归属地判断 |
 
 ---
 
@@ -257,6 +322,9 @@ agents/recorder.py   旁路记账：事件流（SSE）+ agent_runs + 任务主�
 hub 路由、9 个专用 Agent 节点、LangGraph checkpoint。
 理由与证据见 [`docs/12-AI协作交接.md`](docs/12-AI协作交接.md)。
 
+> LangGraph 后来以 **DeerFlow sidecar** 的形式回来了，但只是**可选**的
+> 第二种编排后端，默认不启用 —— 默认路径仍然走上面这套自研编排。
+
 ---
 
 ## 五、技术栈
@@ -264,10 +332,12 @@ hub 路由、9 个专用 Agent 节点、LangGraph checkpoint。
 | 层 | 选型 |
 |---|---|
 | 后端 | FastAPI + uvicorn + SQLAlchemy 2.0 + Pydantic v2 |
-| 关系库 | MySQL 8.0（28 张表，Alembic 管理） |
+| 关系库 | MySQL 8.0（29 张表，Alembic 管理） |
 | 缓存 / 限流 / 熔断 | Redis 8.x |
 | 向量库 | Qdrant 1.x（客服 RAG） |
 | 执行编排 | **自研**：一个 Agent + 显式 todo 列表（不再依赖 LangGraph） |
+| 工具协议 | MCP（stdio + SSE 双传输）—— 对外暴露平台工具，也反向消费外部 MCP 服务 |
+| 可选编排 | DeerFlow（LangGraph）sidecar，默认不启用 |
 | 前端 | React + Vite + ECharts |
 | 模型 | OpenAI 兼容接口（默认 `mock`，不填 Key 也能跑通全链路） |
 
@@ -289,11 +359,13 @@ hub 路由、9 个专用 Agent 节点、LangGraph checkpoint。
 | 现象 | 原因 / 怎么办 |
 |---|---|
 | `/health` 是 `degraded`，redis / qdrant 报 10061 | 依赖服务没起 → `deploy\scripts\services.ps1 start`。**不影响主流程**，只是限流降级、知识库检索不可用 |
-| 后端起不来：`[Errno 10048]` 端口被占 | 换端口 `--port 8010`，并给前端设 `$env:VITE_API_TARGET` |
-| 前端能开但一直 401 / 接口全 404 | 后端没在 8000（或进程被终端带走了）→ 用 `Start-Process` 重启后端 |
+| 后端起不来：`[Errno 10048]` 端口被占 | 换端口 `--port 8020`，并给前端设 `$env:VITE_API_TARGET` |
+| 前端能开但一直 401 / 接口全 404 | 后端没在 8010（或进程被终端带走了）→ 用 `Start-Process` 重启后端 |
 | 灌完库登不进去 | 老版本 bug，已修；现在 seed 会自动补回演示账号。真没有就跑 `fashionops-user create demo --role admin` |
 | `pytest` 有一批 skip | 全是 Redis / Qdrant 没起导致的，不是代码问题 |
 | 任务详情页"没有步骤记录" | 那是旧架构灌的任务（计划存在 `tasks.dag`）；重新跑 `fashionops-seed` 即可 |
+| 外部 Agent 连不上 `:8100/mcp/sse` | MCP 服务没起 → 重跑 `.\start.ps1`，看 `D:\develop\logs\mcp.err.log`。注意它**刻意**不挂在主应用下（挂了会被 middleware 包成重复响应 → 502） |
+| `start.ps1` 报"端口被 [xxx] 占用，不是平台后端" | 那个端口上是**别的 python 程序**（本机 `:8010` 若是被那个股票系统抢先占了就会这样）。此时脚本**不会**启动后端。停掉它，或换端口：`.\start.ps1 -BackendPort 8020`（前端会自动跟着改 `VITE_API_TARGET`）—— 这条是保护，不是故障 |
 
 ---
 
@@ -315,5 +387,5 @@ hub 路由、9 个专用 Agent 节点、LangGraph checkpoint。
 | 文档 | 内容 |
 |---|---|
 | [`docs/12-AI协作交接.md`](docs/12-AI协作交接.md) | 为什么把 DAG 编排换成 todo 列表（含实测数据与决策记录） |
-| [`docs/13-数据模型与库表设计.md`](docs/13-数据模型与库表设计.md) | 28 张表、外键关系、灌库方式与体检结论 |
+| [`docs/13-数据模型与库表设计.md`](docs/13-数据模型与库表设计.md) | 29 张表、外键关系、灌库方式与体检结论 |
 | `../mcp-servers/` | 独立可交付的办公 MCP 工具服务 |

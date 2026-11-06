@@ -2,10 +2,10 @@
 
 启动::
 
-    uv run uvicorn fashionops.api.main:app --reload --port 8000
+    uv run uvicorn fashionops.api.main:app --reload --port 8010
 
-文档：<http://127.0.0.1:8000/docs>
-健康：<http://127.0.0.1:8000/health>
+文档：<http://127.0.0.1:8010/docs>
+健康：<http://127.0.0.1:8010/health>
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from fashionops import __version__
 from fashionops.api.routers import (
+    actions_router,
     admin_router,
     auth_router,
     business_router,
@@ -77,10 +78,22 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(admin_router)
     app.include_router(business_router)
+    app.include_router(actions_router)
     app.include_router(tasks_router)
     app.include_router(chat_router)
     app.include_router(memory_router)
     app.include_router(service_router)
+
+    # ------------------------------------------------------------------
+    # 把工具网关暴露成 MCP over SSE（走法 B）：让 DeerFlow 这类外部编排引擎
+    # 像调本地工具一样调平台的 ERP / 知识库 / 报表 / 发信能力，且调用链和内部
+    # Agent 完全一致（权限、限流、熔断、审计一个不少）。
+    #
+    # 该传输以**独立进程**运行（绕过主应用的 timing_middleware，否则 SSE 响应
+    # 会被重复发送导致 502）：`uv run uvicorn "fashionops.mcp.server:create_sse_app"
+    # --factory --host 127.0.0.1 --port 8100`。DeerFlow 用 `type: sse` + Bearer
+    # 令牌接入，端点：GET /mcp/sse、POST /mcp/messages/。
+    # ------------------------------------------------------------------
 
     # ------------------------------------------------------------------
     # 请求日志：分配 request_id 并绑定到上下文，记录耗时，慢请求打 warning

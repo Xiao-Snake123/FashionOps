@@ -87,6 +87,7 @@ from fashionops.db.models_chat import MSG_ROLE_ASSISTANT, MSG_ROLE_TOOL, MSG_ROL
 from fashionops.gateway.core import CallContext, ToolGateway
 from fashionops.gateway.registry import from_llm_name, registry
 from fashionops.llm import ToolLoopPaused, get_model_client, run_tool_loop
+from fashionops.orchestration import SENTINEL, run_resume, run_turn
 from fashionops.security.service import Principal, effective_scopes
 from fashionops.skills import index_block as skills_index_block
 
@@ -221,6 +222,14 @@ def stream_turn(
     用户消息在**启动后台线程之前**就落库了 —— 这样即使模型调用立刻失败，
     用户的话也已经存下来了。否则用户会看到"我明明说了，它却像没听见"。
     """
+    # ⚠ `get_settings` 在这个模块里一律**函数内局部导入**，不要在顶层 import。
+    # 顶层导入会在模块加载时就把函数对象绑死，之后 patch `fashionops.config.get_settings`
+    # 对它无效 —— 于是"测试里改了配置、代码读到的还是真配置"，正是 docs/11 §6.3
+    # 记的"两处 settings 来源"那类坑（表现只是数据不对，不报错）。
+    # 这里漏了这行曾经让 `stream_turn` 整个抛 NameError —— 对话的唯一入口，
+    # 而它只在跑 chat 测试时才会暴露。
+    from fashionops.config import get_settings
+
     conversation = _load_conversation(conversation_no)
     conversation_id = int(conversation["id"])
     setup = TurnSetup(conversation_no=conversation_no, principal=principal)
@@ -232,7 +241,11 @@ def stream_turn(
         store.rename(conversation_id, user_text[:60])
 
     yield {"type": "message", "message": user_message}
-    yield from _drain(conversation, setup, user_text)
+
+    if get_settings().orchestrator_backend == "deerflow":
+        yield from _drain_deerflow(conversation, setup, user_text)
+    else:
+        yield from _drain(conversation, setup, user_text)
 
 
 def stream_resume(*, conversation_no: str, principal: Principal) -> Iterator[dict[str, Any]]:
@@ -282,6 +295,80 @@ def _drain(
 
 
 _SENTINEL = object()
+
+
+# ---------------------------------------------------------------------------
+# DeerFlow（LangGraph sidecar）后端的"漏桶"：和 _drain 同构，只是后台跑的是
+# DeerFlow 编排而不是平台自研循环。前端收到的帧格式完全一致。
+# ---------------------------------------------------------------------------
+def _drain_deerflow(
+    conversation: dict[str, Any], setup: TurnSetup, user_text: str
+) -> Iterator[dict[str, Any]]:
+    """新回合：worker 跑 DeerFlow 编排，主线程把队列里的平台帧转成 SSE。"""
+    events: queue.Queue = queue.Queue()
+    worker = threading.Thread(
+        target=run_turn,
+        kwargs={"conversation": conversation, "setup": setup, "user_text": user_text, "events": events},
+        name=f"deerflow-{conversation['no']}",
+        daemon=True,
+    )
+    worker.start()
+    while True:
+        try:
+            item = events.get(timeout=15.0)
+        except queue.Empty:
+            yield {"type": "ping"}
+            continue
+        if item is SENTINEL:
+            return
+        if isinstance(item, dict) and item.get("type") == "error":
+            yield {"type": "error", "detail": item.get("detail", "未知错误")}
+            yield {"type": "done", "status": "error"}
+            return
+        yield item
+
+
+def stream_resume_deerflow(
+    *,
+    conversation: dict[str, Any],
+    setup: TurnSetup,
+    approval_no: str,
+    approved: bool,
+    principal: Principal,
+    payload: dict[str, Any],
+    tool_message: dict[str, Any],
+) -> Iterator[dict[str, Any]]:
+    """审批结论回来后，把结果喂回 DeerFlow 线程继续这一轮。"""
+    events: queue.Queue = queue.Queue()
+    worker = threading.Thread(
+        target=run_resume,
+        kwargs={
+            "conversation": conversation,
+            "setup": setup,
+            "approval_no": approval_no,
+            "approved": approved,
+            "principal": principal,
+            "payload": payload,
+            "tool_message": tool_message,
+            "events": events,
+        },
+        name=f"deerflow-resume-{conversation['no']}",
+        daemon=True,
+    )
+    worker.start()
+    while True:
+        try:
+            item = events.get(timeout=15.0)
+        except queue.Empty:
+            yield {"type": "ping"}
+            continue
+        if item is SENTINEL:
+            return
+        if isinstance(item, dict) and item.get("type") == "error":
+            yield {"type": "error", "detail": item.get("detail", "未知错误")}
+            yield {"type": "done", "status": "error"}
+            return
+        yield item
 
 
 # ===========================================================================
@@ -412,7 +499,18 @@ def resolve_approval(
         "tool": tool_name,
         "ok": bool(payload.get("ok")),
     }
-    yield from _drain(conversation, setup, None)
+    if get_settings().orchestrator_backend == "deerflow":
+        yield from stream_resume_deerflow(
+            conversation=conversation,
+            setup=setup,
+            approval_no=approval_no,
+            approved=approved,
+            principal=principal,
+            payload=payload,
+            tool_message=tool_message,
+        )
+    else:
+        yield from _drain(conversation, setup, None)
 
 
 def _required_scopes(tool_name: str) -> frozenset[str]:

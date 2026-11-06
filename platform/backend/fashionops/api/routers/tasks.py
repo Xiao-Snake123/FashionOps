@@ -46,6 +46,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import re
 import time
 from typing import Any
 
@@ -72,7 +73,7 @@ from fashionops.api.schemas import (
     TaskTodoOut,
 )
 from fashionops.db import get_db
-from fashionops.db.models import Task, TaskTodo
+from fashionops.db.models import AdCampaign, EmailMessage, Task, TaskTodo
 from fashionops.security.deps import (
     StreamPrincipal,
     record_audit,
@@ -404,7 +405,61 @@ def get_task(
     detail.is_running = is_running(task_no)
     detail.is_pending = task.status in _RUNNING_STATES
     detail.todos = [TaskTodoOut.model_validate(row) for row in todos]
+    detail.related_docs = _related_docs(session, task, todos)
     return detail
+
+
+def _related_docs(
+    session: Session, task: Task, todos: list[TaskTodo]
+) -> list[dict[str, str]]:
+    """这个任务在别的模块里留下了哪些单据。
+
+    两个来源，缺一不可：
+
+    1. **外键**（`ad_campaigns.task_id` / `email_messages.task_id`）—— 最可靠，
+       但只有少数表有这个外键，覆盖不到"任务只是提到了某个商品"这种情况
+    2. **`result` JSON 里出现的单据号** —— 模型自由写的，键名不保证，
+       所以只按"**值**看起来像不像某个编号"来认（`AC…` / `EM…` / `SPU…`），
+       不认键名。认错了最多多显示一条，不会漏掉一条。
+
+    为什么不让前端自己从 `result` 里找：那等于把"哪些模块之间有关联"
+    这个业务知识复制一份到前端，而它本来就在后端这几张表里。
+    """
+    docs: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def add(kind: str, label: str, ref: str, href: str) -> None:
+        key = (kind, ref)
+        if not ref or key in seen:
+            return
+        seen.add(key)
+        docs.append({"kind": kind, "label": label, "ref": ref, "href": href})
+
+    for no in session.scalars(
+        select(AdCampaign.campaign_no).where(AdCampaign.task_id == task.id)
+    ):
+        add("campaign", "广告计划", no, "/campaigns")
+    for no in session.scalars(
+        select(EmailMessage.message_no).where(EmailMessage.task_id == task.id)
+    ):
+        add("email", "邮件", no, "/emails")
+
+    # result 里扫编号。前缀规则和各表的编号前缀一致（见 db/models 的 *_no 生成处）
+    prefix_map = (
+        ("AC", "campaign", "广告计划", "/campaigns"),
+        ("EM", "email", "邮件", "/emails"),
+        ("SPU", "product", "商品", "/products"),
+        ("TK", "ticket", "工单", "/tickets"),
+    )
+    blobs: list[str] = [json.dumps(task.result or {}, ensure_ascii=False)]
+    for row in todos:
+        blobs.append(json.dumps(row.artifact_nos or [], ensure_ascii=False))
+    text = " ".join(blobs)
+    for prefix, kind, label, href in prefix_map:
+        for hit in re.findall(rf"\b{prefix}\d{{6,}}\b", text):
+            add(kind, label, hit, href)
+
+    return docs
 
 
 @router.get(
