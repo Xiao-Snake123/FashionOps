@@ -86,7 +86,8 @@ jobs:
         run: |
           uv run fashionops-db upgrade head
           uv run fashionops-db current
-          uv run fashionops-db downgrade base
+          # downgrade 会删数据，CLI 要求显式确认；CI 非交互，必须带 --yes
+          uv run fashionops-db downgrade base --yes
           uv run fashionops-db upgrade head
 
   frontend:

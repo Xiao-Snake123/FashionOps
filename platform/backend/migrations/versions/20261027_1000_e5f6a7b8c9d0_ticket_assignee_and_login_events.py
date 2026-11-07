@@ -82,9 +82,11 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_index(op.f("ix_login_events_success_created"), table_name="login_events")
-    op.drop_index(op.f("ix_login_events_user"), table_name="login_events")
     op.drop_index(op.f("ix_login_events_created"), table_name="login_events")
     op.drop_index(op.f("ix_login_events_username_created"), table_name="login_events")
+    # 注意：ix_login_events_user 是 user_id 外键的支撑索引，MySQL 上必须先撤外键才能撤它。
+    # 这里不单独 drop，交给下面的 drop_table 连带外键一起撤掉，避免
+    # "(1553) Cannot drop index 'ix_login_events_user': needed in a foreign key constraint"。
     op.drop_table("login_events")
 
     with op.batch_alter_table("tickets", schema=None) as batch_op:
