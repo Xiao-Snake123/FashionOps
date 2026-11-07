@@ -216,9 +216,7 @@ class TestSalesSummaryQuery:
         assert "（未分类）" in groups, f"缺失未分类分组：{list(groups)}"
         assert groups["（未分类）"]["gmv"] == pytest.approx(150.0)
         # 各分组之和 == 总额，说明没有漏单
-        assert sum(g["gmv"] for g in result.data["groups"]) == pytest.approx(
-            result.data["totals"]["gmv"]
-        )
+        assert sum(g["gmv"] for g in result.data["groups"]) == pytest.approx(result.data["totals"]["gmv"])
 
     def test_day_grouping_returns_iso_dates(self, seeded_env):
         ctx, _ = _build_context()
@@ -242,15 +240,11 @@ class TestSalesSummaryQuery:
         ctx, _ = _build_context()
         result = _call(ctx, "erp.query_sales_summary", {"days": 30, "group_by": "category"})
         for g in result.data["groups"]:
-            assert g["avg_order_value"] == pytest.approx(
-                round(g["gmv"] / g["order_count"], 2), abs=0.01
-            )
+            assert g["avg_order_value"] == pytest.approx(round(g["gmv"] / g["order_count"], 2), abs=0.01)
 
     def test_top_n_is_respected(self, seeded_env):
         ctx, _ = _build_context()
-        result = _call(
-            ctx, "erp.query_sales_summary", {"days": 30, "group_by": "channel", "top_n": 2}
-        )
+        result = _call(ctx, "erp.query_sales_summary", {"days": 30, "group_by": "channel", "top_n": 2})
         assert result.data["count"] == 2
         # 必须按 GMV 降序，否则"取前 N"没有意义
         gmvs = [g["gmv"] for g in result.data["groups"]]
@@ -384,4 +378,3 @@ class TestAlertRules:
             message="x",
         )
         assert alert.model_dump()["level"] == "critical"
-

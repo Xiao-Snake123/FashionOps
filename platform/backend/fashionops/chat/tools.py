@@ -103,15 +103,13 @@ ASK_USER_SCHEMA: dict[str, Any] = {
                     "type": "array",
                     "items": {"type": "string"},
                     "description": (
-                        "候选答案（最多 4 个）。有明确选项时才给 —— 用户能少打字。"
-                        "开放性问题不要传这个字段。"
+                        "候选答案（最多 4 个）。有明确选项时才给 —— 用户能少打字。开放性问题不要传这个字段。"
                     ),
                 },
                 "assumption": {
                     "type": "string",
                     "description": (
-                        "你不问的话打算按什么默认理解来做。写出来，用户就可以只回一句"
-                        "「就按你说的」而不用打完整答案。"
+                        "你不问的话打算按什么默认理解来做。写出来，用户就可以只回一句「就按你说的」而不用打完整答案。"
                     ),
                 },
             },
@@ -192,9 +190,7 @@ FORGET_SCHEMA: dict[str, Any] = {
 }
 
 
-def build_catalog(
-    *, granted_scopes: frozenset[str], permission_codes: frozenset[str]
-) -> list[dict[str, Any]]:
+def build_catalog(*, granted_scopes: frozenset[str], permission_codes: frozenset[str]) -> list[dict[str, Any]]:
     """组装这次对话里模型能看到的工具目录。
 
     ## 为什么在**目录层面**就过滤，而不是让模型看见再被拒

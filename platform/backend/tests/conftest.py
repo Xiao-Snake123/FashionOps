@@ -204,9 +204,7 @@ def login(client, username: str, password: str) -> dict[str, str]:  # noqa: ANN0
     登录失败时**把响应体打进断言消息**：只看到 `assert 401 == 200` 的话，
     完全不知道是密码错了、账号锁了、还是权限同步没跑。
     """
-    resp = client.post(
-        "/api/v1/auth/login", json={"username": username, "password": password}
-    )
+    resp = client.post("/api/v1/auth/login", json={"username": username, "password": password})
     assert resp.status_code == 200, f"登录失败：{resp.status_code} {resp.text[:500]}"
     body: dict[str, Any] = resp.json()
     return {"Authorization": f"Bearer {body['access_token']}"}

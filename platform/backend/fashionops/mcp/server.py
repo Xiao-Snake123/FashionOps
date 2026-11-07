@@ -21,6 +21,7 @@ Cursor / DeerFlow）拿到的工具，和平台内部 Agent 用的工具是**同
 管理员撤销一把 key 之后，必须**立即**生效，而不是等到进程重启。
 （代价是每个请求多一次查库 —— MCP 调用本来就比 HTTP 重，这笔开销可以忽略。）
 """
+
 from __future__ import annotations
 
 import json
@@ -56,8 +57,7 @@ SERVER_NAME = "fashionops"
 #: 凭据没配好时也要说清楚 —— 空的工具列表如果不解释，
 #: 客户端只会以为"这个服务器没提供工具"，然后一直用不了。
 _BAD_CREDENTIAL_HINT = (
-    "设置环境变量 FASHIONOPS_MCP_API_KEY（用 "
-    "`fashionops-user apikey-create <用户名>` 签发一把），然后重启本服务。"
+    "设置环境变量 FASHIONOPS_MCP_API_KEY（用 `fashionops-user apikey-create <用户名>` 签发一把），然后重启本服务。"
 )
 
 
@@ -302,9 +302,7 @@ def build_server(raw_key: str | None = None) -> Server:
     _ensure_registry()
 
     async def _on_list_tools(ctx: Any, params: Any = None) -> ListToolsResult:
-        tools, reason = await anyio.to_thread.run_sync(
-            lambda: _list_tools_sync(raw_key=raw_key)
-        )
+        tools, reason = await anyio.to_thread.run_sync(lambda: _list_tools_sync(raw_key=raw_key))
         if reason:
             logger.warning("MCP 未暴露任何工具：%s", reason)
         return ListToolsResult(tools=tools)
@@ -312,9 +310,7 @@ def build_server(raw_key: str | None = None) -> Server:
     async def _on_call_tool(ctx: Any, params: Any) -> CallToolResult:
         name = str(getattr(params, "name", "") or "")
         arguments = dict(getattr(params, "arguments", None) or {})
-        payload = await anyio.to_thread.run_sync(
-            lambda: _call_tool_sync(name, arguments, raw_key=raw_key)
-        )
+        payload = await anyio.to_thread.run_sync(lambda: _call_tool_sync(name, arguments, raw_key=raw_key))
         ok = bool(payload.get("ok"))
         return CallToolResult(
             content=[TextContent(type="text", text=json.dumps(payload, ensure_ascii=False))],

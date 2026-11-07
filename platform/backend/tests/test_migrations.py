@@ -72,8 +72,7 @@ class TestMigrationRoundTrip:
         """
         command.upgrade(_alembic_config(), "head")
         assert _tables() == EXPECTED_TABLES, (
-            "迁移与模型不一致。加/改模型后必须跑：\n"
-            "  .venv\\Scripts\\alembic.exe revision --autogenerate -m \"描述\""
+            '迁移与模型不一致。加/改模型后必须跑：\n  .venv\\Scripts\\alembic.exe revision --autogenerate -m "描述"'
         )
 
     def test_downgrade_is_complete(self, temp_db):
@@ -201,8 +200,7 @@ def test_cli_does_not_depend_on_ini_encoding():
     assert Path(cfg.get_main_option("script_location")).name == "migrations"
     # 没读 ini 的话 config_file_name 是 None
     assert cfg.config_file_name in (None, ""), (
-        "如果这里不是 None，说明有人在配置里指了 ini —— "
-        "那 Windows 上的 GBK 编码问题就又回来了"
+        "如果这里不是 None，说明有人在配置里指了 ini —— 那 Windows 上的 GBK 编码问题就又回来了"
     )
 
 
@@ -221,9 +219,7 @@ def test_ini_reading_actually_breaks_on_non_ascii():
     with tempfile.TemporaryDirectory() as tmp:
         bad_ini = Path(tmp) / "bad.ini"
         # 写一个最小可用的 ini，但带一行中文
-        bad_ini.write_bytes(
-            "[alembic]\nscript_location = migrations\n# 中文注释会让 GBK 解码失败\n".encode()
-        )
+        bad_ini.write_bytes("[alembic]\nscript_location = migrations\n# 中文注释会让 GBK 解码失败\n".encode())
         cfg = AlembicConfig(str(bad_ini))
         with pytest.raises(UnicodeDecodeError):
             _ = cfg.file_config  # 惰性解析，读到这里才炸
@@ -328,9 +324,7 @@ def test_the_offender_detector_actually_detects():
         "\n"
         "    op.drop_table('task_todos')\n"
     )
-    assert not _find_redundant_index_drops(cross), (
-        "误报了：删 A 表的索引和删 B 表是两件无关的事"
-    )
+    assert not _find_redundant_index_drops(cross), "误报了：删 A 表的索引和删 B 表是两件无关的事"
 
 
 @pytest.mark.parametrize("path", _migration_files(), ids=lambda p: p.name)
@@ -373,11 +367,7 @@ def test_downgrade_is_not_a_stub(path: Path):
 
     body = src.split("def downgrade() -> None:", 1)[1]
     # 去掉注释和空行，看有没有实质语句
-    statements = [
-        ln.strip()
-        for ln in body.splitlines()
-        if ln.strip() and not ln.strip().startswith("#")
-    ]
+    statements = [ln.strip() for ln in body.splitlines() if ln.strip() and not ln.strip().startswith("#")]
     assert statements, f"{path.name} 的 downgrade 是空的"
     assert statements[0] != "pass", f"{path.name} 的 downgrade 是个 pass 存根，回滚等于没回"
 
@@ -416,4 +406,3 @@ def test_all_migration_files_are_chained():
     assert None in chain, "没有找到根迁移（down_revision = None）"
     heads = set(chain.values()) - set(chain.keys())
     assert len(heads) == 1, f"应该只有一个 head，实际有 {len(heads)} 个：{heads}"
-

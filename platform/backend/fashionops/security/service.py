@@ -23,6 +23,7 @@
 自己该去做什么（等 15 分钟 / 找管理员），而攻击者本来也能从"试对了密码却登不进"
 推断出来。**不告诉用户反而把攻击者的信息优势变成了用户的痛苦。**
 """
+
 from __future__ import annotations
 
 import logging
@@ -177,9 +178,7 @@ def find_user_by_email(session: Session, email: str) -> User | None:
     return session.scalar(select(User).where(func_lower(User.email) == wanted))
 
 
-def find_user_by_external(
-    session: Session, *, provider: str, external_id: str
-) -> User | None:
+def find_user_by_external(session: Session, *, provider: str, external_id: str) -> User | None:
     """按第三方身份找用户。扫码登录用。"""
     identity = session.scalar(
         select(ExternalIdentity).where(
@@ -204,9 +203,7 @@ def load_principal(session: Session, user_id: int, *, auth_method: str = "passwo
     from sqlalchemy.orm import selectinload
 
     user = session.scalar(
-        select(User)
-        .options(selectinload(User.roles).selectinload(Role.permissions))
-        .where(User.id == user_id)
+        select(User).options(selectinload(User.roles).selectinload(Role.permissions)).where(User.id == user_id)
     )
     if user is None:
         raise AuthError("登录状态无效，请重新登录", reason="user_not_found")
@@ -294,9 +291,7 @@ def authenticate(
                 ip=ip,
                 user_agent=user_agent,
             )
-            raise AuthError(
-                "账号已被停用，请联系管理员", reason=f"status:{user.status}"
-            )
+            raise AuthError("账号已被停用，请联系管理员", reason=f"status:{user.status}")
 
     if not passwords.verify_password(password, user.password_hash):
         _record_failure(session, user, max_failures=max_failures, lock_minutes=lock_minutes)
@@ -374,9 +369,7 @@ def _record_login_event(
         logger.warning("登录事件落库失败（不影响登录流程）：%s", exc)
 
 
-def _record_failure(
-    session: Session, user: User, *, max_failures: int, lock_minutes: int
-) -> None:
+def _record_failure(session: Session, user: User, *, max_failures: int, lock_minutes: int) -> None:
     """累计失败次数，达到阈值就锁定。"""
     user.failed_login_count = (user.failed_login_count or 0) + 1
     if user.failed_login_count >= max_failures:
@@ -497,9 +490,7 @@ def refresh(
     except TokenError as exc:
         raise AuthError("登录已过期，请重新登录", reason=f"token:{exc.reason}") from exc
 
-    row = session.scalar(
-        select(RefreshToken).where(RefreshToken.token_hash == hash_token(refresh_token))
-    )
+    row = session.scalar(select(RefreshToken).where(RefreshToken.token_hash == hash_token(refresh_token)))
     if row is None:
         # 签名对但库里没有：可能是**换了 jwt_secret**（重启后自动生成的那种），
         # 也可能是被管理员直接删了行。两种情况都得重新登录。
@@ -566,9 +557,7 @@ def logout(session: Session, *, refresh_token: str) -> bool:
     而不是 401 —— 前端在 401 时会跳登录页，而用户明明已经登出了，
     再跳一次登录页是纯粹的多余动作（还会覆盖掉"已登出"的提示）。
     """
-    row = session.scalar(
-        select(RefreshToken).where(RefreshToken.token_hash == hash_token(refresh_token))
-    )
+    row = session.scalar(select(RefreshToken).where(RefreshToken.token_hash == hash_token(refresh_token)))
     if row is None or row.revoked_at is not None:
         return False
     row.revoked_at = utcnow()
@@ -606,9 +595,7 @@ def list_sessions(session: Session, user_id: int, *, include_revoked: bool = Fal
 # ===========================================================================
 # 权限向下传导
 # ===========================================================================
-def effective_scopes(
-    principal: Principal, agent_scopes: frozenset[str]
-) -> frozenset[str]:
+def effective_scopes(principal: Principal, agent_scopes: frozenset[str]) -> frozenset[str]:
     """**用户权限 ∩ Agent 权限集**。
 
     为什么必须做这个交集，而不是直接用 `AGENT_SCOPES[agent]`：
@@ -705,9 +692,7 @@ def assign_role(
     if role is None:
         raise AuthError(f"角色 {role_code} 不存在", reason="role_not_found")
 
-    existing = session.scalar(
-        select(UserRole).where(UserRole.user_id == user.id, UserRole.role_id == role.id)
-    )
+    existing = session.scalar(select(UserRole).where(UserRole.user_id == user.id, UserRole.role_id == role.id))
     if existing is not None:
         return False
 
@@ -724,9 +709,7 @@ def assign_role(
     return True
 
 
-def set_password(
-    session: Session, user: User, password: str, *, must_change: bool = False
-) -> None:
+def set_password(session: Session, user: User, password: str, *, must_change: bool = False) -> None:
     """改密码并**撤销全部会话**。
 
     为什么一定要撤销会话：改密码的常见动机是"我怀疑密码泄漏了"。

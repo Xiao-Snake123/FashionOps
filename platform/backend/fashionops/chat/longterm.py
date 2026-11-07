@@ -115,11 +115,7 @@ def upsert(
     （两条互相矛盾的记忆同时被注入，比只有一条旧的更糟）。
     """
     with session_scope() as session:
-        row = session.scalar(
-            select(AgentMemory).where(
-                AgentMemory.user_id == user_id, AgentMemory.topic == topic
-            )
-        )
+        row = session.scalar(select(AgentMemory).where(AgentMemory.user_id == user_id, AgentMemory.topic == topic))
         created = row is None
         if row is None:
             row = AgentMemory(
@@ -142,9 +138,7 @@ def upsert(
         session.flush()
         payload = serialize(row)
 
-    logger.info(
-        "长期记忆%s：user=%s topic=%r", "新增" if created else "更新", username, topic
-    )
+    logger.info("长期记忆%s：user=%s topic=%r", "新增" if created else "更新", username, topic)
     return payload, created
 
 
@@ -157,9 +151,7 @@ def forget(*, user_id: int, topic: str) -> bool:
     """
     with session_scope() as session:
         result = session.execute(
-            sa_delete(AgentMemory).where(
-                AgentMemory.user_id == user_id, AgentMemory.topic == topic
-            )
+            sa_delete(AgentMemory).where(AgentMemory.user_id == user_id, AgentMemory.topic == topic)
         )
         removed = int(result.rowcount or 0) > 0
     if removed:
@@ -204,8 +196,7 @@ def build_block(rows: list[dict[str, Any]]) -> str:
         "这是你在**以前的对话**里为这位用户记下的，仍然有效 —— "
         "可以直接照做，不必再问一遍。\n"
         "但如果用户这次的说法不一样，**一律以这次为准**，"
-        "并用 `remember` 更新同一个 topic（不要新开一个 topic，那会留下两条互相矛盾的说法）。\n\n"
-        + "\n".join(lines)
+        "并用 `remember` 更新同一个 topic（不要新开一个 topic，那会留下两条互相矛盾的说法）。\n\n" + "\n".join(lines)
     )
 
 
@@ -261,8 +252,7 @@ def remember_tool(
                 "code": "INVALID_ARGUMENTS",
                 "message": "topic 和 content 都不能为空",
                 "hint": (
-                    "topic 是这条记忆的标题（2~8 个字，如「渠道偏好」「报表口径」），"
-                    "content 是要记住的那一句话。"
+                    "topic 是这条记忆的标题（2~8 个字，如「渠道偏好」「报表口径」），content 是要记住的那一句话。"
                 ),
             },
         }
@@ -325,10 +315,7 @@ def forget_tool(*, user_id: int, arguments: dict[str, Any]) -> dict[str, Any]:
             "error": {
                 "code": "NOT_FOUND",
                 "message": f"没有 topic 为「{topic}」的记忆",
-                "hint": (
-                    "检查 topic 是否和注入块里的原文一致。"
-                    "确实没有的话就当没记过，**不要换个写法反复删**。"
-                ),
+                "hint": ("检查 topic 是否和注入块里的原文一致。确实没有的话就当没记过，**不要换个写法反复删**。"),
             },
         }
     return {"ok": True, "data": {"topic": topic, "action": "deleted"}}

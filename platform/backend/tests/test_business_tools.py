@@ -97,9 +97,15 @@ def test_detect_alerts_registered_and_callable(clean_registry):
         by_category=[
             # 60 单（≥ MIN_ORDERS_FOR_JUDGEMENT 才下判定）且退货率 35%
             # 越过 0.30 红线 → critical
-            {"group": "连衣裙", "gmv": 80000.0, "order_count": 60,
-             "customer_count": 25, "avg_order_value": 1333.33,
-             "refund_amount": 13000.0, "return_rate": 0.35}
+            {
+                "group": "连衣裙",
+                "gmv": 80000.0,
+                "order_count": 60,
+                "customer_count": 25,
+                "avg_order_value": 1333.33,
+                "refund_amount": 13000.0,
+                "return_rate": 0.35,
+            }
         ],
         by_channel=[],
     )

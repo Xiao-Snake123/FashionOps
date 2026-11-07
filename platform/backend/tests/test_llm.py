@@ -203,9 +203,7 @@ class TestMockGeneration:
 class TestMockClient:
     def test_structured_response_is_valid_json(self):
         client = MockModelClient()
-        response = client.complete(
-            [Message.user("选品")], response_schema=SelectionResult
-        )
+        response = client.complete([Message.user("选品")], response_schema=SelectionResult)
         parsed = SelectionResult.model_validate_json(extract_json(response.content))
         assert parsed.candidates
 
@@ -216,9 +214,7 @@ class TestMockClient:
         assert not response.has_tool_calls
 
     def test_script_is_consumed_in_order(self):
-        client = MockModelClient(
-            script=[MockReply(content="第一步"), MockReply(content="第二步")]
-        )
+        client = MockModelClient(script=[MockReply(content="第一步"), MockReply(content="第二步")])
         assert client.complete([Message.user("x")]).content == "第一步"
         assert client.complete([Message.user("x")]).content == "第二步"
         # 脚本用完之后回退到默认行为，不报错
@@ -299,9 +295,7 @@ class TestStructuredCall:
     def test_repair_prompt_contains_specific_errors(self):
         """回喂的内容必须**具体**。只说"你错了重来"，模型大概率再错一次。"""
         good = build_instance(SelectionResult).model_dump_json()
-        client = MockModelClient(
-            script=[MockReply(content='{"summary": "x"}'), MockReply(content=good)]
-        )
+        client = MockModelClient(script=[MockReply(content='{"summary": "x"}'), MockReply(content=good)])
         structured_call(client, [Message.user("选品")], SelectionResult)
 
         repair_message = client.calls[1][-1]
@@ -310,12 +304,8 @@ class TestStructuredCall:
 
     def test_gives_up_after_max_repair(self):
         """修复轮数必须有上限，否则遇到模型死活改不对会一直烧 token。"""
-        client = MockModelClient(
-            script=[MockReply(content='{"summary": "x"}') for _ in range(10)]
-        )
-        result = structured_call(
-            client, [Message.user("选品")], SelectionResult, max_repair=2
-        )
+        client = MockModelClient(script=[MockReply(content='{"summary": "x"}') for _ in range(10)])
+        result = structured_call(client, [Message.user("选品")], SelectionResult, max_repair=2)
         assert not result.ok
         assert result.value is None
         assert result.attempted == 3  # 首轮 + 2 次修复
@@ -413,9 +403,7 @@ class TestToolLoop:
         def boom(name, args):  # noqa: ANN001, ANN202
             raise RuntimeError("下游 500")
 
-        result = run_tool_loop(
-            client, [Message.user("查库存")], tools=self._tools(), tool_runner=boom
-        )
+        result = run_tool_loop(client, [Message.user("查库存")], tools=self._tools(), tool_runner=boom)
         assert result.finished
         tool_messages = [m for m in client.calls[1] if m.role == "tool"]
         assert "TOOL_EXECUTION_FAILED" in tool_messages[0].content
@@ -423,10 +411,7 @@ class TestToolLoop:
     def test_max_steps_caps_infinite_loop(self):
         """模型要是一直在调工具，必须有硬上限兜住。"""
         client = MockModelClient(
-            script=[
-                MockReply(tool_calls=[ToolCall(id=f"c{i}", name="erp__query_inventory")])
-                for i in range(20)
-            ]
+            script=[MockReply(tool_calls=[ToolCall(id=f"c{i}", name="erp__query_inventory")]) for i in range(20)]
         )
         result = run_tool_loop(
             client,
@@ -505,7 +490,5 @@ class TestFactory:
         """配了真实 provider 但忘填 Key 时自动降级，而不是启动就崩。"""
         from fashionops.config import Settings
 
-        client = get_model_client(
-            Settings(model_provider="deepseek", model_api_key=None)
-        )
+        client = get_model_client(Settings(model_provider="deepseek", model_api_key=None))
         assert isinstance(client, MockModelClient)

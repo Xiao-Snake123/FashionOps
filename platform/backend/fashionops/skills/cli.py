@@ -13,6 +13,7 @@
 `config` / `logging_setup` —— 配置写错了、外部依赖挂了，也应该能读技能文档。
 排查环境问题时，"这条命令还能不能用"本身就是一条有用的分界线。
 """
+
 from __future__ import annotations
 
 import sys

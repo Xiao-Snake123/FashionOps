@@ -115,22 +115,16 @@ class TestGateBlocks:
         assert d.code == "blocked_denylist"
 
     def test_too_many_recipients(self):
-        d = _gate(mail_max_recipients=2).evaluate(
-            to=["a@example.com", "b@example.com", "c@example.com"]
-        )
+        d = _gate(mail_max_recipients=2).evaluate(to=["a@example.com", "b@example.com", "c@example.com"])
         assert d.code == "blocked_recipients"
 
     def test_attachment_type_not_allowed(self):
-        d = _gate().evaluate(
-            to=["ops@example.com"], attachments=[AttachmentInfo(".env", 100)]
-        )
+        d = _gate().evaluate(to=["ops@example.com"], attachments=[AttachmentInfo(".env", 100)])
         assert d.code == "blocked_attachment_type"
         assert ".env" in d.reason
 
     def test_attachment_no_extension_blocked(self):
-        d = _gate().evaluate(
-            to=["ops@example.com"], attachments=[AttachmentInfo("secrets", 100)]
-        )
+        d = _gate().evaluate(to=["ops@example.com"], attachments=[AttachmentInfo("secrets", 100)])
         assert d.code == "blocked_attachment_type"
 
     def test_attachment_too_large(self):
@@ -166,16 +160,12 @@ class TestGateAllows:
 
     def test_dry_run_does_not_bypass_blocking(self):
         """dry_run 不是"跳过检查"，黑名单照样拦。"""
-        d = _gate(mail_dry_run=True, mail_denylist=("@evil.com",)).evaluate(
-            to=["a@evil.com"]
-        )
+        d = _gate(mail_dry_run=True, mail_denylist=("@evil.com",)).evaluate(to=["a@evil.com"])
         assert d.code == "blocked_denylist"
         assert d.to == ("a@evil.com",)
 
     def test_allowed_when_everything_configured(self):
-        d = _gate(
-            mail_dry_run=False, mail_can_really_send=True
-        ).evaluate(to=["ops@example.com"])
+        d = _gate(mail_dry_run=False, mail_can_really_send=True).evaluate(to=["ops@example.com"])
         assert d.code == "allowed"
         assert d.allowed
 
@@ -207,17 +197,13 @@ class TestAddressHandling:
         不跨字段去重的话收件人上限会被虚高的数字触发，
         运维看到"10 个收件人超限"，实际只有 6 个人。
         """
-        to_c, cc_c, bcc_c = split_fields(
-            ["a@x.com", "b@x.com"], ["B@X.com", "c@x.com"], ["d@x.com"]
-        )
+        to_c, cc_c, bcc_c = split_fields(["a@x.com", "b@x.com"], ["B@X.com", "c@x.com"], ["d@x.com"])
         assert to_c == ("a@x.com", "b@x.com")
         assert cc_c == ("c@x.com",)
         assert bcc_c == ("d@x.com",)
 
     def test_dedupe_does_not_trigger_recipient_limit(self):
-        d = _gate(mail_max_recipients=2).evaluate(
-            to=["a@example.com", "A@example.com"], cc=["a@example.com"]
-        )
+        d = _gate(mail_max_recipients=2).evaluate(to=["a@example.com", "A@example.com"], cc=["a@example.com"])
         assert d.code == "dry_run"
 
 
@@ -260,23 +246,17 @@ class TestSender:
         assert msg["Bcc"] is None
         assert "secret@example.com" not in msg.as_string()
         # 但投递名单里必须有它
-        assert "secret@example.com" in self._msg(
-            to=("ops@example.com",), bcc=("secret@example.com",)
-        ).all_recipients
+        assert "secret@example.com" in self._msg(to=("ops@example.com",), bcc=("secret@example.com",)).all_recipients
 
     def test_smtp_omits_empty_cc_header(self):
         """空收件人不能设头部 —— 会产出非法头部。"""
-        sender = SmtpSender(
-            host="h", port=465, user="", password="", from_addr="a@b.com"
-        )
+        sender = SmtpSender(host="h", port=465, user="", password="", from_addr="a@b.com")
         msg = sender.build(self._msg())
         assert msg["Cc"] is None
 
     def test_smtp_attaches_bytes(self):
         sender = SmtpSender(host="h", port=465, user="", password="", from_addr="a@b.com")
-        msg = sender.build(
-            self._msg(attachments=(("报表.xlsx", b"binary-content"),))
-        )
+        msg = sender.build(self._msg(attachments=(("报表.xlsx", b"binary-content"),)))
         assert msg.is_multipart()
         payloads = [p.get_payload(decode=True) for p in msg.walk() if p.get_filename()]
         assert b"binary-content" in payloads
@@ -504,20 +484,19 @@ class TestMailTool:
 
     def test_requires_mail_scope(self, seeded_env):
         ctx, _ = _build_context()
-        result = _call(ctx, "mail.send", {"to_addrs": ["a@example.com"], "subject": "s", "body_text": "b"}, scopes=frozenset())  # noqa: E501
+        result = _call(
+            ctx, "mail.send", {"to_addrs": ["a@example.com"], "subject": "s", "body_text": "b"}, scopes=frozenset()
+        )  # noqa: E501
         assert not result.ok
 
     def test_idempotent_on_rerun(self, seeded_env):
         """节点重跑不该把同一封信发第二次。"""
         ctx, _ = _build_context()
         args = {"to_addrs": ["ops@example.com"], "subject": "s", "body_text": "b", "task_id": None}
-        call_ctx = CallContext(
-            actor="test", scopes=AGENT_SCOPES["notification"], idempotency_key="T1:notification"
-        )
+        call_ctx = CallContext(actor="test", scopes=AGENT_SCOPES["notification"], idempotency_key="T1:notification")
         first = ctx.gateway.call("mail.send", args, ctx=call_ctx)
         second = ctx.gateway.call("mail.send", args, ctx=call_ctx)
         assert first.data["message_no"] == second.data["message_no"]
 
         with Session(get_engine()) as session:
             assert session.query(EmailMessage).count() == 1
-

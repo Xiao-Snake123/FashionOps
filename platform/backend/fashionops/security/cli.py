@@ -195,11 +195,7 @@ def cmd_list(args: Namespace) -> int:
             print("建第一个管理员：fashionops-user create-admin admin")
             return 0
 
-        counts = dict(
-            session.execute(
-                select(UserRole.user_id, func.count()).group_by(UserRole.user_id)
-            ).all()
-        )
+        counts = dict(session.execute(select(UserRole.user_id, func.count()).group_by(UserRole.user_id)).all())
 
         print(f"{'ID':>4}  {'用户名':<20} {'状态':<9} {'角色':<28} 最后登录")
         print("-" * 96)
@@ -283,9 +279,7 @@ def cmd_grant(args: Namespace) -> int:
         if not added:
             _warn(f"用户 {user.username} 已经有 {args.role} 角色了（未重复添加）")
             return 0
-        _audit(
-            session, action="user.grant_role", target=args.username, detail={"role": args.role}
-        )
+        _audit(session, action="user.grant_role", target=args.username, detail={"role": args.role})
         _ok(f"已授予 {user.username} 角色 {args.role}")
         # 权限是每次请求现算的，所以这里**不需要**提示"重新登录才生效"
         print("  权限立即生效，用户不需要重新登录（权限不从 token 里读）")
@@ -299,18 +293,12 @@ def cmd_revoke(args: Namespace) -> int:
         if role_row is None:
             _fail(f"角色 {args.role} 不存在")
             return 1
-        row = session.scalar(
-            select(UserRole).where(
-                UserRole.user_id == user.id, UserRole.role_id == role_row.id
-            )
-        )
+        row = session.scalar(select(UserRole).where(UserRole.user_id == user.id, UserRole.role_id == role_row.id))
         if row is None:
             _warn(f"用户 {user.username} 本来就没有 {args.role} 角色")
             return 0
         session.delete(row)
-        _audit(
-            session, action="user.revoke_role", target=args.username, detail={"role": args.role}
-        )
+        _audit(session, action="user.revoke_role", target=args.username, detail={"role": args.role})
         _ok(f"已撤销 {user.username} 的角色 {args.role}")
     return 0
 
@@ -391,9 +379,7 @@ def cmd_roles(args: Namespace) -> int:
             return 0
         presets = {r.code: r for r in ROLE_PRESETS}
         for role in roles:
-            user_count = session.scalar(
-                select(func.count()).select_from(UserRole).where(UserRole.role_id == role.id)
-            )
+            user_count = session.scalar(select(func.count()).select_from(UserRole).where(UserRole.role_id == role.id))
             codes = sorted(role.permission_codes())
             print(f"[{role.code}] {role.name}  · {user_count} 人  · {len(codes)} 项权限")
             print(f"    {role.description or '-'}")
@@ -432,16 +418,12 @@ def cmd_sync(args: Namespace) -> int:
 
         if getattr(args, "apply_presets", False):
             filled = apply_role_presets(session)
-            _ok(
-                f"已把预设授权补到已有角色：新增 {filled['added']} 条，涉及 {filled['roles']} 个角色"
-            )
+            _ok(f"已把预设授权补到已有角色：新增 {filled['added']} 条，涉及 {filled['roles']} 个角色")
             roles = dict(roles)
             roles["missing"] = {}
 
         _audit(session, action="identity.sync", target="permissions+roles", detail=stats)
-        _ok(
-            f"权限同步完成：新增 {perms['created']} / 更新 {perms['updated']} / 移除 {perms['removed']}"
-        )
+        _ok(f"权限同步完成：新增 {perms['created']} / 更新 {perms['updated']} / 移除 {perms['removed']}")
         _ok(f"角色同步完成：新增 {roles['created']} 个角色，写入 {roles['granted']} 条授权")
         if perms["removed"]:
             _warn(
@@ -494,9 +476,7 @@ def cmd_apikey_create(args: Namespace) -> int:
         print()
         print(f"    名称    : {row.name}")
         print(f"    归属    : {user.username}")
-        print(
-            f"    作用域  : {'、'.join(scopes) if scopes else '（不收紧，等于该用户的全部权限）'}"
-        )
+        print(f"    作用域  : {'、'.join(scopes) if scopes else '（不收紧，等于该用户的全部权限）'}")
         print(f"    有效期  : {row.expires_at or '长期'}")
         print()
         print("    给 MCP 客户端配置：")
@@ -611,10 +591,7 @@ def build_parser() -> ArgumentParser:
     p.add_argument(
         "--apply-presets",
         action="store_true",
-        help=(
-            "把代码里的角色预设授权**补充**到已有角色上（只加不删）。"
-            "升级后新加的权限码需要跑一次这个才生效"
-        ),
+        help=("把代码里的角色预设授权**补充**到已有角色上（只加不删）。升级后新加的权限码需要跑一次这个才生效"),
     )
     p.set_defaults(func=cmd_sync)
 

@@ -198,9 +198,7 @@ def _window_start_seq(conversation_id: int, limit: int) -> int | None:
     """上下文窗口里**最旧**那条消息的 seq。``None`` = 整个会话还没超出窗口。"""
     with session_scope() as session:
         total = session.scalar(
-            select(func.count())
-            .select_from(ChatMessage)
-            .where(ChatMessage.conversation_id == conversation_id)
+            select(func.count()).select_from(ChatMessage).where(ChatMessage.conversation_id == conversation_id)
         )
         if int(total or 0) <= limit:
             return None

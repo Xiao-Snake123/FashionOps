@@ -339,22 +339,28 @@ class ToolGateway:
             spec = self.registry.get(tool_name)
         except ToolNotFound:
             return self._reject(
-                tool_name, trace_id, started, stats,
+                tool_name,
+                trace_id,
+                started,
+                stats,
                 ToolError(
                     ErrorCode.TOOL_NOT_FOUND,
                     f"工具 {tool_name} 未注册",
                     hint=(
-                        f"可用工具：{', '.join(self.registry.names()[:12])}"
-                        + (" …" if len(self.registry) > 12 else "")
+                        f"可用工具：{', '.join(self.registry.names()[:12])}" + (" …" if len(self.registry) > 12 else "")
                     ),
                 ),
-                ctx, action=None,
+                ctx,
+                action=None,
             )
 
         # ---- 2. 权限 ----
         if spec.scopes and not (spec.scopes & ctx.scopes):
             return self._reject(
-                tool_name, trace_id, started, stats,
+                tool_name,
+                trace_id,
+                started,
+                stats,
                 ToolError(
                     ErrorCode.PERMISSION_DENIED,
                     f"角色 {ctx.actor} 缺少调用 {tool_name} 所需权限",
@@ -365,7 +371,8 @@ class ToolGateway:
                     ),
                     details={"required": sorted(spec.scopes), "granted": sorted(ctx.scopes)},
                 ),
-                ctx, action="denied",
+                ctx,
+                action="denied",
             )
 
         # ---- 3. 参数校验 ----
@@ -373,9 +380,13 @@ class ToolGateway:
             payload = self.validate_args(spec, args)
         except ValidationError as exc:
             return self._reject(
-                tool_name, trace_id, started, stats,
+                tool_name,
+                trace_id,
+                started,
+                stats,
                 self.invalid_args_error(spec, exc),
-                ctx, action="invalid",
+                ctx,
+                action="invalid",
             )
 
         # ---- 4. 幂等 ----
@@ -385,9 +396,11 @@ class ToolGateway:
             if cached is not None:
                 stats.success += 1
                 return ToolResult.success(
-                    tool_name, cached,
+                    tool_name,
+                    cached,
                     duration_ms=self._elapsed_ms(started),
-                    trace_id=trace_id, cached=True,
+                    trace_id=trace_id,
+                    cached=True,
                 )
 
         # ---- 5. 限流 ----
@@ -435,9 +448,7 @@ class ToolGateway:
         return int((time.perf_counter() - started) * 1000)
 
     @staticmethod
-    def _idempotency_key(
-        spec: ToolSpec, payload: dict[str, Any], ctx: CallContext
-    ) -> str | None:
+    def _idempotency_key(spec: ToolSpec, payload: dict[str, Any], ctx: CallContext) -> str | None:
         """算出本次调用的幂等键；返回 ``None`` 表示不做幂等。
 
         **关键点：键里必须带上入参摘要。**
@@ -489,10 +500,7 @@ class ToolGateway:
             f"参数校验失败：{exc.error_count()} 处不合法",
             hint=(
                 "请按 schema 修正参数后重试："
-                + "; ".join(
-                    f"{'.'.join(str(x) for x in e['loc'])}: {e['msg']}"
-                    for e in exc.errors()[:4]
-                )
+                + "; ".join(f"{'.'.join(str(x) for x in e['loc'])}: {e['msg']}" for e in exc.errors()[:4])
             ),
             details={"schema": spec.args_model.model_json_schema()},
         )
@@ -562,34 +570,40 @@ class ToolGateway:
                 return None
             # 写操作 fail-closed：没有限流保护就不发写请求
             return self._reject(
-                spec.name, trace_id, started, stats,
+                spec.name,
+                trace_id,
+                started,
+                stats,
                 ToolError(
                     ErrorCode.RATE_LIMITED,
                     "限流组件不可用，写操作已按 fail-closed 策略拒绝",
                     hint=(
-                        "请检查 Redis 是否在运行（deploy/scripts/services.ps1 status）。"
-                        "在限流恢复前不要重试写操作。"
+                        "请检查 Redis 是否在运行（deploy/scripts/services.ps1 status）。在限流恢复前不要重试写操作。"
                     ),
                     details={"reason": "limiter_unavailable", "error": str(exc)},
                 ),
-                ctx, action="rate_limit_unavailable",
+                ctx,
+                action="rate_limit_unavailable",
             )
 
         if decision.allowed:
             return None
 
         return self._reject(
-            spec.name, trace_id, started, stats,
+            spec.name,
+            trace_id,
+            started,
+            stats,
             ToolError(
                 ErrorCode.RATE_LIMITED,
                 f"工具 {spec.name} 触发限流：{decision.window_s} 秒内已调用 {decision.limit} 次",
                 hint=(
-                    f"请在 {decision.retry_after_s:.1f} 秒后重试，"
-                    "或先做其他步骤（比如先去查别的数据），不要原地重试。"
+                    f"请在 {decision.retry_after_s:.1f} 秒后重试，或先做其他步骤（比如先去查别的数据），不要原地重试。"
                 ),
                 details=decision.to_dict(),
             ),
-            ctx, action="rate_limited",
+            ctx,
+            action="rate_limited",
         )
 
     def _check_circuit(
@@ -608,14 +622,18 @@ class ToolGateway:
                 logger.warning("熔断组件不可用，只读工具 %s 放行：%s", spec.name, exc)
                 return None
             return self._reject(
-                spec.name, trace_id, started, stats,
+                spec.name,
+                trace_id,
+                started,
+                stats,
                 ToolError(
                     ErrorCode.CIRCUIT_OPEN,
                     "熔断组件不可用，写操作已按 fail-closed 策略拒绝",
                     hint="请检查 Redis 是否在运行，在熔断状态可查之前不要重试写操作。",
                     details={"reason": "breaker_unavailable", "error": str(exc)},
                 ),
-                ctx, action="breaker_unavailable",
+                ctx,
+                action="breaker_unavailable",
             )
 
         if decision.allowed:
@@ -629,18 +647,21 @@ class ToolGateway:
             )
 
         return self._reject(
-            spec.name, trace_id, started, stats,
+            spec.name,
+            trace_id,
+            started,
+            stats,
             ToolError(
                 ErrorCode.CIRCUIT_OPEN,
                 f"工具 {spec.name} 处于熔断状态（{decision.state}）",
                 hint=(
-                    extra_hint
-                    + "请不要重试同一工具，改用其他工具或走降级方案；"
+                    extra_hint + "请不要重试同一工具，改用其他工具或走降级方案；"
                     "如果这是关键步骤，标记为「需要人工介入」。"
                 ),
                 details=decision.to_dict(),
             ),
-            ctx, action="circuit_open",
+            ctx,
+            action="circuit_open",
         )
 
     def _on_upstream_success(self, spec: ToolSpec) -> None:
@@ -661,7 +682,9 @@ class ToolGateway:
             if not decision.allowed:
                 logger.warning(
                     "工具 %s 已熔断（连续失败 %d 次，冷却 %ds）",
-                    spec.name, decision.failures, int(decision.retry_after_s),
+                    spec.name,
+                    decision.failures,
+                    int(decision.retry_after_s),
                 )
         except Exception as exc:  # noqa: BLE001
             logger.debug("熔断失败记账失败（忽略)：%s", exc)
@@ -682,10 +705,7 @@ class ToolGateway:
                 last_error = ToolError(
                     ErrorCode.UPSTREAM_TIMEOUT,
                     f"工具 {spec.name} 超过 {spec.timeout_s}s 未返回",
-                    hint=(
-                        "该工具响应过慢。可以：调小查询范围（比如缩短时间区间）、"
-                        "或者改用聚合类工具拿汇总数据。"
-                    ),
+                    hint=("该工具响应过慢。可以：调小查询范围（比如缩短时间区间）、或者改用聚合类工具拿汇总数据。"),
                     details={"timeout_s": spec.timeout_s},
                 )
             except ValidationError as exc:
@@ -740,9 +760,7 @@ class ToolGateway:
         网关这层是兜底而不是唯一防线。
         """
         if spec.is_async:
-            raise RuntimeError(
-                f"工具 {spec.name} 是 async handler，请改用 gateway.acall()"
-            )
+            raise RuntimeError(f"工具 {spec.name} 是 async handler，请改用 gateway.acall()")
 
         pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="tool-gw")
         try:

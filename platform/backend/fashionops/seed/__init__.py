@@ -194,8 +194,10 @@ def seed(seed_value: int = DEFAULT_SEED, reset: bool = True) -> dict[str, int]:
 
         sku_rows = gen.make_skus(rng, product_rows)
         skus = [
-            SKU(**{k: v for k, v in row.items() if k != "product_index"},
-                product_id=product_ids[row["product_index"] - 1])
+            SKU(
+                **{k: v for k, v in row.items() if k != "product_index"},
+                product_id=product_ids[row["product_index"] - 1],
+            )
             for row in sku_rows
         ]
         session.add_all(skus)
@@ -226,8 +228,7 @@ def seed(seed_value: int = DEFAULT_SEED, reset: bool = True) -> dict[str, int]:
         # ------------------------------------------------------------------
         inv_rows, final_stock = gen.make_inventory(rng, sku_count=len(skus))
         inventories = [
-            Inventory(**{k: v for k, v in row.items() if k != "sku_index"},
-                      sku_id=sku_ids[row["sku_index"] - 1])
+            Inventory(**{k: v for k, v in row.items() if k != "sku_index"}, sku_id=sku_ids[row["sku_index"] - 1])
             for row in inv_rows
         ]
         session.add_all(inventories)
@@ -274,9 +275,7 @@ def seed(seed_value: int = DEFAULT_SEED, reset: bool = True) -> dict[str, int]:
         task_rows = gen.make_tasks(rng, count=20)
         # 生成器里下划线开头的是给别的生成器用的中间量（_plan / _stop_at），
         # 不是模型字段 —— 统一在这里过滤掉
-        tasks = [
-            Task(**{k: v for k, v in row.items() if not k.startswith("_")}) for row in task_rows
-        ]
+        tasks = [Task(**{k: v for k, v in row.items() if not k.startswith("_")}) for row in task_rows]
         session.add_all(tasks)
         session.flush()
         task_ids = [t.id for t in tasks]
@@ -284,8 +283,7 @@ def seed(seed_value: int = DEFAULT_SEED, reset: bool = True) -> dict[str, int]:
 
         # ---- 6.1 新架构：每一步一条 todo ----
         todos = [
-            TaskTodo(**{k: v for k, v in row.items() if k != "task_index"},
-                     task_id=task_ids[row["task_index"] - 1])
+            TaskTodo(**{k: v for k, v in row.items() if k != "task_index"}, task_id=task_ids[row["task_index"] - 1])
             for row in gen.make_task_todos(rng, task_rows)
         ]
         session.add_all(todos)
@@ -329,16 +327,14 @@ def seed(seed_value: int = DEFAULT_SEED, reset: bool = True) -> dict[str, int]:
             counts["chat_approvals"] = len(approvals)
 
         events = [
-            TaskEvent(**{k: v for k, v in row.items() if k != "task_index"},
-                      task_id=task_ids[row["task_index"] - 1])
+            TaskEvent(**{k: v for k, v in row.items() if k != "task_index"}, task_id=task_ids[row["task_index"] - 1])
             for row in gen.make_task_events(rng, task_rows)
         ]
         session.add_all(events)
         counts["task_events"] = len(events)
 
         runs = [
-            AgentRun(**{k: v for k, v in row.items() if k != "task_index"},
-                     task_id=task_ids[row["task_index"] - 1])
+            AgentRun(**{k: v for k, v in row.items() if k != "task_index"}, task_id=task_ids[row["task_index"] - 1])
             for row in gen.make_agent_runs(rng, task_rows)
         ]
         session.add_all(runs)
@@ -349,18 +345,22 @@ def seed(seed_value: int = DEFAULT_SEED, reset: bool = True) -> dict[str, int]:
         # 7. 素材 / 广告 / 邮件
         # ------------------------------------------------------------------
         assets = [
-            Asset(**{k: v for k, v in row.items() if k not in ("task_index", "product_index")},
-                  task_id=task_ids[row["task_index"] - 1],
-                  product_id=product_ids[row["product_index"] - 1])
+            Asset(
+                **{k: v for k, v in row.items() if k not in ("task_index", "product_index")},
+                task_id=task_ids[row["task_index"] - 1],
+                product_id=product_ids[row["product_index"] - 1],
+            )
             for row in gen.make_assets(rng, task_rows, count=50)
         ]
         session.add_all(assets)
         counts["assets"] = len(assets)
 
         campaigns = [
-            AdCampaign(**{k: v for k, v in row.items() if k not in ("task_index", "product_index")},
-                       task_id=task_ids[row["task_index"] - 1],
-                       product_id=product_ids[row["product_index"] - 1])
+            AdCampaign(
+                **{k: v for k, v in row.items() if k not in ("task_index", "product_index")},
+                task_id=task_ids[row["task_index"] - 1],
+                product_id=product_ids[row["product_index"] - 1],
+            )
             for row in gen.make_ad_campaigns(rng, count=12)
         ]
         session.add_all(campaigns)
@@ -368,8 +368,7 @@ def seed(seed_value: int = DEFAULT_SEED, reset: bool = True) -> dict[str, int]:
         counts["_ad_bad_roi"] = sum(1 for c in campaigns if (c.roi or Decimal(0)) < Decimal("1.0"))
 
         emails = [
-            EmailMessage(**{k: v for k, v in row.items() if k != "task_index"},
-                         task_id=task_ids[row["task_index"] - 1])
+            EmailMessage(**{k: v for k, v in row.items() if k != "task_index"}, task_id=task_ids[row["task_index"] - 1])
             for row in gen.make_email_messages(rng, count=30)
         ]
         session.add_all(emails)
@@ -380,8 +379,10 @@ def seed(seed_value: int = DEFAULT_SEED, reset: bool = True) -> dict[str, int]:
         # 8. 审计日志
         # ------------------------------------------------------------------
         audits = [
-            AuditLog(**{k: v for k, v in row.items() if k != "task_index"},
-                     task_id=(task_ids[row["task_index"] - 1] if row["task_index"] else None))
+            AuditLog(
+                **{k: v for k, v in row.items() if k != "task_index"},
+                task_id=(task_ids[row["task_index"] - 1] if row["task_index"] else None),
+            )
             for row in gen.make_audit_logs(rng, count=300)
         ]
         session.add_all(audits)
@@ -416,8 +417,7 @@ def seed(seed_value: int = DEFAULT_SEED, reset: bool = True) -> dict[str, int]:
                 )
                 session.add(
                     Approval(
-                        approval_no=f"AP{conversation.created_at.strftime('%Y%m%d')}"
-                        f"{rng.randrange(10**5, 10**6):06d}",
+                        approval_no=f"AP{conversation.created_at.strftime('%Y%m%d')}{rng.randrange(10**5, 10**6):06d}",
                         conversation_id=conversation.id,
                         message_id=msg_row.id if msg_row else None,
                         tool_call_id=f"call_{conversation.conversation_no[-4:]}",
@@ -448,9 +448,7 @@ def seed(seed_value: int = DEFAULT_SEED, reset: bool = True) -> dict[str, int]:
 
         # 再查一遍行数，确认真的落库了（而不是只在自己的 Session 里）
         for model in ALL_MODELS:
-            counts[model.__tablename__] = session.scalar(
-                select(func.count()).select_from(model)
-            ) or 0
+            counts[model.__tablename__] = session.scalar(select(func.count()).select_from(model)) or 0
 
     # fake 只是为了让 linter 知道它被用了；Faker 用于生成更自然的昵称/地址
     _ = fake
@@ -490,9 +488,7 @@ def report(counts: dict[str, int], seed_value: int) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        prog="fashionops-seed", description="生成并灌入服装电商假数据"
-    )
+    parser = argparse.ArgumentParser(prog="fashionops-seed", description="生成并灌入服装电商假数据")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED, help="随机种子，默认 %(default)s")
     parser.add_argument("--keep", action="store_true", help="保留已有数据（默认先清空重建）")
     args = parser.parse_args(argv)

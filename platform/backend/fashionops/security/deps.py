@@ -33,6 +33,7 @@ def approve(
 **这个头很重要**：让"忘了开鉴权"这件事在浏览器 DevTools 里一眼可见，
 而不是要靠读配置才知道。
 """
+
 from __future__ import annotations
 
 import logging
@@ -179,8 +180,7 @@ def get_stream_principal(
         str | None,
         Query(
             description=(
-                "仅用于 SSE 的令牌传递方式。浏览器的原生 EventSource "
-                "**不支持自定义请求头**，所以只能从查询串带令牌"
+                "仅用于 SSE 的令牌传递方式。浏览器的原生 EventSource **不支持自定义请求头**，所以只能从查询串带令牌"
             )
         ),
     ] = None,
@@ -249,8 +249,7 @@ def require_permission(*codes: str):
     """
     if not codes:
         raise ValueError(
-            "require_permission() 至少需要一个权限码。"
-            "不需要权限的接口请用 CurrentPrincipal，不要用这个函数"
+            "require_permission() 至少需要一个权限码。不需要权限的接口请用 CurrentPrincipal，不要用这个函数"
         )
 
     def dependency(principal: Annotated[Principal, Depends(get_principal)]) -> Principal:

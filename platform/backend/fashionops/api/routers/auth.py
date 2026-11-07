@@ -406,10 +406,7 @@ def oauth_authorize(provider: str, state: str = "") -> dict:
     if not impl.configured:
         raise HTTPException(
             status_code=503,
-            detail=(
-                f"{provider} 登录未配置。需要在 .env 里填 "
-                f"FASHIONOPS_{provider.upper()}_* 相关字段"
-            ),
+            detail=(f"{provider} 登录未配置。需要在 .env 里填 FASHIONOPS_{provider.upper()}_* 相关字段"),
         )
 
     # `state` 由服务端生成（不信任调用方传的）—— 它要防的是 CSRF，
@@ -471,9 +468,7 @@ def list_users(
                 "is_superuser": u.is_superuser,
                 "roles": u.role_codes(),
                 "permissions": sorted(user_permission_codes(u)),
-                "last_login_at": u.last_login_at.isoformat(timespec="seconds")
-                if u.last_login_at
-                else None,
+                "last_login_at": u.last_login_at.isoformat(timespec="seconds") if u.last_login_at else None,
             }
             for u in users
         ],

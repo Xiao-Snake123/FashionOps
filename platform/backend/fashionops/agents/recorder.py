@@ -240,9 +240,7 @@ class TaskRecorder:
     # ------------------------------------------------------------------
     # 事件流（SSE 数据源）
     # ------------------------------------------------------------------
-    def event(
-        self, task_no: str, kind: str, payload: dict[str, Any] | None = None, *, level: str = "info"
-    ) -> None:
+    def event(self, task_no: str, kind: str, payload: dict[str, Any] | None = None, *, level: str = "info") -> None:
         """追加一条事件。
 
         ``seq`` 以内存计数为准，**但首次用到某个任务时必须从库里取基线**。
@@ -359,9 +357,7 @@ class TaskRecorder:
             )
 
         if update.get("progress") is not None:
-            self.update_progress(
-                task_no, status="running", progress=int(update["progress"]), node=node
-            )
+            self.update_progress(task_no, status="running", progress=int(update["progress"]), node=node)
 
     # ------------------------------------------------------------------
     @staticmethod
@@ -378,9 +374,7 @@ class TaskRecorder:
 
     def _max_seq(self, session: Any, task_id: int) -> int:
         """取某个任务当前的最大 seq。"""
-        return int(
-            session.scalar(select(func.max(TaskEvent.seq)).where(TaskEvent.task_id == task_id)) or 0
-        )
+        return int(session.scalar(select(func.max(TaskEvent.seq)).where(TaskEvent.task_id == task_id)) or 0)
 
     def _current_seq(self, task_no: str) -> int:
         try:

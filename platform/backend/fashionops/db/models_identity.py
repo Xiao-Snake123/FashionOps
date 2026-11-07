@@ -140,9 +140,7 @@ class User(Base):
     #:
     #: ondelete 用 SET NULL 而不是 CASCADE：删部门不该连带删人 ——
     #: 人的任务、审计、发件记录都还挂在那个 user_id 上。
-    department_id: Mapped[int | None] = mapped_column(
-        ForeignKey("departments.id", ondelete="SET NULL"), index=True
-    )
+    department_id: Mapped[int | None] = mapped_column(ForeignKey("departments.id", ondelete="SET NULL"), index=True)
 
     #: 连续失败次数与锁定截止时间。用于防暴力破解。
     failed_login_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -153,14 +151,10 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
     #: 谁创建的（自注册时为 NULL）。同样存 ID + 快照名。
-    created_by_id: Mapped[int | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL")
-    )
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     created_by: Mapped[str] = mapped_column(String(64), default="")
 
-    roles: Mapped[list[Role]] = relationship(
-        secondary="user_roles", back_populates="users", lazy="selectin"
-    )
+    roles: Mapped[list[Role]] = relationship(secondary="user_roles", back_populates="users", lazy="selectin")
 
     @property
     def is_active(self) -> bool:
@@ -226,9 +220,7 @@ class Permission(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
-    roles: Mapped[list[Role]] = relationship(
-        secondary="role_permissions", back_populates="permissions"
-    )
+    roles: Mapped[list[Role]] = relationship(secondary="role_permissions", back_populates="permissions")
 
     def __repr__(self) -> str:
         return f"<Permission {self.code}>"
@@ -242,12 +234,8 @@ class UserRole(Base):
 
     __tablename__ = "user_roles"
 
-    user_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
-    )
-    role_id: Mapped[int] = mapped_column(
-        ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True
-    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    role_id: Mapped[int] = mapped_column(ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True)
     granted_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     #: 谁授的权（权限变更本身就是审计对象）
     granted_by: Mapped[str] = mapped_column(String(64), default="")
@@ -258,12 +246,8 @@ class RolePermission(Base):
 
     __tablename__ = "role_permissions"
 
-    role_id: Mapped[int] = mapped_column(
-        ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True
-    )
-    permission_id: Mapped[int] = mapped_column(
-        ForeignKey("permissions.id", ondelete="CASCADE"), primary_key=True
-    )
+    role_id: Mapped[int] = mapped_column(ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True)
+    permission_id: Mapped[int] = mapped_column(ForeignKey("permissions.id", ondelete="CASCADE"), primary_key=True)
 
 
 # ===========================================================================
@@ -283,9 +267,7 @@ class RefreshToken(Base):
     __tablename__ = "refresh_tokens"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), index=True
-    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     token_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     #: JWT 的 jti，便于把日志里的 token 和这一行对上（日志不该出现 token 原文）
     jti: Mapped[str] = mapped_column(String(64), index=True)
@@ -293,9 +275,7 @@ class RefreshToken(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime)
     #: 轮换时用来定位"上一个 token"，从而能检测令牌重放
-    replaced_by_id: Mapped[int | None] = mapped_column(
-        ForeignKey("refresh_tokens.id", ondelete="SET NULL")
-    )
+    replaced_by_id: Mapped[int | None] = mapped_column(ForeignKey("refresh_tokens.id", ondelete="SET NULL"))
 
     user_agent: Mapped[str] = mapped_column(String(255), default="")
     ip: Mapped[str] = mapped_column(String(64), default="")

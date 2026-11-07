@@ -20,6 +20,7 @@
 | 操作自己 | 管理员停用自己（自锁）或绕过原密码改自己密码 |
 | 没有部门 | "都没有部门"被当成"同一个部门"，导致无部门账号互相可见 |
 """
+
 from __future__ import annotations
 
 import pytest
@@ -350,9 +351,7 @@ class TestHappyPath:
         """
         # 先拿到**重置之前**的那个 refresh token。顺序反了的话这个用例会假绿：
         # 重置之后旧密码登不进来，重新登录拿到的是**新**令牌，它本来就该有效
-        before = client.post(
-            "/api/v1/auth/login", json={"username": U_MEMBER_A, "password": PASSWORD}
-        )
+        before = client.post("/api/v1/auth/login", json={"username": U_MEMBER_A, "password": PASSWORD})
         assert before.status_code == 200
         stolen = before.json()["refresh_token"]
 

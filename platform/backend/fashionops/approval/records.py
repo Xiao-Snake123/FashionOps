@@ -98,9 +98,7 @@ def pending_for_task(task_no: str, *, include_expired: bool = False) -> dict | N
 
     conditions = [Approval.task_no == task_no]
     if include_expired:
-        conditions.append(
-            Approval.status.in_((APPROVAL_STATUS_PENDING, APPROVAL_STATUS_EXPIRED))
-        )
+        conditions.append(Approval.status.in_((APPROVAL_STATUS_PENDING, APPROVAL_STATUS_EXPIRED)))
     else:
         conditions.append(Approval.status == APPROVAL_STATUS_PENDING)
         if limit is not None:

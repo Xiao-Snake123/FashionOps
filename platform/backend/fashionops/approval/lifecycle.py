@@ -161,9 +161,7 @@ def mark_expired(approval_no: str) -> None:
     """把单张作废（执行口拦住之后调用，让状态与"它没被执行"这件事一致）。"""
     with session_scope() as session:
         session.execute(
-            update(Approval)
-            .where(Approval.approval_no == approval_no)
-            .values(status=APPROVAL_STATUS_EXPIRED)
+            update(Approval).where(Approval.approval_no == approval_no).values(status=APPROVAL_STATUS_EXPIRED)
         )
 
 

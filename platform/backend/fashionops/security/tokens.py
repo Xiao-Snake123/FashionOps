@@ -40,6 +40,7 @@ refresh token 长但入库、可撤销、且每次刷新都轮换（rotation）�
 
 `LEAN_TOKEN` 这个名字就是提醒：token 里只放**不会变**的东西。
 """
+
 from __future__ import annotations
 
 import hashlib

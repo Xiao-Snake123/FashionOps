@@ -27,6 +27,7 @@ argon2 的哈希串形如 `$argon2id$v=19$m=65536,t=3,p=4$<salt>$<hash>`，
 攻击者可以先枚举出有效用户名，再去爆破密码，成本降低一个数量级。
 这类漏洞叫**时序侧信道**，靠 code review 基本看不出来。
 """
+
 from __future__ import annotations
 
 import unicodedata
@@ -39,10 +40,7 @@ _HASHER = PasswordHasher()
 
 #: 一个固定的、无意义的哈希串，专门用来在"用户不存在"时消耗等量时间。
 #: 它的明文是随机串，谁都猜不到，也不需要能对上。
-_DUMMY_HASH = (
-    "$argon2id$v=19$m=65536,t=3,p=4$"
-    "c29tZXNhbHRzb21lc2FsdA$RdescudvJCsgt3ub+b+dWRWJTmaaJObG"
-)
+_DUMMY_HASH = "$argon2id$v=19$m=65536,t=3,p=4$c29tZXNhbHRzb21lc2FsdA$RdescudvJCsgt3ub+b+dWRWJTmaaJObG"
 
 #: 密码最大长度。argon2 本身没有 bcrypt 那种截断问题，但设上限是为了
 #: 防止有人拿 10MB 的 "密码" 来做 CPU 消耗攻击（DoS）。
@@ -52,9 +50,20 @@ MAX_PASSWORD_BYTES = 1024
 #: 真正的黑名单要靠 HaveIBeenPwned 之类的服务，这里不做过度设计。
 _COMMON_PASSWORDS = frozenset(
     {
-        "password", "passw0rd", "12345678", "123456789", "1234567890",
-        "qwertyuiop", "admin123", "administrator", "letmein", "welcome",
-        "iloveyou", "abc123456", "fashionops", "fashionops123",
+        "password",
+        "passw0rd",
+        "12345678",
+        "123456789",
+        "1234567890",
+        "qwertyuiop",
+        "admin123",
+        "administrator",
+        "letmein",
+        "welcome",
+        "iloveyou",
+        "abc123456",
+        "fashionops",
+        "fashionops123",
     }
 )
 
@@ -105,9 +114,7 @@ def needs_rehash(password_hash: str) -> bool:
         return True
 
 
-def validate_strength(
-    password: str, *, min_length: int = 10, require_classes: int = 2
-) -> None:
+def validate_strength(password: str, *, min_length: int = 10, require_classes: int = 2) -> None:
     """强度校验。不满足抛 `PasswordPolicyError`，消息直接给用户看。
 
     为什么要求"几类字符"而不是"必须含特殊符号"：
@@ -147,9 +154,7 @@ def validate_strength(
 
     if classes < require_classes:
         raise PasswordPolicyError(
-            f"密码需要至少包含 {require_classes} 类字符"
-            "（小写字母 / 大写字母 / 数字 / 符号），当前只有 "
-            f"{classes} 类"
+            f"密码需要至少包含 {require_classes} 类字符（小写字母 / 大写字母 / 数字 / 符号），当前只有 {classes} 类"
         )
 
 

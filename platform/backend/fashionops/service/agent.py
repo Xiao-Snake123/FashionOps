@@ -359,9 +359,7 @@ def handle_ticket(
     return outcome
 
 
-def _run_fast_lane(
-    ctx: RunContext, snapshot: dict[str, Any], tri: Any, outcome: ServiceOutcome
-) -> None:
+def _run_fast_lane(ctx: RunContext, snapshot: dict[str, Any], tri: Any, outcome: ServiceOutcome) -> None:
     """快车道：**0 次模型调用**。模板 + 知识库依据。"""
     hits = _kb_search(
         ctx,
@@ -389,17 +387,13 @@ def _run_fast_lane(
     )
 
 
-def _run_agent_lane(
-    ctx: RunContext, snapshot: dict[str, Any], tri: Any, outcome: ServiceOutcome
-) -> None:
+def _run_agent_lane(ctx: RunContext, snapshot: dict[str, Any], tri: Any, outcome: ServiceOutcome) -> None:
     """Agent 层：工具循环查知识库 → 结构化输出。"""
     schemas = service_tool_schemas(ctx.scopes)
     if not schemas:
         raise RuntimeError("客服 Agent 一个工具都没拿到（权限不足或工具未注册）")
 
-    order_no = snapshot.get("order_no") or extract_order_no(
-        snapshot["subject"], snapshot["content"]
-    )
+    order_no = snapshot.get("order_no") or extract_order_no(snapshot["subject"], snapshot["content"])
     user_prompt = (
         f"客户工单：\n"
         f"标题：{snapshot['subject']}\n"
@@ -586,9 +580,7 @@ def _persist(outcome: ServiceOutcome, *, created_at: Any, order_no: str | None) 
         if not outcome.escalated:
             ticket.resolved_at = utcnow()
         if created_at is not None:
-            ticket.first_response_seconds = max(
-                0, int((utcnow() - created_at).total_seconds())
-            )
+            ticket.first_response_seconds = max(0, int((utcnow() - created_at).total_seconds()))
 
 
 __all__ = [

@@ -142,9 +142,7 @@ class TestRedisCircuitBreaker:
         assert decision.retry_after_s > 0
 
     def test_half_open_allows_exactly_one_probe(self, redis_client, clean_keys):
-        cb = RedisCircuitBreaker(
-            client=redis_client, threshold=2, cooldown_s=1, probe_timeout_s=10
-        )
+        cb = RedisCircuitBreaker(client=redis_client, threshold=2, cooldown_s=1, probe_timeout_s=10)
         key = _key("cb-half")
         cb.record_failure(key)
         cb.record_failure(key)
@@ -157,9 +155,7 @@ class TestRedisCircuitBreaker:
         assert not cb.before_call(key).allowed
 
     def test_probe_failure_reopens_immediately(self, redis_client, clean_keys):
-        cb = RedisCircuitBreaker(
-            client=redis_client, threshold=5, cooldown_s=5, probe_timeout_s=10
-        )
+        cb = RedisCircuitBreaker(client=redis_client, threshold=5, cooldown_s=5, probe_timeout_s=10)
         key = _key("cb-probe-fail")
         for _ in range(5):
             cb.record_failure(key)
@@ -172,9 +168,7 @@ class TestRedisCircuitBreaker:
         assert decision.retry_after_s > 0
 
     def test_probe_success_closes(self, redis_client, clean_keys):
-        cb = RedisCircuitBreaker(
-            client=redis_client, threshold=2, cooldown_s=1, probe_timeout_s=10
-        )
+        cb = RedisCircuitBreaker(client=redis_client, threshold=2, cooldown_s=1, probe_timeout_s=10)
         key = _key("cb-recover")
         cb.record_failure(key)
         cb.record_failure(key)

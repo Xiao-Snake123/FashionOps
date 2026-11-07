@@ -45,9 +45,7 @@ def conversation_id_of(session: Session, conversation_no: str) -> int:
     不用 `create_conversation` 的返回值：它返回的是**对外的字典**，
     里面刻意没有自增 id（对外暴露 id 会泄漏"系统里总共有多少会话"）。
     """
-    value = session.scalar(
-        select(Conversation.id).where(Conversation.conversation_no == conversation_no)
-    )
+    value = session.scalar(select(Conversation.id).where(Conversation.conversation_no == conversation_no))
     assert value is not None
     return int(value)
 
@@ -177,9 +175,7 @@ class TestToolNameReplay:
         from fashionops.chat import store
 
         conversation_id = self._seed(session, "mail.send")
-        messages = store.to_llm_messages(
-            store.history(session, conversation_id), system_prompt="sys"
-        )
+        messages = store.to_llm_messages(store.history(session, conversation_id), system_prompt="sys")
         raw = str([m.model_dump() for m in messages])
         assert "mail.send" not in raw
         assert "mail__send" in raw
@@ -283,9 +279,7 @@ class TestToolNameReplay:
         store.append_message(conversation_id, role=MSG_ROLE_USER, content="算了，先看看库存")
 
         session.expire_all()
-        messages = store.to_llm_messages(
-            store.history(session, conversation_id), system_prompt="sys"
-        )
+        messages = store.to_llm_messages(store.history(session, conversation_id), system_prompt="sys")
         assert_tool_pairs_valid(messages)
 
         # 正文还在：模型得知道自己提过这件事、但没执行
@@ -355,9 +349,7 @@ class TestApprovalPolicy:
         """
         from fashionops.chat.tools import build_catalog
 
-        catalog = build_catalog(
-            granted_scopes=frozenset({"erp:read"}), permission_codes=frozenset()
-        )
+        catalog = build_catalog(granted_scopes=frozenset({"erp:read"}), permission_codes=frozenset())
         names = {item["function"]["name"] for item in catalog}
         assert "erp__query_inventory" in names
         # mail:send 没给 → 发信工具不该出现
@@ -368,9 +360,7 @@ class TestApprovalPolicy:
     def test_catalog_adds_task_submit_only_with_permission(self):
         from fashionops.chat.tools import build_catalog
 
-        with_perm = build_catalog(
-            granted_scopes=frozenset({"erp:read"}), permission_codes=frozenset({"task:submit"})
-        )
+        with_perm = build_catalog(granted_scopes=frozenset({"erp:read"}), permission_codes=frozenset({"task:submit"}))
         assert "task__submit" in {i["function"]["name"] for i in with_perm}
 
 
@@ -403,9 +393,7 @@ class TestApprovalPreview:
     def test_long_body_is_truncated(self):
         from fashionops.chat.tools import describe_preview
 
-        preview = describe_preview(
-            "mail.send", {"to_addrs": ["a@b.com"], "subject": "s", "body_text": "字" * 500}
-        )
+        preview = describe_preview("mail.send", {"to_addrs": ["a@b.com"], "subject": "s", "body_text": "字" * 500})
         assert "…" in preview
         assert len(preview) < 600
 
@@ -446,9 +434,7 @@ class TestStore:
 
         created = store.create_conversation(username="z", user_id=None)
         cid = conversation_id_of(session, created["conversation_no"])
-        store.append_message(
-            cid, role=MSG_ROLE_ASSISTANT, content="x", prompt_tokens=10, completion_tokens=5
-        )
+        store.append_message(cid, role=MSG_ROLE_ASSISTANT, content="x", prompt_tokens=10, completion_tokens=5)
         session.expire_all()
         row = session.get(Conversation, cid)
         assert row is not None
@@ -554,8 +540,7 @@ class TestAskUser:
         asked = [
             event["message"]
             for event in events
-            if event["type"] == "message"
-            and event["message"]["finish_reason"] == "awaiting_user"
+            if event["type"] == "message" and event["message"]["finish_reason"] == "awaiting_user"
         ]
         assert len(asked) == 1
         # 这三条是"不落成工具调用"的落点
@@ -583,9 +568,7 @@ class TestAskUser:
         store.append_message(conversation_id, role=MSG_ROLE_USER, content="抖音")
 
         session.expire_all()
-        messages = store.to_llm_messages(
-            store.history(session, conversation_id), system_prompt="sys"
-        )
+        messages = store.to_llm_messages(store.history(session, conversation_id), system_prompt="sys")
         assert_tool_pairs_valid(messages)
 
         roles = [m.role for m in messages]
@@ -819,9 +802,7 @@ class TestApprovalExpiry:
             return None  # 走"无事可做"分支，避免真去建一个任务
 
         monkeypatch.setattr(records, "pending_for_task", fake_pending_for_task)
-        result = loop.resume_task(
-            "T2609190009", decision={"approved": False, "by": "z"}, recorder=object()
-        )
+        result = loop.resume_task("T2609190009", decision={"approved": False, "by": "z"}, recorder=object())
 
         assert result["status"] == "noop"
         assert seen and seen[0].get("include_expired") is True
@@ -849,9 +830,7 @@ class TestApprovalExpiry:
         )
 
         with pytest.raises(RuntimeError, match="作废"):
-            loop.resume_task(
-                "T2609190010", decision={"approved": True, "by": "z"}, recorder=object()
-            )
+            loop.resume_task("T2609190010", decision={"approved": True, "by": "z"}, recorder=object())
 
     def test_both_sides_serialize_the_same_fields(self, session):  # noqa: ANN001
         """两侧的审批形状必须**逐字段一致** —— 前端一个组件渲染两边。
@@ -898,9 +877,7 @@ def _seed_long_conversation(session, *, pairs: int = 30) -> tuple[str, int]:  # 
     conversation_id = conversation_id_of(session, conversation_no)
     for index in range(pairs):
         store.append_message(conversation_id, role=MSG_ROLE_USER, content=f"问题 {index}")
-        store.append_message(
-            conversation_id, role=MSG_ROLE_ASSISTANT, content=f"回答 {index}"
-        )
+        store.append_message(conversation_id, role=MSG_ROLE_ASSISTANT, content=f"回答 {index}")
     return conversation_no, conversation_id
 
 
@@ -1066,11 +1043,7 @@ class TestMemoryCompression:
 
         session.expire_all()
         with patch.object(agent, "get_model_client", return_value=client):
-            list(
-                agent.stream_turn(
-                    conversation_no=conversation_no, principal=principal, user_text="继续"
-                )
-            )
+            list(agent.stream_turn(conversation_no=conversation_no, principal=principal, user_text="继续"))
 
         session.expire_all()
         conversation = session.get(Conversation, conversation_id)
@@ -1108,9 +1081,7 @@ class TestContextBudget:
             finish_reason="error",
         )
 
-        messages = store.to_llm_messages(
-            store.history(session, conversation_id), system_prompt="sys"
-        )
+        messages = store.to_llm_messages(store.history(session, conversation_id), system_prompt="sys")
         assistant = [m for m in messages if m.role == "assistant"][0]
         assert "退货率是 3.2%" in assistant.content
         assert "中断" in assistant.content, "被打断的回答没标注，模型会当成完整回答"
@@ -1124,9 +1095,7 @@ class TestContextBudget:
         conversation_id = conversation_id_of(session, created["conversation_no"])
         store.append_message(conversation_id, role=MSG_ROLE_ASSISTANT, content="退货率是 3.2%")
 
-        messages = store.to_llm_messages(
-            store.history(session, conversation_id), system_prompt="sys"
-        )
+        messages = store.to_llm_messages(store.history(session, conversation_id), system_prompt="sys")
         assert messages[1].content == "退货率是 3.2%"
 
     def _seed_tool_result(self, session, *, filler: int, big: str = "数据" * 400):  # noqa: ANN001
@@ -1251,12 +1220,8 @@ class TestLongTermMemory:
         from fashionops.chat import longterm
 
         uid = self._make_user(session)
-        longterm.remember_tool(
-            user_id=uid, username="z", arguments={"topic": "渠道偏好", "content": "只看抖音渠道"}
-        )
-        longterm.remember_tool(
-            user_id=uid, username="z", arguments={"topic": "渠道偏好", "content": "抖音和淘宝都看"}
-        )
+        longterm.remember_tool(user_id=uid, username="z", arguments={"topic": "渠道偏好", "content": "只看抖音渠道"})
+        longterm.remember_tool(user_id=uid, username="z", arguments={"topic": "渠道偏好", "content": "抖音和淘宝都看"})
 
         session.expire_all()
         items = longterm.list_for_user(uid)
@@ -1268,9 +1233,7 @@ class TestLongTermMemory:
         from fashionops.chat import longterm
 
         uid = self._make_user(session)
-        longterm.remember_tool(
-            user_id=uid, username="z", arguments={"topic": "渠道偏好", "content": "只看抖音渠道"}
-        )
+        longterm.remember_tool(user_id=uid, username="z", arguments={"topic": "渠道偏好", "content": "只看抖音渠道"})
         assert longterm.forget(user_id=uid, topic="渠道偏好") is True
         session.expire_all()
         assert longterm.list_for_user(uid) == []
@@ -1315,9 +1278,7 @@ class TestLongTermMemory:
         from fashionops.chat import longterm
 
         uid = self._make_user(session)
-        result = longterm.remember_tool(
-            user_id=uid, username="z", arguments={"topic": "", "content": "只看抖音"}
-        )
+        result = longterm.remember_tool(user_id=uid, username="z", arguments={"topic": "", "content": "只看抖音"})
         assert result["ok"] is False
         assert result["error"]["code"] == "INVALID_ARGUMENTS"
 
@@ -1352,11 +1313,7 @@ class TestLongTermMemory:
         principal = Principal(user_id=uid, username="z", is_superuser=True)
         session.expire_all()
         with patch.object(agent, "get_model_client", return_value=client):
-            list(
-                agent.stream_turn(
-                    conversation_no=no_a, principal=principal, user_text="记住：我只做抖音渠道"
-                )
-            )
+            list(agent.stream_turn(conversation_no=no_a, principal=principal, user_text="记住：我只做抖音渠道"))
 
         session.expire_all()
         assert longterm.list_for_user(uid), "A 会话里没记下记忆"
@@ -1367,11 +1324,7 @@ class TestLongTermMemory:
         client2 = MockModelClient()  # 无脚本 → 默认回一句纯文本，不调工具
         session.expire_all()
         with patch.object(agent, "get_model_client", return_value=client2):
-            list(
-                agent.stream_turn(
-                    conversation_no=no_b, principal=principal, user_text="今天退货率多少"
-                )
-            )
+            list(agent.stream_turn(conversation_no=no_b, principal=principal, user_text="今天退货率多少"))
 
         system = client2.calls[-1][0]
         assert system.role == "system"
@@ -1406,18 +1359,12 @@ class TestMemoryAPI:
 
         uid_z = self._make_user(session, "z")
         uid_w = self._make_user(session, "w")
-        longterm.remember_tool(
-            user_id=uid_z, username="z", arguments={"topic": "渠道", "content": "抖音"}
-        )
-        longterm.remember_tool(
-            user_id=uid_w, username="w", arguments={"topic": "渠道", "content": "淘宝"}
-        )
+        longterm.remember_tool(user_id=uid_z, username="z", arguments={"topic": "渠道", "content": "抖音"})
+        longterm.remember_tool(user_id=uid_w, username="w", arguments={"topic": "渠道", "content": "淘宝"})
 
         # 这里**直接调函数**（不走 FastAPI），所以查询参数要显式传 ——
         # 不传的话拿到的是 Query(...) 这个默认值对象而不是数字。
-        items = list_my_memories(
-            principal=Principal(user_id=uid_z, username="z"), session=session, limit=200
-        )["items"]
+        items = list_my_memories(principal=Principal(user_id=uid_z, username="z"), session=session, limit=200)["items"]
         assert [i["content"] for i in items] == ["抖音"]
 
     def test_cannot_delete_someone_elses_memory(self, session):  # noqa: ANN001
@@ -1429,9 +1376,7 @@ class TestMemoryAPI:
 
         uid_z = self._make_user(session, "z")
         uid_w = self._make_user(session, "w")
-        longterm.remember_tool(
-            user_id=uid_w, username="w", arguments={"topic": "渠道", "content": "淘宝"}
-        )
+        longterm.remember_tool(user_id=uid_w, username="w", arguments={"topic": "渠道", "content": "淘宝"})
         wid = longterm.list_for_user(uid_w)[0]["id"]
 
         # z 删 w 的 → 404（不能越权删别人的数据；memory id 可枚举，漏校验就是洞）
@@ -1515,9 +1460,7 @@ class TestConversationArchive:
         principal = Principal(user_id=uid, username="z", is_superuser=True)
 
         # 同上：直接调函数，新加的 offset 要显式传
-        result = list_endpoint(
-            principal=principal, session=session, limit=50, offset=0, status=None
-        )
+        result = list_endpoint(principal=principal, session=session, limit=50, offset=0, status=None)
         nos = [i["conversation_no"] for i in result["items"]]
         assert no not in nos
 
@@ -1530,15 +1473,11 @@ class TestConversationArchive:
         no = self._conv(session, uid)
         principal = Principal(user_id=uid, username="z", is_superuser=True)
 
-        archived = archive_conversation(
-            conversation_no=no, request=None, principal=principal, session=session
-        )
+        archived = archive_conversation(conversation_no=no, request=None, principal=principal, session=session)
         assert archived["ok"] is True
         assert archived["status"] == CONVERSATION_STATUS_ARCHIVED
 
-        restored = unarchive_conversation(
-            conversation_no=no, request=None, principal=principal, session=session
-        )
+        restored = unarchive_conversation(conversation_no=no, request=None, principal=principal, session=session)
         assert restored["status"] == "active"
 
     def test_cannot_archive_someone_elses_conversation(self, session):  # noqa: ANN001

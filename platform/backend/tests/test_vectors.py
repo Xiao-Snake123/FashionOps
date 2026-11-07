@@ -209,9 +209,7 @@ class TestContract:
                 VectorRecord(id="3", vector=_unit(DIM, 0), payload={"cat": "尺码"}),
             ],
         )
-        hits = store.search(
-            COLLECTION, _unit(DIM, 0), limit=5, filter=Filter(any_of={"cat": ["退货", "物流"]})
-        )
+        hits = store.search(COLLECTION, _unit(DIM, 0), limit=5, filter=Filter(any_of={"cat": ["退货", "物流"]}))
         assert sorted(h.id for h in hits) == ["1", "2"]
 
     def test_filter_must_not(self, store):  # noqa: ANN001
@@ -318,9 +316,7 @@ class TestContract:
             store.ensure_collection(COLLECTION, dimension=DIM * 2)
 
     def test_ensure_collection_is_idempotent(self, store):  # noqa: ANN001
-        assert store.ensure_collection(COLLECTION, dimension=DIM) is False, (
-            "已存在的 collection 不该报告为'新建了'"
-        )
+        assert store.ensure_collection(COLLECTION, dimension=DIM) is False, "已存在的 collection 不该报告为'新建了'"
 
     def test_ties_are_deterministic(self, store):  # noqa: ANN001
         """同分记录的返回顺序必须**稳定**。
@@ -328,10 +324,7 @@ class TestContract:
         不稳定的话，同一份数据两次运行会给出不同排序，
         测试变成偶发失败，最后被人加 skip 关掉 —— 而真正的问题还在。
         """
-        records = [
-            VectorRecord(id=f"tie-{i}", vector=_unit(DIM, 0), payload={PAYLOAD_TEXT: f"t{i}"})
-            for i in range(5)
-        ]
+        records = [VectorRecord(id=f"tie-{i}", vector=_unit(DIM, 0), payload={PAYLOAD_TEXT: f"t{i}"}) for i in range(5)]
         store.upsert(COLLECTION, records)
 
         first = [h.id for h in store.search(COLLECTION, _unit(DIM, 0), limit=5)]

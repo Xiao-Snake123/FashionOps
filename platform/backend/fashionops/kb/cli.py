@@ -41,9 +41,7 @@ def cmd_index(args: Namespace) -> int:
     print(f"维度    : {embedder.dimension}（{embedder.model_name}）")
     print()
 
-    stats = build_index(
-        store=store, embedder=embedder, settings=settings, rebuild=args.rebuild
-    )
+    stats = build_index(store=store, embedder=embedder, settings=settings, rebuild=args.rebuild)
     print(stats.summary())
     print()
     print("完成。")

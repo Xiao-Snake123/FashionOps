@@ -52,9 +52,7 @@ def _check_db(session: Session) -> DependencyStatus:
         latency = (time.perf_counter() - started) * 1000
         settings = get_settings()
         backend = "SQLite（降级）" if settings.is_sqlite else "MySQL 8"
-        return DependencyStatus(
-            name="database", ok=True, detail=backend, latency_ms=round(latency, 2)
-        )
+        return DependencyStatus(name="database", ok=True, detail=backend, latency_ms=round(latency, 2))
     except Exception as exc:  # noqa: BLE001 - 探活接口要吞掉所有异常
         return DependencyStatus(name="database", ok=False, detail=f"{type(exc).__name__}: {exc}")
 
@@ -72,9 +70,7 @@ def _check_redis(settings: Settings) -> DependencyStatus:
         client.ping()
         server_version = client.info("server").get("redis_version", "?")
         latency = (time.perf_counter() - started) * 1000
-        return DependencyStatus(
-            name="redis", ok=True, detail=f"Redis {server_version}", latency_ms=round(latency, 2)
-        )
+        return DependencyStatus(name="redis", ok=True, detail=f"Redis {server_version}", latency_ms=round(latency, 2))
     except Exception as exc:  # noqa: BLE001
         return DependencyStatus(name="redis", ok=False, detail=f"{type(exc).__name__}: {exc}")
 
@@ -123,9 +119,7 @@ def _check_qdrant(settings: Settings) -> DependencyStatus:
             store.close()
 
         latency = (time.perf_counter() - started) * 1000
-        return DependencyStatus(
-            name="qdrant", ok=True, detail=detail, latency_ms=round(latency, 2)
-        )
+        return DependencyStatus(name="qdrant", ok=True, detail=detail, latency_ms=round(latency, 2))
     except Exception as exc:  # noqa: BLE001
         # 把地址一起带上：只说“Qdrant 不可用”对排查毫无帮助。
         # 我们真踩过：系统代理把请求拦成 502，而日志里没有地址，
@@ -199,11 +193,7 @@ def summary(session: Session = Depends(get_db)) -> SummaryResponse:
     )
 
     # ---- 库存告急：取每个 SKU 最新一条流水的 quantity_after ----
-    latest = (
-        select(Inventory.sku_id, func.max(Inventory.occurred_at).label("ts"))
-        .group_by(Inventory.sku_id)
-        .subquery()
-    )
+    latest = select(Inventory.sku_id, func.max(Inventory.occurred_at).label("ts")).group_by(Inventory.sku_id).subquery()
     stockout = scalar(
         select(func.count())
         .select_from(Inventory)
@@ -222,9 +212,7 @@ def summary(session: Session = Depends(get_db)) -> SummaryResponse:
         open_tickets=scalar(
             select(func.count()).select_from(Ticket).where(Ticket.status.in_(("open", "processing", "waiting")))
         ),
-        escalated_tickets=scalar(
-            select(func.count()).select_from(Ticket).where(Ticket.escalated.is_(True))
-        ),
+        escalated_tickets=scalar(select(func.count()).select_from(Ticket).where(Ticket.escalated.is_(True))),
         stockout_skus=stockout,
         running_tasks=scalar(select(func.count()).select_from(Task).where(Task.status == "running")),
         failed_tasks=scalar(select(func.count()).select_from(Task).where(Task.status == "failed")),

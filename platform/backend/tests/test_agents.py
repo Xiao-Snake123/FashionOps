@@ -48,8 +48,6 @@ class TestRunContext:
         assert not hasattr(ctx, "to_dict")
 
     def test_repr_is_readable(self):
-        ctx = RunContext(
-            gateway=None, model=None, actor="agent:service", scopes=frozenset({"erp:read"})
-        )
+        ctx = RunContext(gateway=None, model=None, actor="agent:service", scopes=frozenset({"erp:read"}))
         assert "agent:service" in repr(ctx)
         assert "erp:read" in repr(ctx)

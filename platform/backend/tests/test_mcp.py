@@ -20,6 +20,7 @@ MCP 是平台**第一个对外开放的入口**（外部 Agent 可以调我们�
 这和 `docs/06` 里记的 MySQL REPEATABLE READ 那一条是同一类问题：
 **跨会话可见性**。SQLite 下表现为"另一个连接看不见未提交的行"。
 """
+
 from __future__ import annotations
 
 from datetime import timedelta
@@ -257,9 +258,7 @@ class TestCredentials:
         这是防"用 key 提权"的关键：给 key 塞一个用户本人没有的作用域，
         最终拿到的也不该包含它。
         """
-        raw, _row = _issue(
-            session, operator, name="试图提权", scopes=["erp:read", "mail:send"]
-        )
+        raw, _row = _issue(session, operator, name="试图提权", scopes=["erp:read", "mail:send"])
         identity, reason = auth.resolve(session, raw)
         assert identity is not None, reason
         assert "erp:read" in identity.scopes
@@ -340,9 +339,7 @@ class TestHandlers:
         from mcp.types import CallToolRequestParams
 
         monkeypatch.setenv(auth.ENV_API_KEY, erp_only_key)
-        params = CallToolRequestParams(
-            name="erp.query_inventory", arguments={"sku_codes": ["SKU00042"]}
-        )
+        params = CallToolRequestParams(name="erp.query_inventory", arguments={"sku_codes": ["SKU00042"]})
         result = await server.handle_call_tool(None, params)
         assert result.is_error is False
 
@@ -423,9 +420,7 @@ class TestApprovalGateForExternalCallers:
         assert _SAFE_RECIPIENT in payload["preview"]
 
     def test_read_tool_is_never_gated(self, mail_key):  # noqa: ANN001
-        payload = server._call_tool_sync(
-            "erp.query_inventory", {"sku_codes": ["SKU00042"]}, raw_key=mail_key
-        )
+        payload = server._call_tool_sync("erp.query_inventory", {"sku_codes": ["SKU00042"]}, raw_key=mail_key)
         assert payload["ok"] is True
         assert "needs_approval" not in payload
 
@@ -444,9 +439,7 @@ class TestApprovalGateForExternalCallers:
 
     def test_malformed_write_is_rejected_before_the_gate(self, mail_key):  # noqa: ANN001
         """**本组最重要的一条**：参数不合法 → INVALID_ARGUMENTS，且不弹审批卡。"""
-        payload = server._call_tool_sync(
-            "mail.send", {"to_addrs": "不是数组"}, raw_key=mail_key
-        )
+        payload = server._call_tool_sync("mail.send", {"to_addrs": "不是数组"}, raw_key=mail_key)
 
         assert payload["ok"] is False
         assert "needs_approval" not in payload, "坏参数不该占用人的注意力"

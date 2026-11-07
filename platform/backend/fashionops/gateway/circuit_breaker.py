@@ -165,9 +165,7 @@ class RedisCircuitBreaker:
 
         # 冷却期已过 —— 抢探测名额。抢不到说明已经有一个探测请求在飞了，
         # 继续快速失败，不要一窝蜂涌上去。
-        got_probe = client.set(
-            self._k_probe(key), str(now_ms), nx=True, px=self.probe_timeout_s * 1000
-        )
+        got_probe = client.set(self._k_probe(key), str(now_ms), nx=True, px=self.probe_timeout_s * 1000)
         if got_probe:
             return BreakerDecision(True, BreakerState.HALF_OPEN, fails, self.threshold, backend=self.backend)
 
@@ -203,8 +201,12 @@ class RedisCircuitBreaker:
                 px=(self.cooldown_s * 2 + 60) * 1000,
             )
             return BreakerDecision(
-                False, BreakerState.OPEN, self.threshold, self.threshold,
-                retry_after_s=float(self.cooldown_s), backend=self.backend,
+                False,
+                BreakerState.OPEN,
+                self.threshold,
+                self.threshold,
+                retry_after_s=float(self.cooldown_s),
+                backend=self.backend,
             )
 
         fails = client.incr(self._k_fails(key))
@@ -218,8 +220,12 @@ class RedisCircuitBreaker:
                 px=(self.cooldown_s * 2 + 60) * 1000,
             )
             return BreakerDecision(
-                False, BreakerState.OPEN, fails, self.threshold,
-                retry_after_s=float(self.cooldown_s), backend=self.backend,
+                False,
+                BreakerState.OPEN,
+                fails,
+                self.threshold,
+                retry_after_s=float(self.cooldown_s),
+                backend=self.backend,
             )
 
         return BreakerDecision(True, BreakerState.CLOSED, fails, self.threshold, backend=self.backend)
@@ -244,9 +250,7 @@ class RedisCircuitBreaker:
         }
 
     def reset(self, key: str) -> None:
-        self._get_client().delete(
-            self._k_open_until(key), self._k_fails(key), self._k_probe(key)
-        )
+        self._get_client().delete(self._k_open_until(key), self._k_fails(key), self._k_probe(key))
 
 
 # ---------------------------------------------------------------------------
@@ -292,14 +296,16 @@ class MemoryCircuitBreaker:
                 state.fails_expire_at = 0.0
 
             if state.open_until == 0.0:
-                return BreakerDecision(
-                    True, BreakerState.CLOSED, state.failures, self.threshold, backend=self.backend
-                )
+                return BreakerDecision(True, BreakerState.CLOSED, state.failures, self.threshold, backend=self.backend)
 
             if now < state.open_until:
                 return BreakerDecision(
-                    False, BreakerState.OPEN, state.failures, self.threshold,
-                    retry_after_s=state.open_until - now, backend=self.backend,
+                    False,
+                    BreakerState.OPEN,
+                    state.failures,
+                    self.threshold,
+                    retry_after_s=state.open_until - now,
+                    backend=self.backend,
                 )
 
             if state.probe_until <= now:
@@ -309,8 +315,12 @@ class MemoryCircuitBreaker:
                 )
 
             return BreakerDecision(
-                False, BreakerState.OPEN, state.failures, self.threshold,
-                retry_after_s=state.probe_until - now, backend=self.backend,
+                False,
+                BreakerState.OPEN,
+                state.failures,
+                self.threshold,
+                retry_after_s=state.probe_until - now,
+                backend=self.backend,
             )
 
     def record_success(self, key: str) -> None:
@@ -326,8 +336,12 @@ class MemoryCircuitBreaker:
                 state.probe_until = 0.0
                 state.open_until = now + self.cooldown_s
                 return BreakerDecision(
-                    False, BreakerState.OPEN, state.failures, self.threshold,
-                    retry_after_s=float(self.cooldown_s), backend=self.backend,
+                    False,
+                    BreakerState.OPEN,
+                    state.failures,
+                    self.threshold,
+                    retry_after_s=float(self.cooldown_s),
+                    backend=self.backend,
                 )
 
             if state.fails_expire_at and now >= state.fails_expire_at:
@@ -338,21 +352,22 @@ class MemoryCircuitBreaker:
             if state.failures >= self.threshold:
                 state.open_until = now + self.cooldown_s
                 return BreakerDecision(
-                    False, BreakerState.OPEN, state.failures, self.threshold,
-                    retry_after_s=float(self.cooldown_s), backend=self.backend,
+                    False,
+                    BreakerState.OPEN,
+                    state.failures,
+                    self.threshold,
+                    retry_after_s=float(self.cooldown_s),
+                    backend=self.backend,
                 )
 
-            return BreakerDecision(
-                True, BreakerState.CLOSED, state.failures, self.threshold, backend=self.backend
-            )
+            return BreakerDecision(True, BreakerState.CLOSED, state.failures, self.threshold, backend=self.backend)
 
     def snapshot(self, key: str) -> dict:
         now = time.monotonic()
         with self._lock:
             state = self._states.get(key)
             if state is None:
-                return {"key": key, "state": "closed", "failures": 0,
-                        "threshold": self.threshold, "retry_after_s": 0.0}
+                return {"key": key, "state": "closed", "failures": 0, "threshold": self.threshold, "retry_after_s": 0.0}
             if state.open_until > now:
                 st = BreakerState.OPEN
             elif state.probe_until > now:

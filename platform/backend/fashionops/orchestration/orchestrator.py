@@ -84,9 +84,7 @@ def run_resume(
 ) -> None:
     """审批结论回来后，把结果喂回同一 DeerFlow 线程继续这一轮。"""
     try:
-        asyncio.run(
-            _arun_resume(conversation, setup, approval_no, approved, principal, payload, tool_message, events)
-        )
+        asyncio.run(_arun_resume(conversation, setup, approval_no, approved, principal, payload, tool_message, events))
     except Exception as exc:  # noqa: BLE001
         logger.exception("DeerFlow run_resume 失败")
         events.put({"type": "error", "detail": f"{type(exc).__name__}: {exc}"})
@@ -243,9 +241,7 @@ def _handle_value_message(
             tool_ok=bool(payload.get("ok")),
         )
         events.put({"type": "message", "message": tool_message})
-        events.put(
-            {"type": "tool_result", "name": name, "ok": bool(payload.get("ok")), "message": tool_message}
-        )
+        events.put({"type": "tool_result", "name": name, "ok": bool(payload.get("ok")), "message": tool_message})
         if payload.get("needs_approval"):
             approval = store.create_approval(
                 conversation_id=conversation_id,

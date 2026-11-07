@@ -15,6 +15,7 @@ calendar）**接入**进来，再注册进工具网关 —— 于是外部能力
   平台的 `ToolSpec`，handler 代理转发到该连接。schema 直接用服务器给的那份，
   **不重写参数模型**（重写必然漂移）。
 """
+
 from __future__ import annotations
 
 from fashionops.mcp_client.bridge import McpToolSpec, register_server_tools

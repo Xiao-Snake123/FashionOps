@@ -26,6 +26,7 @@
 `authenticate()` 里含失败计数、锁定、惰性解锁、哈希参数升级 ——
 这些状态全在库里。mock 掉等于只测了一条 happy path。
 """
+
 from __future__ import annotations
 
 from datetime import timedelta
@@ -193,9 +194,7 @@ class TestPasswords:
 class TestTokens:
     @pytest.fixture
     def tokens(self) -> TokenService:
-        return TokenService(
-            secret="x" * 48, access_minutes=30, refresh_days=14, issuer="fashionops"
-        )
+        return TokenService(secret="x" * 48, access_minutes=30, refresh_days=14, issuer="fashionops")
 
     def test_roundtrip(self, tokens):
         pair = tokens.create_pair(user_id=7, username="zhang")
@@ -535,9 +534,7 @@ class TestLoginFlow:
 
         for _ in range(5):
             with pytest.raises(service.AuthError):
-                service.login(
-                    session, username="zhang", password="wrong", tokens=tokens, max_failures=5
-                )
+                service.login(session, username="zhang", password="wrong", tokens=tokens, max_failures=5)
 
         session.refresh(user)
         assert user.status == USER_STATUS_LOCKED
@@ -609,9 +606,7 @@ class TestLoginFlow:
         make_user(session, "zhang")
         session.commit()
         tokens = TokenService(secret="s" * 48)
-        user, _ = service.login(
-            session, username="zhang", password=PASSWORD, tokens=tokens, ip="10.0.0.9"
-        )
+        user, _ = service.login(session, username="zhang", password=PASSWORD, tokens=tokens, ip="10.0.0.9")
         assert user.last_login_ip == "10.0.0.9"
         assert user.last_login_at is not None
 
@@ -634,9 +629,7 @@ class TestRefreshRotation:
 
         from fashionops.db.models_identity import RefreshToken
 
-        old = session.scalar(
-            select(RefreshToken).where(RefreshToken.token_hash == hash_token(pair.refresh_token))
-        )
+        old = session.scalar(select(RefreshToken).where(RefreshToken.token_hash == hash_token(pair.refresh_token)))
         assert old.revoked_at is not None
         assert old.replaced_by_id is not None, "没有指向新的那条，重放检测就做不了"
 
@@ -698,9 +691,7 @@ class TestRefreshRotation:
         session, _, _, _ = logged_in
         forged = TokenService(secret="q" * 48).create_pair(user_id=1, username="zhang")
         with pytest.raises(service.AuthError) as excinfo:
-            service.refresh(
-                session, refresh_token=forged.refresh_token, tokens=TokenService(secret="s" * 48)
-            )
+            service.refresh(session, refresh_token=forged.refresh_token, tokens=TokenService(secret="s" * 48))
         assert excinfo.value.reason.startswith("token:")
 
 
@@ -708,9 +699,7 @@ class TestRefreshRotation:
 # 5. 权限向下传导（防越权的核心）
 # ===========================================================================
 class TestEffectiveScopes:
-    AGENT = frozenset(
-        {"erp:read", "ecom:read", "ad:read", "kb:read", "asset:write", "mail:send"}
-    )
+    AGENT = frozenset({"erp:read", "ecom:read", "ad:read", "kb:read", "asset:write", "mail:send"})
 
     def test_intersection_blocks_escalation(self):
         """**整个 RBAC 里唯一真正防住越权的地方。**
@@ -796,9 +785,7 @@ class TestHttpAuth:
         from conftest import create_admin
 
         username, password = create_admin(db)
-        resp = client.post(
-            "/api/v1/auth/login", json={"username": username, "password": password}
-        )
+        resp = client.post("/api/v1/auth/login", json={"username": username, "password": password})
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert body["token_type"] == "bearer"
@@ -813,9 +800,7 @@ class TestHttpAuth:
         from conftest import create_admin
 
         username, _ = create_admin(db)
-        resp = client.post(
-            "/api/v1/auth/login", json={"username": username, "password": "definitely-wrong"}
-        )
+        resp = client.post("/api/v1/auth/login", json={"username": username, "password": "definitely-wrong"})
         assert resp.status_code == 401
 
     def test_401_and_403_are_distinguished(self, client, db):
@@ -827,20 +812,14 @@ class TestHttpAuth:
         from conftest import login
 
         with Session(db) as session:
-            service.create_user(
-                session, username="viewer", password=PASSWORD, roles=(ROLE_VIEWER,)
-            )
+            service.create_user(session, username="viewer", password=PASSWORD, roles=(ROLE_VIEWER,))
             session.commit()
         viewer_headers = login(client, "viewer", PASSWORD)
 
         # 能读
-        assert (
-            client.get("/api/v1/products?page_size=1", headers=viewer_headers).status_code == 200
-        )
+        assert client.get("/api/v1/products?page_size=1", headers=viewer_headers).status_code == 200
         # 不能提交任务 → 403（已登录但没权限）
-        resp = client.post(
-            "/api/v1/tasks", json={"user_request": "出份报表"}, headers=viewer_headers
-        )
+        resp = client.post("/api/v1/tasks", json={"user_request": "出份报表"}, headers=viewer_headers)
         assert resp.status_code == 403, resp.text
         # 没带令牌 → 401
         assert client.post("/api/v1/tasks", json={"user_request": "出份报表"}).status_code == 401
@@ -875,9 +854,7 @@ class TestHttpAuth:
         from conftest import login
 
         with Session(db) as session:
-            service.create_user(
-                session, username="viewer2", password=PASSWORD, roles=(ROLE_VIEWER,)
-            )
+            service.create_user(session, username="viewer2", password=PASSWORD, roles=(ROLE_VIEWER,))
             session.commit()
         headers = login(client, "viewer2", PASSWORD)
 
@@ -888,28 +865,20 @@ class TestHttpAuth:
         from conftest import create_admin
 
         username, password = create_admin(db)
-        first = client.post(
-            "/api/v1/auth/login", json={"username": username, "password": password}
-        ).json()
-        resp = client.post(
-            "/api/v1/auth/refresh", json={"refresh_token": first["refresh_token"]}
-        )
+        first = client.post("/api/v1/auth/login", json={"username": username, "password": password}).json()
+        resp = client.post("/api/v1/auth/refresh", json={"refresh_token": first["refresh_token"]})
         assert resp.status_code == 200, resp.text
         assert resp.json()["refresh_token"] != first["refresh_token"]
 
         # 旧的那个再用一次 → 重放检测，401
-        again = client.post(
-            "/api/v1/auth/refresh", json={"refresh_token": first["refresh_token"]}
-        )
+        again = client.post("/api/v1/auth/refresh", json={"refresh_token": first["refresh_token"]})
         assert again.status_code == 401
 
     def test_logout_makes_refresh_useless(self, client, db):
         from conftest import create_admin
 
         username, password = create_admin(db)
-        tokens = client.post(
-            "/api/v1/auth/login", json={"username": username, "password": password}
-        ).json()
+        tokens = client.post("/api/v1/auth/login", json={"username": username, "password": password}).json()
         headers = {"Authorization": f"Bearer {tokens['access_token']}"}
 
         resp = client.post(
@@ -919,9 +888,7 @@ class TestHttpAuth:
         )
         assert resp.status_code == 200 and resp.json()["revoked"] is True
 
-        after = client.post(
-            "/api/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}
-        )
+        after = client.post("/api/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]})
         assert after.status_code == 401
 
     def test_change_password_needs_correct_old_password(self, client, db):

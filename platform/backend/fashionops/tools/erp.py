@@ -73,11 +73,7 @@ def _latest_inventory_subquery():  # noqa: ANN202
     而不是把流水里所有正负变动加起来。原因：流水里可能有盘点调整，
     直接求和会把"系统记录被纠正过"这件事算错。
     """
-    return (
-        select(Inventory.sku_id, func.max(Inventory.occurred_at).label("ts"))
-        .group_by(Inventory.sku_id)
-        .subquery()
-    )
+    return select(Inventory.sku_id, func.max(Inventory.occurred_at).label("ts")).group_by(Inventory.sku_id).subquery()
 
 
 def _fetch_candidates(category: str | None, season: str | None, limit: int) -> list[dict[str, Any]]:
@@ -130,9 +126,7 @@ def _fetch_candidates(category: str | None, season: str | None, limit: int) -> l
         for product, stock, sold_30d, competitor_avg in session.execute(stmt).all():
             cost = _to_decimal(product.cost_price)
             price = _to_decimal(product.list_price)
-            margin_rate = (
-                float((price - cost) / price) if price and cost and price > 0 else None
-            )
+            margin_rate = float((price - cost) / price) if price and cost and price > 0 else None
             rows.append(
                 {
                     "product_id": product.id,
@@ -149,9 +143,7 @@ def _fetch_candidates(category: str | None, season: str | None, limit: int) -> l
                     "rating": float(product.rating) if product.rating is not None else None,
                     "available_stock": int(stock or 0),
                     "sold_30d": int(sold_30d or 0),
-                    "competitor_avg_price": (
-                        float(v) if (v := _to_decimal(competitor_avg)) is not None else None
-                    ),
+                    "competitor_avg_price": (float(v) if (v := _to_decimal(competitor_avg)) is not None else None),
                 }
             )
     return rows
@@ -179,9 +171,7 @@ def _fetch_inventory(sku_codes: list[str]) -> list[dict[str, Any]]:
         ]
 
 
-def _fetch_sales_summary(
-    days: int, category: str | None, group_by: str, top_n: int
-) -> list[dict[str, Any]]:
+def _fetch_sales_summary(days: int, category: str | None, group_by: str, top_n: int) -> list[dict[str, Any]]:
     """按维度聚合订单。
 
     **退货率按订单数算而不是按金额算**。按金额算会被大额订单带偏：
@@ -205,12 +195,10 @@ def _fetch_sales_summary(
             func.count().label("order_count"),
             func.sum(Order.actual_amount).label("gmv"),
             func.count(func.distinct(Order.buyer_nick)).label("customer_count"),
-            func.sum(
-                case((Order.status.in_(("refunded", "refunding")), Order.actual_amount), else_=0)
-            ).label("refund_amount"),
-            func.sum(
-                case((Order.status.in_(("refunded", "refunding")), 1), else_=0)
-            ).label("refund_count"),
+            func.sum(case((Order.status.in_(("refunded", "refunding")), Order.actual_amount), else_=0)).label(
+                "refund_amount"
+            ),
+            func.sum(case((Order.status.in_(("refunded", "refunding")), 1), else_=0)).label("refund_count"),
         )
         .select_from(Order)
         .where(Order.paid_at >= since, Order.status != "cancelled")
@@ -221,14 +209,14 @@ def _fetch_sales_summary(
 
     if group_by == "category":
         # outer join：订单的 sku_id 在商品被删时会置空，inner join 会把这些单子漏掉
-        stmt = stmt.outerjoin(SKU, SKU.id == Order.sku_id).outerjoin(
-            Product, Product.id == SKU.product_id
-        )
+        stmt = stmt.outerjoin(SKU, SKU.id == Order.sku_id).outerjoin(Product, Product.id == SKU.product_id)
 
     if category and group_by != "category":
-        stmt = stmt.outerjoin(SKU, SKU.id == Order.sku_id).outerjoin(
-            Product, Product.id == SKU.product_id
-        ).where(Product.category == category)
+        stmt = (
+            stmt.outerjoin(SKU, SKU.id == Order.sku_id)
+            .outerjoin(Product, Product.id == SKU.product_id)
+            .where(Product.category == category)
+        )
     elif category:
         stmt = stmt.where(Product.category == category)
 
@@ -245,9 +233,7 @@ def _fetch_sales_summary(
                     "customer_count": int(customers or 0),
                     "gmv": float(gmv_d),
                     "refund_amount": float(refund_d),
-                    "avg_order_value": float(
-                        (gmv_d / orders).quantize(Decimal("0.01")) if orders else Decimal("0")
-                    ),
+                    "avg_order_value": float((gmv_d / orders).quantize(Decimal("0.01")) if orders else Decimal("0")),
                     "refund_count": int(refund_count or 0),
                     "return_rate": round(int(refund_count or 0) / orders, 4) if orders else 0.0,
                 }
@@ -275,9 +261,7 @@ def register(registry: ToolRegistry) -> None:
         tags=("products",),
         rate_limit_per_minute=60,
     )
-    def query_candidates(
-        category: str | None = None, season: str | None = None, limit: int = 50
-    ) -> dict[str, Any]:
+    def query_candidates(category: str | None = None, season: str | None = None, limit: int = 50) -> dict[str, Any]:
         rows = _fetch_candidates(category, season, limit)
         return {"count": len(rows), "candidates": rows}
 
@@ -297,8 +281,7 @@ def register(registry: ToolRegistry) -> None:
     @registry.tool(
         name="erp.query_sales_summary",
         description=(
-            "按类目 / 日期 / 渠道聚合销售数据，返回 GMV、订单数、客单价、"
-            "退款金额与退货率。用于经营分析与报表。"
+            "按类目 / 日期 / 渠道聚合销售数据，返回 GMV、订单数、客单价、退款金额与退货率。用于经营分析与报表。"
         ),
         args_model=SalesSummaryArgs,
         scopes=(Scope.ERP_READ,),

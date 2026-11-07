@@ -61,8 +61,10 @@ def _print_outcome(outcome: Any) -> None:
     if outcome.escalate_reason:
         print(f"  转人工原因: {outcome.escalate_reason}")
     print(f"  知识库依据: {outcome.cited_article_nos or '（无）'}")
-    print(f"  开销      : {outcome.steps} 轮 / {outcome.tool_calls} 次工具 / "
-          f"{outcome.tokens} tokens / ¥{outcome.cost} / {outcome.duration_ms}ms")
+    print(
+        f"  开销      : {outcome.steps} 轮 / {outcome.tool_calls} 次工具 / "
+        f"{outcome.tokens} tokens / ¥{outcome.cost} / {outcome.duration_ms}ms"
+    )
     if outcome.error:
         print(f"  错误      : {outcome.error}")
     print()
@@ -151,10 +153,7 @@ def cmd_handle_pending(args: Namespace) -> int:
 
     print()
     print("─" * 72)
-    print(
-        f"快车道 {fast} / Agent {agent} / 转人工 {escalated} / 失败 {failed} "
-        f"/ 合计 {tokens} tokens"
-    )
+    print(f"快车道 {fast} / Agent {agent} / 转人工 {escalated} / 失败 {failed} / 合计 {tokens} tokens")
     if args.dry_run:
         _warn("--dry-run：结果没有写回数据库")
     return 0
@@ -180,10 +179,7 @@ def cmd_eval(args: Namespace) -> int:
     print(f"  情绪准确率   : {report['sentiment_accuracy']}%")
     print(f"  **漏转**（危险）: {len(report['escalation_missed'])} 条 {report['escalation_missed'][:10]}")
     print(f"  多转（安全） : {len(report['escalation_over'])} 条")
-    print(
-        "  注：只统计**已处理**的。没处理过的还留着 seed 标注，"
-        "拿它算准确率等于自己对自己"
-    )
+    print("  注：只统计**已处理**的。没处理过的还留着 seed 标注，拿它算准确率等于自己对自己")
 
     if report["intent_misses"]:
         print()

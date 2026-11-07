@@ -69,9 +69,7 @@ MEMORY_KIND_FACT = "fact"
 #: 其它备忘（"这个客户很在意时效"这类）。不承诺可执行，只作背景。
 MEMORY_KIND_NOTE = "note"
 
-MEMORY_KINDS: frozenset[str] = frozenset(
-    {MEMORY_KIND_PREFERENCE, MEMORY_KIND_FACT, MEMORY_KIND_NOTE}
-)
+MEMORY_KINDS: frozenset[str] = frozenset({MEMORY_KIND_PREFERENCE, MEMORY_KIND_FACT, MEMORY_KIND_NOTE})
 
 #: ``topic`` 的长度上限。
 #: 它的作用是让模型**能稳定地复述同一个键**（"渠道偏好"每次都得写一样），
@@ -97,9 +95,7 @@ class AgentMemory(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
-    user_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     #: 用户名快照，理由见模块顶部
     username: Mapped[str] = mapped_column(String(64), default="")
 

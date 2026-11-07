@@ -101,25 +101,19 @@ class Product(Base):
 
     title: Mapped[str] = mapped_column(String(255))
     category: Mapped[str] = mapped_column(String(64), comment="一级类目：女装/男装/童装")
-    sub_category: Mapped[str | None] = mapped_column(
-        String(64), comment="二级类目：连衣裙/毛衣/风衣"
-    )
+    sub_category: Mapped[str | None] = mapped_column(String(64), comment="二级类目：连衣裙/毛衣/风衣")
     season: Mapped[str | None] = mapped_column(String(32), comment="春季/夏季/秋季/冬季/四季")
     brand: Mapped[str | None] = mapped_column(String(64))
 
     style_tags: Mapped[list | None] = mapped_column(JSON, comment="风格标签：法式/通勤/休闲/辣妹")
-    target_audience: Mapped[str | None] = mapped_column(
-        String(128), comment="目标人群：18-25 学生党"
-    )
+    target_audience: Mapped[str | None] = mapped_column(String(128), comment="目标人群：18-25 学生党")
     fabric: Mapped[str | None] = mapped_column(String(128), comment="面料成分")
 
     cost_price: Mapped[Decimal | None] = mapped_column(MONEY, comment="生产成本")
     list_price: Mapped[Decimal | None] = mapped_column(MONEY, comment="吊牌价")
     rating: Mapped[Decimal | None] = mapped_column(RATE, comment="站内评分，0~5")
 
-    status: Mapped[str] = mapped_column(
-        String(32), default="draft", comment="draft/ready/on_sale/off_shelf"
-    )
+    status: Mapped[str] = mapped_column(String(32), default="draft", comment="draft/ready/on_sale/off_shelf")
     launch_date: Mapped[date | None] = mapped_column(Date)
     description: Mapped[str | None] = mapped_column(Text)
     image_urls: Mapped[list | None] = mapped_column(JSON)
@@ -127,9 +121,7 @@ class Product(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
-    skus: Mapped[list[SKU]] = relationship(
-        back_populates="product", cascade="all, delete-orphan", lazy="selectin"
-    )
+    skus: Mapped[list[SKU]] = relationship(back_populates="product", cascade="all, delete-orphan", lazy="selectin")
 
 
 # ===========================================================================
@@ -149,9 +141,7 @@ class SKU(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    product_id: Mapped[int] = mapped_column(
-        ForeignKey("products.id", ondelete="CASCADE"), index=True
-    )
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), index=True)
     sku_code: Mapped[str] = mapped_column(String(64), unique=True, index=True)
 
     color: Mapped[str] = mapped_column(String(32))
@@ -228,9 +218,7 @@ class Order(Base):
     is_new_customer: Mapped[bool] = mapped_column(Boolean, default=True)
 
     sku_id: Mapped[int | None] = mapped_column(ForeignKey("skus.id", ondelete="SET NULL"))
-    product_title: Mapped[str | None] = mapped_column(
-        String(255), comment="下单时快照，商品改名后历史订单仍要显示原名"
-    )
+    product_title: Mapped[str | None] = mapped_column(String(255), comment="下单时快照，商品改名后历史订单仍要显示原名")
     quantity: Mapped[int] = mapped_column(Integer, default=1)
 
     unit_price: Mapped[Decimal] = mapped_column(MONEY)
@@ -243,9 +231,7 @@ class Order(Base):
         default="paid",
         comment="paid/shipped/completed/refunding/refunded/cancelled",
     )
-    channel: Mapped[str] = mapped_column(
-        String(64), default="自然流量", comment="自然流量/搜索/直播/广告/私域"
-    )
+    channel: Mapped[str] = mapped_column(String(64), default="自然流量", comment="自然流量/搜索/直播/广告/私域")
 
     province: Mapped[str | None] = mapped_column(String(32))
     city: Mapped[str | None] = mapped_column(String(32))
@@ -355,13 +341,9 @@ class KBArticle(Base):
     article_no: Mapped[str] = mapped_column(String(64), unique=True)
 
     title: Mapped[str] = mapped_column(String(255))
-    category: Mapped[str] = mapped_column(
-        String(64), comment="尺码/退换货/物流/材质/发票/优惠/支付"
-    )
+    category: Mapped[str] = mapped_column(String(64), comment="尺码/退换货/物流/材质/发票/优惠/支付")
     content: Mapped[str] = mapped_column(Text)
-    retrieval_text: Mapped[str | None] = mapped_column(
-        Text, comment="喂给 embedding 的文本（标题+关键词+正文摘要）"
-    )
+    retrieval_text: Mapped[str | None] = mapped_column(Text, comment="喂给 embedding 的文本（标题+关键词+正文摘要）")
     tags: Mapped[list | None] = mapped_column(JSON)
 
     version: Mapped[str] = mapped_column(String(16), default="v1")
@@ -397,23 +379,15 @@ class Ticket(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     ticket_no: Mapped[str] = mapped_column(String(64), unique=True, index=True)
 
-    channel: Mapped[str] = mapped_column(
-        String(32), default="mock", comment="douyin/taobao/wechat/phone"
-    )
+    channel: Mapped[str] = mapped_column(String(32), default="mock", comment="douyin/taobao/wechat/phone")
     customer_nick: Mapped[str | None] = mapped_column(String(64))
     order_no: Mapped[str | None] = mapped_column(String(64), index=True)
 
     subject: Mapped[str] = mapped_column(String(255))
     content: Mapped[str] = mapped_column(Text)
-    intent: Mapped[str | None] = mapped_column(
-        String(64), comment="退换货/尺码咨询/物流查询/质量投诉/发票/催发货"
-    )
-    sentiment: Mapped[str | None] = mapped_column(
-        String(16), comment="positive/neutral/negative/angry"
-    )
-    priority: Mapped[str] = mapped_column(
-        String(16), default="normal", comment="low/normal/high/urgent"
-    )
+    intent: Mapped[str | None] = mapped_column(String(64), comment="退换货/尺码咨询/物流查询/质量投诉/发票/催发货")
+    sentiment: Mapped[str | None] = mapped_column(String(16), comment="positive/neutral/negative/angry")
+    priority: Mapped[str] = mapped_column(String(16), default="normal", comment="low/normal/high/urgent")
 
     status: Mapped[str] = mapped_column(
         String(32), default="open", comment="open/processing/waiting/transferred/closed"
@@ -423,9 +397,7 @@ class Ticket(Base):
     escalated: Mapped[bool] = mapped_column(Boolean, default=False)
     escalate_reason: Mapped[str | None] = mapped_column(String(255))
     resolution: Mapped[str | None] = mapped_column(Text)
-    cited_article_nos: Mapped[list | None] = mapped_column(
-        JSON, comment="RAG 命中的知识库文章号，用于评估召回质量"
-    )
+    cited_article_nos: Mapped[list | None] = mapped_column(JSON, comment="RAG 命中的知识库文章号，用于评估召回质量")
     confidence: Mapped[Decimal | None] = mapped_column(RATIO, comment="Agent 自评置信度")
 
     first_response_seconds: Mapped[int | None] = mapped_column(Integer)
@@ -515,9 +487,7 @@ class Task(Base):
     thread_id: Mapped[str | None] = mapped_column(
         String(64), comment="LangGraph checkpoint 的 thread_id，默认等于 task_no"
     )
-    approval_payload: Mapped[dict | None] = mapped_column(
-        JSON, comment="HITL 中断时挂起的待确认内容"
-    )
+    approval_payload: Mapped[dict | None] = mapped_column(JSON, comment="HITL 中断时挂起的待确认内容")
 
     llm_calls: Mapped[int] = mapped_column(Integer, default=0)
     total_tokens: Mapped[int] = mapped_column(Integer, default=0)
@@ -525,9 +495,7 @@ class Task(Base):
 
     # ---- 发起人 ----
     #: 外键指向真实用户。**可空**：历史数据（seed 灌的演示任务）没有归属人。
-    created_by_id: Mapped[int | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"), index=True
-    )
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
     #: 用户名**快照**。
     #: 为什么不直接 join users 拿名字：用户被删/改名后，
     #: 历史任务上会显示成别人的名字或空白 —— 而"这个任务当时是谁交办的"
@@ -536,9 +504,7 @@ class Task(Base):
 
     # ---- 人工确认留痕（HITL 闸口存在的意义就在这里）----
     #: 谁批的。只记"任务被批准了"没有意义，必须能回答"**谁**批的"。
-    approved_by_id: Mapped[int | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL")
-    )
+    approved_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     approved_by: Mapped[str | None] = mapped_column(String(64))
     approved_at: Mapped[datetime | None] = mapped_column(DateTime)
     #: 驳回理由 / 审批备注
@@ -705,9 +671,7 @@ class AgentRun(Base):
 
     agent_name: Mapped[str] = mapped_column(String(64), index=True)
     node_name: Mapped[str | None] = mapped_column(String(64))
-    run_index: Mapped[int] = mapped_column(
-        Integer, default=1, comment="同一节点第几次执行（反思迭代会 +1）"
-    )
+    run_index: Mapped[int] = mapped_column(Integer, default=1, comment="同一节点第几次执行（反思迭代会 +1）")
 
     model: Mapped[str | None] = mapped_column(String(64))
     prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
@@ -716,9 +680,7 @@ class AgentRun(Base):
     cost: Mapped[Decimal] = mapped_column(COST, default=Decimal("0"), comment="人民币元")
 
     latency_ms: Mapped[int | None] = mapped_column(Integer)
-    status: Mapped[str] = mapped_column(
-        String(16), default="success", comment="success/error/timeout"
-    )
+    status: Mapped[str] = mapped_column(String(16), default="success", comment="success/error/timeout")
 
     tool_call_count: Mapped[int] = mapped_column(Integer, default=0)
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -750,9 +712,7 @@ class Asset(Base):
     task_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"))
     product_id: Mapped[int | None] = mapped_column(ForeignKey("products.id", ondelete="SET NULL"))
 
-    asset_type: Mapped[str] = mapped_column(
-        String(32), comment="image/video/report/spreadsheet/copywriting"
-    )
+    asset_type: Mapped[str] = mapped_column(String(32), comment="image/video/report/spreadsheet/copywriting")
     name: Mapped[str] = mapped_column(String(255))
 
     storage_backend: Mapped[str] = mapped_column(String(32), default="local", comment="local/minio")
@@ -764,15 +724,11 @@ class Asset(Base):
     height: Mapped[int | None] = mapped_column(Integer)
     duration_seconds: Mapped[Decimal | None] = mapped_column(Numeric(8, 2))
 
-    source: Mapped[str] = mapped_column(
-        String(32), default="generated", comment="generated/uploaded"
-    )
+    source: Mapped[str] = mapped_column(String(32), default="generated", comment="generated/uploaded")
     generator: Mapped[str | None] = mapped_column(String(64), comment="产出它的 Agent 名")
     prompt: Mapped[str | None] = mapped_column(Text, comment="生成用的原始 prompt，便于复现")
 
-    review_status: Mapped[str] = mapped_column(
-        String(32), default="pending", comment="pending/approved/rejected"
-    )
+    review_status: Mapped[str] = mapped_column(String(32), default="pending", comment="pending/approved/rejected")
     review_note: Mapped[str | None] = mapped_column(String(255))
     regenerate_count: Mapped[int] = mapped_column(Integer, default=0)
 
@@ -858,9 +814,7 @@ class EmailMessage(Base):
     message_no: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     task_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"))
 
-    direction: Mapped[str] = mapped_column(
-        String(8), default="outbound", comment="outbound/inbound"
-    )
+    direction: Mapped[str] = mapped_column(String(8), default="outbound", comment="outbound/inbound")
     to_addrs: Mapped[list | None] = mapped_column(JSON)
     cc_addrs: Mapped[list | None] = mapped_column(JSON)
     bcc_addrs: Mapped[list | None] = mapped_column(JSON)
@@ -887,9 +841,7 @@ class EmailMessage(Base):
     #: 这封信是**谁批准发出去的**。
     #: 邮件是对外且不可撤销的动作，事后被问"这封是谁让发的"时
     #: 必须能从库直接答出来，而不是去翻聊天记录。
-    approved_by_id: Mapped[int | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL")
-    )
+    approved_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     approved_by: Mapped[str | None] = mapped_column(String(64))
     approved_at: Mapped[datetime | None] = mapped_column(DateTime)
 
@@ -924,9 +876,7 @@ class AuditLog(Base):
     actor: Mapped[str] = mapped_column(String(64), comment="agent 名 / user / system")
     #: 发起这次调用的**人**。``actor`` 记的是"哪个 Agent"，
     #: 但排查时更常问的是"谁触发的"—— 一个 Agent 可能是被任何人的任务调起来的。
-    actor_user_id: Mapped[int | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"), index=True
-    )
+    actor_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
     #: 用户名**快照**。外键在用户被删时会置空，只留 ID 的话审计记录
     #: 就成了"某人干的" —— 合规上一文不值。
     #: 审计的铁律：它记录"当时发生了什么"，不能随后续变更而改变。
@@ -938,9 +888,7 @@ class AuditLog(Base):
     args_digest: Mapped[dict | None] = mapped_column(JSON, comment="脱敏后的入参快照")
     result_summary: Mapped[str | None] = mapped_column(String(512))
 
-    status: Mapped[str] = mapped_column(
-        String(16), default="success", comment="success/error/blocked"
-    )
+    status: Mapped[str] = mapped_column(String(16), default="success", comment="success/error/blocked")
     error_code: Mapped[str | None] = mapped_column(String(64))
     duration_ms: Mapped[int | None] = mapped_column(Integer)
     ip: Mapped[str | None] = mapped_column(String(64))

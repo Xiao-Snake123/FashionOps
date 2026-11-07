@@ -43,6 +43,7 @@ def _split_csv(raw: str | None) -> tuple[str, ...]:
     parts = re.split(r"[,\s]+", raw.strip())
     return tuple(p for p in parts if p)
 
+
 # 侧翼效应，但是必须的：只要有用到配置的地方，本地服务就得绕过系统代理。
 # 背景见 fashionops/net.py —— 不这么做的话，连本地 Qdrant 都会返回 502。
 ensure_localhost_bypasses_proxy()
@@ -90,14 +91,10 @@ class Settings(BaseSettings):
 
     # ---- 数据库 ----
     # 不配 db_host 就落到 SQLite 文件：跑单测、或先看界面时不需要 MySQL 在跑。
-    db_host: str | None = Field(
-        default=None, description="MySQL 地址。留空则自动用 SQLite 文件"
-    )
+    db_host: str | None = Field(default=None, description="MySQL 地址。留空则自动用 SQLite 文件")
     db_port: int = 3306
     db_user: str = "fashionops"
-    db_password: str | None = Field(
-        default=None, exclude=True, repr=False, description="由 init-mysql.ps1 写入 .env"
-    )
+    db_password: str | None = Field(default=None, exclude=True, repr=False, description="由 init-mysql.ps1 写入 .env")
     db_name: str = "fashionops"
     database_url: str | None = Field(
         default=None,
@@ -139,9 +136,7 @@ class Settings(BaseSettings):
     # 默认**复用 chat 的 provider 和 Key**：智谱等厂商同一个 Key 同时管
     # chat 和 embedding，再让用户配一份是多余的心智负担。
     # 需要混用（chat 用智谱、embedding 用本地 BGE）时才填下面这几个。
-    embedding_provider: str = Field(
-        default="", description="留空则跟随 ``model_provider``；可填 zhipu/qwen/local/mock"
-    )
+    embedding_provider: str = Field(default="", description="留空则跟随 ``model_provider``；可填 zhipu/qwen/local/mock")
     embedding_model: str = Field(
         default="embedding-2",
         description="智谱 embedding-2 是 1024 维（和 embedding_dim 对应）；OpenAI 用 text-embedding-3-small",
@@ -172,9 +167,7 @@ class Settings(BaseSettings):
         default="local",
         description="对象存储后端：``local``（本地文件系统）/ ``minio``（生产）",
     )
-    storage_dir: Path | None = Field(
-        default=None, description="本地存储根目录，留空则用 ``data_dir/storage``"
-    )
+    storage_dir: Path | None = Field(default=None, description="本地存储根目录，留空则用 ``data_dir/storage``")
 
     # ---- 缓存 / 会话状态 ----
     cache_backend: str = Field(
@@ -188,9 +181,7 @@ class Settings(BaseSettings):
         default="redis://127.0.0.1:6379/0",
         description="db0=任务状态，db1=限流计数，db2=业务缓存（见 deploy/redis/redis.conf 注释）",
     )
-    redis_key_prefix: str = Field(
-        default="fashionops", description="键前缀，避免和同机上其他项目抢 key"
-    )
+    redis_key_prefix: str = Field(default="fashionops", description="键前缀，避免和同机上其他项目抢 key")
     redis_socket_timeout: float = Field(default=5.0, description="Redis 读写超时秒数")
 
     # ---- 业务缓存（db2）----
@@ -216,8 +207,7 @@ class Settings(BaseSettings):
     no_proxy_extra: str | None = Field(
         default=None,
         description=(
-            "额外需要绕过系统代理的地址（逗号分隔）。回环地址已自动加入，"
-            "这里填内网域名。背景见 fashionops/net.py"
+            "额外需要绕过系统代理的地址（逗号分隔）。回环地址已自动加入，这里填内网域名。背景见 fashionops/net.py"
         ),
     )
 
@@ -232,9 +222,7 @@ class Settings(BaseSettings):
     model_api_key: str | None = Field(default=None, exclude=True, repr=False)
     model_base_url: str | None = None
     model_name: str = Field(default="deepseek-chat", description="主力模型")
-    model_name_fast: str = Field(
-        default="deepseek-chat", description="轻量模型（用于模型路由，降本）"
-    )
+    model_name_fast: str = Field(default="deepseek-chat", description="轻量模型（用于模型路由，降本）")
     model_temperature: float = 0.3
     model_timeout: float = Field(
         default=120.0,
@@ -254,12 +242,8 @@ class Settings(BaseSettings):
     )
 
     # ---- 外部系统（全部 Mock 占位）----
-    ecom_api_mode: str = Field(
-        default="mock", description="电商平台：``mock`` / ``real``（抖音小店 / 淘宝开放平台）"
-    )
-    ad_api_mode: str = Field(
-        default="mock", description="广告平台：``mock`` / ``real``（巨量引擎）"
-    )
+    ecom_api_mode: str = Field(default="mock", description="电商平台：``mock`` / ``real``（抖音小店 / 淘宝开放平台）")
+    ad_api_mode: str = Field(default="mock", description="广告平台：``mock`` / ``real``（巨量引擎）")
     erp_api_mode: str = Field(default="mock", description="ERP：``mock`` / ``real``")
 
     # ---- 邮件（通知 Agent）----
@@ -267,12 +251,8 @@ class Settings(BaseSettings):
     # 邮件发出去了就收不回来，所以这里的每一个默认值都选了"更安全的那个"：
     # 总开关默认关、dry_run 默认开、白名单默认空（空 = 禁发）。
     # 漏配的后果必须是"发不出去"，而不是"能发给任何人"。
-    mail_enabled: bool = Field(
-        default=False, description="邮件发送总开关。false 时 mail.send 一律拒绝"
-    )
-    mail_dry_run: bool = Field(
-        default=True, description="只记录不投递。开发期默认开，要真发必须显式关掉"
-    )
+    mail_enabled: bool = Field(default=False, description="邮件发送总开关。false 时 mail.send 一律拒绝")
+    mail_dry_run: bool = Field(default=True, description="只记录不投递。开发期默认开，要真发必须显式关掉")
     mail_from: str = Field(default="agent@fashionops.local", description="发件人地址")
     mail_send_allowlist: str = Field(
         default="",
@@ -281,16 +261,10 @@ class Settings(BaseSettings):
             "``@corp.com``（整个域）/ ``a@b.com``（精确）。**留空 = 禁止发送任何邮件**"
         ),
     )
-    mail_send_denylist: str = Field(
-        default="", description="收件人黑名单，逗号分隔。优先级高于白名单"
-    )
+    mail_send_denylist: str = Field(default="", description="收件人黑名单，逗号分隔。优先级高于白名单")
     mail_max_recipients: int = Field(default=10, description="单封邮件收件人上限（防群发）")
-    mail_rate_limit_per_minute: int = Field(
-        default=6, description="每收件人每分钟最多收几封。防模型陷入循环反复发"
-    )
-    mail_max_attachment_bytes: int = Field(
-        default=20 * 1024 * 1024, description="单个附件大小上限（字节）"
-    )
+    mail_rate_limit_per_minute: int = Field(default=6, description="每收件人每分钟最多收几封。防模型陷入循环反复发")
+    mail_max_attachment_bytes: int = Field(default=20 * 1024 * 1024, description="单个附件大小上限（字节）")
     mail_attachment_allowlist: str = Field(
         default=".xlsx,.pdf,.csv,.png,.jpg,.jpeg",
         description="允许外发的附件扩展名，逗号分隔。留空 = 不限制（不建议）",
@@ -329,16 +303,14 @@ class Settings(BaseSettings):
         description=(
             "JWT 签名密钥。**留空时启动会自动生成一个随机值并打 warning** ——"
             " 这样服务能起来（不会因为忘了配就起不来），但重启后所有 token 失效，"
-            "所以生产必须显式配。生成：python -c \"import secrets;print(secrets.token_urlsafe(48))\""
+            '所以生产必须显式配。生成：python -c "import secrets;print(secrets.token_urlsafe(48))"'
         ),
     )
     jwt_algorithm: str = Field(default="HS256", description="HS256（对称）够用；上 RS256 要配公私钥")
     access_token_minutes: int = Field(
         default=30, description="访问令牌有效期（分钟）。短一些是对的：它无状态、撤不回来"
     )
-    refresh_token_days: int = Field(
-        default=14, description="刷新令牌有效期（天）。它入库可撤销，所以可以长一些"
-    )
+    refresh_token_days: int = Field(default=14, description="刷新令牌有效期（天）。它入库可撤销，所以可以长一些")
 
     # ---- 登录安全 ----
     password_min_length: int = Field(default=10, description="密码最短长度")
@@ -346,9 +318,7 @@ class Settings(BaseSettings):
         default=2,
         description="至少要包含几类字符（小写/大写/数字/符号）。2 类兼顾安全和可用性",
     )
-    login_max_failures: int = Field(
-        default=5, description="连续登录失败几次后锁定账号。防在线暴力破解"
-    )
+    login_max_failures: int = Field(default=5, description="连续登录失败几次后锁定账号。防在线暴力破解")
     login_lock_minutes: int = Field(default=15, description="锁定时长（分钟）")
     login_rate_limit_per_minute: int = Field(
         default=20,
@@ -434,28 +404,20 @@ class Settings(BaseSettings):
     # 留成"能配但不用"而不是删掉：真接入时只需要填这四个值 + 一个 provider 实现，
     # 不用再改数据模型和前端流程。
     dingtalk_client_id: str = Field(default="", description="钉钉应用 AppKey")
-    dingtalk_client_secret: str | None = Field(
-        default=None, exclude=True, repr=False, description="钉钉应用 AppSecret"
-    )
+    dingtalk_client_secret: str | None = Field(default=None, exclude=True, repr=False, description="钉钉应用 AppSecret")
     dingtalk_corp_id: str = Field(default="", description="钉钉企业 CorpId")
     wecom_corp_id: str = Field(default="", description="企业微信 CorpId")
     wecom_agent_id: str = Field(default="", description="企业微信应用 AgentId")
-    wecom_secret: str | None = Field(
-        default=None, exclude=True, repr=False, description="企业微信应用 Secret"
-    )
+    wecom_secret: str | None = Field(default=None, exclude=True, repr=False, description="企业微信应用 Secret")
     oauth_redirect_base: str = Field(
         default="http://localhost:3000/oauth/callback",
         description="扫码登录后前端回调地址。**必须在第三方后台登记过**，否则会被拒",
     )
 
     # ---- 工具网关 ----
-    gateway_rate_limit_per_minute: int = Field(
-        default=120, description="工具调用每分钟上限（按工具名分别计数）"
-    )
+    gateway_rate_limit_per_minute: int = Field(default=120, description="工具调用每分钟上限（按工具名分别计数）")
     gateway_max_retries: int = Field(default=2, description="外部调用的最大重试次数")
-    gateway_circuit_breaker_threshold: int = Field(
-        default=5, description="连续失败多少次后熔断该工具"
-    )
+    gateway_circuit_breaker_threshold: int = Field(default=5, description="连续失败多少次后熔断该工具")
     gateway_circuit_breaker_cooldown: int = Field(default=60, description="熔断冷却秒数")
 
     # ---- 可观测性 ----
@@ -467,9 +429,7 @@ class Settings(BaseSettings):
     # 默认全关：开了才拉起子进程接入。两种方式二选一（见 office.py 说明）：
     #   1) office_mcp_servers_json 直接给 JSON 数组；
     #   2) office_mcp_cwd 指向 mcp-servers 目录，按约定拉起三个 office 模块。
-    office_mcp_enabled: bool = Field(
-        default=False, description="是否把外部 MCP 服务器（office 等）接入工具网关"
-    )
+    office_mcp_enabled: bool = Field(default=False, description="是否把外部 MCP 服务器（office 等）接入工具网关")
     office_mcp_servers_json: str | None = Field(
         default=None,
         description="JSON 数组，描述要接入的 MCP 服务器（command/args/cwd/env/scopes 等）",
@@ -482,9 +442,7 @@ class Settings(BaseSettings):
         default="python",
         description="拉起 office 服务器用的解释器（通常指向 mcp-servers 的 venv 里的 python）",
     )
-    office_mcp_workspace: str | None = Field(
-        default=None, description="传给 office 服务器的 OFFICE_MCP_WORKSPACE_ROOT"
-    )
+    office_mcp_workspace: str | None = Field(default=None, description="传给 office 服务器的 OFFICE_MCP_WORKSPACE_ROOT")
 
     # ---- DeerFlow（LangGraph 编排层，sidecar @ :8011）----
     # 对话侧编排引擎的可切换项：`legacy` 走平台自研的 run_tool_loop；
@@ -604,8 +562,7 @@ class Settings(BaseSettings):
     @property
     def mail_attachment_exts(self) -> tuple[str, ...]:
         return tuple(
-            e.lower() if e.startswith(".") else f".{e.lower()}"
-            for e in _split_csv(self.mail_attachment_allowlist)
+            e.lower() if e.startswith(".") else f".{e.lower()}" for e in _split_csv(self.mail_attachment_allowlist)
         )
 
     @property

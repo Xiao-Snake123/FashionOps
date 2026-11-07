@@ -165,18 +165,14 @@ class SmtpSender:
             if self.use_ssl:
                 with smtplib.SMTP_SSL(self.host, self.port, timeout=self.timeout) as server:
                     self._login(server)
-                    server.send_message(
-                        msg, from_addr=self.from_addr, to_addrs=recipients
-                    )
+                    server.send_message(msg, from_addr=self.from_addr, to_addrs=recipients)
             else:
                 with smtplib.SMTP(self.host, self.port, timeout=self.timeout) as server:
                     server.ehlo()
                     server.starttls()
                     server.ehlo()
                     self._login(server)
-                    server.send_message(
-                        msg, from_addr=self.from_addr, to_addrs=recipients
-                    )
+                    server.send_message(msg, from_addr=self.from_addr, to_addrs=recipients)
         except (smtplib.SMTPException, OSError) as exc:
             # 只报异常类型和文本，不把连接串/凭证带进错误信息
             return SendResult(

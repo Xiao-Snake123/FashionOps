@@ -53,9 +53,7 @@ class RankCandidatesArgs(BaseModel):
         min_length=1, max_length=500, description="erp.query_candidates 返回的候选商品列表"
     )
     top_n: int = Field(default=3, ge=1, le=50, description="要选出几款")
-    min_stock: int = Field(
-        default=30, ge=0, le=10000, description="可用库存下限（件）。库存不够卖就是事故"
-    )
+    min_stock: int = Field(default=30, ge=0, le=10000, description="可用库存下限（件）。库存不够卖就是事故")
     min_margin_rate: float = Field(default=0.40, ge=0.0, le=1.0, description="毛利率下限")
     max_cost: float | None = Field(default=None, description="单件成本上限（元）")
     min_rating: float | None = Field(default=None, description="评分下限")
@@ -73,12 +71,8 @@ class DetectAlertsArgs(BaseModel):
     """
 
     totals: dict[str, Any] = Field(default_factory=dict, description="erp.query_sales_summary 的 totals")
-    by_category: list[dict[str, Any]] = Field(
-        default_factory=list, description="group_by=category 的 groups"
-    )
-    by_channel: list[dict[str, Any]] = Field(
-        default_factory=list, description="group_by=channel 的 groups"
-    )
+    by_category: list[dict[str, Any]] = Field(default_factory=list, description="group_by=category 的 groups")
+    by_channel: list[dict[str, Any]] = Field(default_factory=list, description="group_by=channel 的 groups")
 
 
 # ---------------------------------------------------------------------------
@@ -95,9 +89,7 @@ class RenderReportArgs(BaseModel):
     task_no: str | None = Field(default=None, description="任务号，用于报表文件名，方便人对上号")
 
 
-def _build_sheets(
-    by_category: dict[str, Any], by_channel: dict[str, Any]
-) -> list[dict[str, Any]]:
+def _build_sheets(by_category: dict[str, Any], by_channel: dict[str, Any]) -> list[dict[str, Any]]:
     """构造三张标准工作表（类目 / 渠道 / 整体）。
 
     从原 analytics 节点原样搬来。数字格式在这里就定好 ——
@@ -211,8 +203,7 @@ def register(registry: ToolRegistry) -> None:
 
         if selected:
             summary = (
-                f"候选池 {outcome.total_input} 个，通过硬约束 {outcome.passed} 个，"
-                f"已按加权评分选出前 {len(selected)}"
+                f"候选池 {outcome.total_input} 个，通过硬约束 {outcome.passed} 个，已按加权评分选出前 {len(selected)}"
             )
         else:
             summary = (
@@ -286,10 +277,7 @@ def register(registry: ToolRegistry) -> None:
         task_id: int | None = None,
         task_no: str | None = None,
     ) -> dict[str, Any]:
-        filename = (
-            f"{date.today():%Y%m%d}-经营分析"
-            f"{'-' + task_no if task_no else ''}.xlsx"
-        )
+        filename = f"{date.today():%Y%m%d}-经营分析{'-' + task_no if task_no else ''}.xlsx"
         return export_excel_core(
             filename=filename,
             title="服装电商经营分析报表",

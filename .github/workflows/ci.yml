@@ -59,16 +59,17 @@ jobs:
         run: uv sync --all-extras --frozen
 
       - name: Ruff（lint）
-        run: uv run ruff check src tests scripts --output-format=github
+        # 项目已从 src/ 布局迁移到 backend/，所以这里扫 backend 而非 src/tests/scripts
+        run: uv run ruff check backend --output-format=github
 
       - name: Ruff（格式）
         # 只检查不自动改：CI 上自动改代码没有任何意义（改完也不会提交回来）
-        run: uv run ruff format --check src tests scripts
+        run: uv run ruff format --check backend
 
       - name: Pytest
         # 关掉第三方库的 deprecation 噪音，只看自己的问题。
         # -p no:randomly 之类的不需要（没装）。
-        run: uv run pytest tests -q --no-header -W "ignore::DeprecationWarning"
+        run: uv run pytest backend/tests -q --no-header -W "ignore::DeprecationWarning"
 
       - name: 配置体检（不配 Key 也要能过）
         # 这一步的价值：确认"新增配置项忘了加默认值"这类问题会在 CI 上暴露，

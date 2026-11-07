@@ -122,11 +122,7 @@ def list_products(
 
     # ① 库存：流水线里每个 SKU 取**最新一条**，其余额才是当前可售量。
     #    直接 sum 所有流水行会把历史进出全加一遍，得出一个毫无意义的数。
-    latest = (
-        select(Inventory.sku_id, func.max(Inventory.occurred_at).label("ts"))
-        .group_by(Inventory.sku_id)
-        .subquery()
-    )
+    latest = select(Inventory.sku_id, func.max(Inventory.occurred_at).label("ts")).group_by(Inventory.sku_id).subquery()
     stock_rows = (
         session.execute(
             select(SKU.product_id, func.sum(Inventory.quantity_after))
@@ -190,12 +186,8 @@ def product_facets(
     if hit is not None:
         return hit
 
-    cats = session.execute(
-        select(Product.category, func.count()).group_by(Product.category)
-    ).all()
-    seasons = session.execute(
-        select(Product.season, func.count()).group_by(Product.season)
-    ).all()
+    cats = session.execute(select(Product.category, func.count()).group_by(Product.category)).all()
+    seasons = session.execute(select(Product.season, func.count()).group_by(Product.season)).all()
     payload = {
         "categories": [{"value": c, "count": n} for c, n in cats if c],
         "seasons": [{"value": s, "count": n} for s, n in seasons if s],
@@ -220,11 +212,7 @@ def low_stock(
     if hit is not None:
         return hit
 
-    latest = (
-        select(Inventory.sku_id, func.max(Inventory.occurred_at).label("ts"))
-        .group_by(Inventory.sku_id)
-        .subquery()
-    )
+    latest = select(Inventory.sku_id, func.max(Inventory.occurred_at).label("ts")).group_by(Inventory.sku_id).subquery()
     rows = session.execute(
         select(SKU.sku_code, SKU.color, SKU.size, Product.title, Inventory.quantity_after)
         .join(latest, (Inventory.sku_id == latest.c.sku_id) & (Inventory.occurred_at == latest.c.ts))
@@ -306,12 +294,8 @@ def ticket_stats(
     **客服流程**里的位置，不是有没有人在跟。
     """
     total = session.scalar(select(func.count()).select_from(Ticket)) or 0
-    unassigned = (
-        session.scalar(select(func.count()).where(Ticket.assignee.is_(None))) or 0
-    )
-    by_status = dict(
-        session.execute(select(Ticket.status, func.count()).group_by(Ticket.status)).all()
-    )
+    unassigned = session.scalar(select(func.count()).where(Ticket.assignee.is_(None))) or 0
+    by_status = dict(session.execute(select(Ticket.status, func.count()).group_by(Ticket.status)).all())
     by_human = dict(
         session.execute(
             select(Ticket.human_status, func.count())
@@ -321,9 +305,7 @@ def ticket_stats(
     )
     by_assignee = dict(
         session.execute(
-            select(Ticket.assignee, func.count())
-            .where(Ticket.assignee.is_not(None))
-            .group_by(Ticket.assignee)
+            select(Ticket.assignee, func.count()).where(Ticket.assignee.is_not(None)).group_by(Ticket.assignee)
         ).all()
     )
     return {
@@ -430,7 +412,8 @@ def return_rate_by_category(
             func.sum(BIMetric.gmv).label("gmv"),
         )
         # "全部"是汇总行，混进来会让每个品类都算进整体，结论失真
-        .where(BIMetric.metric_date >= since, BIMetric.category != "全部").group_by(BIMetric.category)
+        .where(BIMetric.metric_date >= since, BIMetric.category != "全部")
+        .group_by(BIMetric.category)
     ).all()
 
     items: list[dict[str, Any]] = []

@@ -151,9 +151,7 @@ def main() -> int:
     print("  [3] 普通对话")
     try:
         started = time.perf_counter()
-        response = client.complete(
-            [Message.user("用一句话说明服装电商的退货率为什么通常高于其他品类。")]
-        )
+        response = client.complete([Message.user("用一句话说明服装电商的退货率为什么通常高于其他品类。")])
         elapsed = int((time.perf_counter() - started) * 1000)
         print(f"{OK} {elapsed} ms | {response.usage.total_tokens} tokens | ¥{response.cost}")
         print(f"        模型回答：{response.content.strip()[:120]}")
@@ -232,8 +230,7 @@ def main() -> int:
         )
         if executed:
             print(f"{OK} 模型发起了工具调用：{executed}")
-            print(f"        轮数 {loop.steps} | 累计 {loop.total_usage.total_tokens} tokens "
-                  f"| ¥{loop.total_cost}")
+            print(f"        轮数 {loop.steps} | 累计 {loop.total_usage.total_tokens} tokens | ¥{loop.total_cost}")
             print(f"        最终回答：{loop.content.strip()[:120]}")
         else:
             print(f"{WARN} 模型没有发起工具调用，直接回答了：{loop.content.strip()[:120]}")
@@ -255,10 +252,7 @@ def main() -> int:
         ("完整（9 Agent 全链路）", 12000, 2500, 60),
     ]:
         per_call = estimate_cost(settings.model_name, prompt_tokens, completion_tokens)
-        print(
-            f"    {label:<22} 单次 ¥{per_call:.6f}"
-            f"  ×  {calls:>2} 次  =  ¥{per_call * calls:.4f}"
-        )
+        print(f"    {label:<22} 单次 ¥{per_call:.6f}  ×  {calls:>2} 次  =  ¥{per_call * calls:.4f}")
     print()
     print("  这是按「每次都把全量上下文发过去」估的上界；")
     print("  实际会因为上下文裁剪和模型路由（简单任务走 fast 模型）明显低于这个数。")

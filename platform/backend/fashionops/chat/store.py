@@ -126,9 +126,7 @@ def create_conversation(
 
 
 def get_conversation(session: Session, conversation_no: str) -> Conversation | None:
-    return session.scalar(
-        select(Conversation).where(Conversation.conversation_no == conversation_no)
-    )
+    return session.scalar(select(Conversation).where(Conversation.conversation_no == conversation_no))
 
 
 def list_conversations(
@@ -139,12 +137,7 @@ def list_conversations(
     offset: int = 0,
     status: str | None = None,
 ) -> list[Conversation]:
-    stmt = (
-        select(Conversation)
-        .order_by(Conversation.updated_at.desc())
-        .offset(offset)
-        .limit(limit)
-    )
+    stmt = select(Conversation).order_by(Conversation.updated_at.desc()).offset(offset).limit(limit)
     if user_id is not None:
         stmt = stmt.where(Conversation.user_id == user_id)
     if status is not None:
@@ -152,9 +145,7 @@ def list_conversations(
     return list(session.scalars(stmt))
 
 
-def count_conversations(
-    session: Session, *, user_id: int | None, status: str | None = None
-) -> int:
+def count_conversations(session: Session, *, user_id: int | None, status: str | None = None) -> int:
     """符合条件的会话**总数**（不受 limit 影响）。
 
     为什么要单独一个函数：列表查询带了 ``limit``，拿它的长度当总数的话
@@ -282,9 +273,9 @@ def _bump(session: Session, conversation_id: int, row: ChatMessage) -> None:
     if conversation is None:
         return
     conversation.message_count = int(conversation.message_count or 0) + 1
-    conversation.total_tokens = int(conversation.total_tokens or 0) + int(
-        row.prompt_tokens or 0
-    ) + int(row.completion_tokens or 0)
+    conversation.total_tokens = (
+        int(conversation.total_tokens or 0) + int(row.prompt_tokens or 0) + int(row.completion_tokens or 0)
+    )
     conversation.total_cost = (conversation.total_cost or 0) + (row.cost or 0)
     if row.role == MSG_ROLE_TOOL:
         conversation.tool_calls = int(conversation.tool_calls or 0) + 1
@@ -461,10 +452,7 @@ def to_llm_messages(
         elif row.role == MSG_ROLE_TOOL:
             content = row.content
             if truncate_at > 0 and index < full_from and len(content) > truncate_at:
-                content = (
-                    f"{content[:truncate_at]}\n"
-                    f"…（结果过长已截断，原始长度 {len(content)} 字符）"
-                )
+                content = f"{content[:truncate_at]}\n…（结果过长已截断，原始长度 {len(content)} 字符）"
             messages.append(
                 Message.tool(
                     tool_call_id=row.tool_call_id or "",

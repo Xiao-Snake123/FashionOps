@@ -92,9 +92,7 @@ def _usage_only(prompt: int, completion: int) -> SimpleNamespace:
     total = prompt + completion
     return SimpleNamespace(
         choices=[],
-        usage=SimpleNamespace(
-            prompt_tokens=prompt, completion_tokens=completion, total_tokens=total
-        ),
+        usage=SimpleNamespace(prompt_tokens=prompt, completion_tokens=completion, total_tokens=total),
     )
 
 

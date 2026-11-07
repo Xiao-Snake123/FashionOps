@@ -59,9 +59,17 @@ class Scope:
 
     ALL = frozenset(
         {
-            ERP_READ, ERP_WRITE, ECOM_READ, ECOM_WRITE,
-            AD_READ, AD_WRITE, KB_READ, ASSET_WRITE, MAIL_SEND,
-            OFFICE_READ, OFFICE_WRITE,
+            ERP_READ,
+            ERP_WRITE,
+            ECOM_READ,
+            ECOM_WRITE,
+            AD_READ,
+            AD_WRITE,
+            KB_READ,
+            ASSET_WRITE,
+            MAIL_SEND,
+            OFFICE_READ,
+            OFFICE_WRITE,
         }
     )
 

@@ -62,37 +62,27 @@ class TestHardConstraints:
 
     def test_rejects_low_stock_with_reason(self):
         """库存不达标必须**带原因**被拒。运营最常问的就是"为什么这个款没选上"。"""
-        passed, rejected = apply_constraints(
-            [_candidate(available_stock=3)], HardConstraints(min_stock=30)
-        )
+        passed, rejected = apply_constraints([_candidate(available_stock=3)], HardConstraints(min_stock=30))
         assert passed == []
         assert len(rejected) == 1
         assert rejected[0].reason == "stock"
         assert "3 件" in rejected[0].detail
 
     def test_rejects_low_margin(self):
-        _, rejected = apply_constraints(
-            [_candidate(margin_rate=0.15)], HardConstraints(min_margin_rate=0.40)
-        )
+        _, rejected = apply_constraints([_candidate(margin_rate=0.15)], HardConstraints(min_margin_rate=0.40))
         assert rejected[0].reason == "margin"
 
     def test_rejects_off_shelf(self):
-        _, rejected = apply_constraints(
-            [_candidate(status="off_shelf")], HardConstraints()
-        )
+        _, rejected = apply_constraints([_candidate(status="off_shelf")], HardConstraints())
         assert rejected[0].reason == "status"
 
     def test_rejects_missing_margin_data(self):
         """算不出毛利就不能选 —— 宁可不选，也不要拍脑袋上架。"""
-        _, rejected = apply_constraints(
-            [_candidate(margin_rate=None)], HardConstraints()
-        )
+        _, rejected = apply_constraints([_candidate(margin_rate=None)], HardConstraints())
         assert rejected[0].reason == "margin"
 
     def test_max_cost_is_respected(self):
-        _, rejected = apply_constraints(
-            [_candidate(cost_price=500.0)], HardConstraints(max_cost=Decimal("100"))
-        )
+        _, rejected = apply_constraints([_candidate(cost_price=500.0)], HardConstraints(max_cost=Decimal("100")))
         assert rejected[0].reason == "cost"
 
     def test_constraints_describe_is_human_readable(self):
@@ -187,9 +177,7 @@ class TestRankCandidates:
         assert reasons == {"stock", "margin"}
 
     def test_outcome_dict_includes_rejection_samples(self):
-        outcome = rank_candidates(
-            [_candidate(spu_code="X", available_stock=0)], constraints=HardConstraints()
-        )
+        outcome = rank_candidates([_candidate(spu_code="X", available_stock=0)], constraints=HardConstraints())
         payload = outcome.to_dict()
         assert payload["rejected"] == 1
         assert payload["rejected_samples"][0]["spu_code"] == "X"
@@ -205,13 +193,10 @@ class TestScoreWeightConfigurable:
             _candidate(spu_code="MARGIN", sold_30d=20, margin_rate=0.85),
         ]
         by_volume = rank_candidates(
-            pool, weights=ScoreWeights(sell_through=0.9, margin=0.02, price_gap=0.02,
-                                       rating=0.03, stock_depth=0.03)
+            pool, weights=ScoreWeights(sell_through=0.9, margin=0.02, price_gap=0.02, rating=0.03, stock_depth=0.03)
         )
         by_margin = rank_candidates(
-            pool, weights=ScoreWeights(sell_through=0.02, margin=0.9, price_gap=0.02,
-                                       rating=0.03, stock_depth=0.03)
+            pool, weights=ScoreWeights(sell_through=0.02, margin=0.9, price_gap=0.02, rating=0.03, stock_depth=0.03)
         )
         assert by_volume.scored[0].spu_code == "VOLUME"
         assert by_margin.scored[0].spu_code == "MARGIN"
-

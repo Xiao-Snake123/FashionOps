@@ -80,7 +80,7 @@ class SparseVector:
     values: tuple[float, ...] = ()
 
     @classmethod
-    def empty(cls) -> "SparseVector":
+    def empty(cls) -> SparseVector:
         return cls((), ())
 
     def __bool__(self) -> bool:
@@ -196,7 +196,9 @@ class VectorStore(Protocol):
     #: 后端名字（qdrant / memory），写进日志和健康检查
     backend: str
 
-    def ensure_collection(self, name: str, *, dimension: int, distance: str = "cosine", sparse_vector_names: list[str] | None = None) -> bool:
+    def ensure_collection(
+        self, name: str, *, dimension: int, distance: str = "cosine", sparse_vector_names: list[str] | None = None
+    ) -> bool:
         """确保 collection 存在且维度正确。已存在且维度一致时返回 False（没动它）。
 
         **维度不一致必须报错，不能静默重建** —— 重建会丢掉全部已有向量，

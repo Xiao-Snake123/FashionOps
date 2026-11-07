@@ -5,6 +5,7 @@
     from fashionops.chat import agent, store
     agent.stream_turn(conversation_no="CH...", principal=p, user_text="...")
 """
+
 from __future__ import annotations
 
 import importlib

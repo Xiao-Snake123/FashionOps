@@ -15,6 +15,7 @@
 2. **校验时顺手更新 `last_used_at`**。一把长期不用的 key 是安全隐患，
    而"最后使用时间"是判断它该不该被清理的唯一依据。
 """
+
 from __future__ import annotations
 
 import logging
@@ -129,9 +130,7 @@ def load_owner(session: Session, key: APIKey) -> User | None:
     if key.owner_id is None:
         return None
     return session.scalar(
-        select(User)
-        .options(selectinload(User.roles).selectinload(Role.permissions))
-        .where(User.id == key.owner_id)
+        select(User).options(selectinload(User.roles).selectinload(Role.permissions)).where(User.id == key.owner_id)
     )
 
 

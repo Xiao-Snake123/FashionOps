@@ -25,6 +25,7 @@
 YAML 解析器（顺带承担它的锚点/多行/类型推断等全部行为）不划算 ——
 真出问题时，"我们的 frontmatter 只支持这两种写法"是个更好排查的约束。
 """
+
 from __future__ import annotations
 
 import re
@@ -137,9 +138,7 @@ def render(text: str, source: Path) -> str:
         name = match.group(1)
         if name not in known:
             available = "、".join(sorted(known))
-            raise SkillError(
-                f"{source.name}：占位符 {{{{{name}}}}} 不存在。可用的事实：{available}"
-            )
+            raise SkillError(f"{source.name}：占位符 {{{{{name}}}}} 不存在。可用的事实：{available}")
         return known[name]
 
     return _PLACEHOLDER.sub(replace, text)
@@ -183,9 +182,7 @@ def _load_uncached() -> tuple[Skill, ...]:
         skill = _build(raw_meta, render(body, path), path)
 
         if skill.name in seen:
-            raise SkillError(
-                f"技能名重复：{skill.name}（{seen[skill.name].name} 和 {path.name}）"
-            )
+            raise SkillError(f"技能名重复：{skill.name}（{seen[skill.name].name} 和 {path.name}）")
         seen[skill.name] = path
         skills.append(skill)
 
@@ -242,8 +239,7 @@ def index_block() -> str:
     return (
         "## 可用技能\n"
         "下面是本系统的业务操作规范。**需要按标准流程做事之前，"
-        "先用 `skill.load` 读出对应技能的完整内容**，不要凭印象操作：\n"
-        + "\n".join(lines)
+        "先用 `skill.load` 读出对应技能的完整内容**，不要凭印象操作：\n" + "\n".join(lines)
     )
 
 

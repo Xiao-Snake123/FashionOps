@@ -159,9 +159,7 @@ class OpenAICompatEmbeddingClient:
             return EmbeddingError(f"embedding 请求失败：{text}", retryable=True)
 
         retryable = status == 429 or status >= 500
-        return EmbeddingError(
-            f"embedding 服务返回 {status}：{text}", retryable=retryable, status=status
-        )
+        return EmbeddingError(f"embedding 服务返回 {status}：{text}", retryable=retryable, status=status)
 
     def _check_dimension(self, vectors: list[list[float]]) -> None:
         """维度不对时给出**能看懂的**错误。

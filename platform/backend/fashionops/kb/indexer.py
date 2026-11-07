@@ -153,9 +153,7 @@ def build_index(
             f"两个模型的向量空间不兼容，混在一起检索的相似度没有意义。"
         )
         if not rebuild:
-            raise RuntimeError(
-                f"{message}\n建议重建：fashionops-kb index --rebuild"
-            )
+            raise RuntimeError(f"{message}\n建议重建：fashionops-kb index --rebuild")
         stats.warnings.append(f"{message}已按 --rebuild 清空重建。")
 
     if rebuild and stats.before_count:
@@ -165,9 +163,7 @@ def build_index(
     # ---- 读文章 ----
     with session_scope() as session:
         articles = list(
-            session.scalars(
-                select(KBArticle).where(KBArticle.is_active.is_(True)).order_by(KBArticle.article_no)
-            )
+            session.scalars(select(KBArticle).where(KBArticle.is_active.is_(True)).order_by(KBArticle.article_no))
         )
 
     if not articles:
@@ -202,9 +198,7 @@ def build_index(
         save_idf(settings.data_dir, idf)
 
     records = []
-    for text, (article_no, index, article), vector in zip(
-        pending_texts, pending_meta, vectors, strict=True
-    ):
+    for text, (article_no, index, article), vector in zip(pending_texts, pending_meta, vectors, strict=True):
         payload = {
             PAYLOAD_TEXT: text,
             PAYLOAD_SOURCE_ID: article_no,
@@ -269,16 +263,11 @@ def search_kb(
         # 明确区分"库里没数据"和"检索没命中"。
         # 混为一谈的话，没建索引会被误判成"知识库里没有相关文章"，
         # 而这个结论会被当成事实写进回复
-        raise RuntimeError(
-            f"collection {collection!r} 不存在或为空 —— 知识库还没建索引。\n"
-            f"先跑：fashionops-kb index"
-        )
+        raise RuntimeError(f"collection {collection!r} 不存在或为空 —— 知识库还没建索引。\n先跑：fashionops-kb index")
 
     # 只在需要时构造过滤条件。空的 filter 传下去会让某些后端生成
     # 一个恒真的条件，白白多一次求值
-    flt = Filter(must={"category": category, "is_active": True}) if category else Filter(
-        must={"is_active": True}
-    )
+    flt = Filter(must={"category": category, "is_active": True}) if category else Filter(must={"is_active": True})
 
     query_vec = embedder.embed_one(query)
 

@@ -50,6 +50,7 @@ _KEYWORDS: dict[str, tuple[str, ...]] = {
     "notification": ("发给", "邮件", "通知", "告知", "汇报"),
 }
 
+
 def _matches_request(pattern: str, request: str) -> bool:
     return re.search(pattern, request) is not None
 
@@ -87,11 +88,7 @@ def matched_kinds(user_request: str) -> list[str]:
     时中间夹了数字和空格，纯子串 ``"选款"`` 命中不了，
     结果就是选品那步被丢掉 —— 而用户明明要的就是选品。
     """
-    return [
-        kind
-        for kind in TODO_KINDS
-        if any(_matches_request(p, user_request) for p in _KEYWORDS[kind])
-    ]
+    return [kind for kind in TODO_KINDS if any(_matches_request(p, user_request) for p in _KEYWORDS[kind])]
 
 
 def plan_todos(user_request: str) -> list[TodoSpec]:

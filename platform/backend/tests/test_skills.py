@@ -12,6 +12,7 @@
 3. **技能里声明的工具真实存在。** 写错一个工具名，模型会照着调、
    拿到 `TOOL_NOT_FOUND` —— 报错点在运行时，离原因（md 里打错一个字）很远。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -186,9 +187,7 @@ class TestFactsComeFromCode:
         assert before is not None
         assert "退货率 ≥ 30% → critical" in before.body
 
-        monkeypatch.setattr(
-            "fashionops.agents.analytics_rules.RETURN_RATE_CRITICAL", 0.50
-        )
+        monkeypatch.setattr("fashionops.agents.analytics_rules.RETURN_RATE_CRITICAL", 0.50)
         facts.cache_clear()
         after = reload()
         target = next(s for s in after if s.name == "business-review")
@@ -199,9 +198,7 @@ class TestFactsComeFromCode:
 
         改之前模型只知道"level 以工具返回为准"，解释不了"为什么这个类目不管"。
         """
-        monkeypatch.setattr(
-            "fashionops.agents.analytics_rules.MIN_ORDERS_FOR_JUDGEMENT", 7
-        )
+        monkeypatch.setattr("fashionops.agents.analytics_rules.MIN_ORDERS_FOR_JUDGEMENT", 7)
         facts.cache_clear()
         target = next(s for s in reload() if s.name == "business-review")
         assert "分组订单数 < 7 单时" in target.body
@@ -314,10 +311,7 @@ class TestSkillTool:
         from fashionops.gateway.registry import registry
 
         # 空作用域的工具对任何权限集合都可见（用户只有 kb:read 也应该能读技能）
-        names = {
-            schema["function"]["name"]
-            for schema in registry.openai_schemas(frozenset({"kb:read"}))
-        }
+        names = {schema["function"]["name"] for schema in registry.openai_schemas(frozenset({"kb:read"}))}
         assert "skill__load" in names
 
     def test_load_returns_body(self):
@@ -359,8 +353,7 @@ class TestSkillTool:
         _write_skill(
             tmp_path,
             "a.md",
-            "---\nname: broken\ntitle: 坏的\nsummary: 引用了不存在的工具\n"
-            "tools:\n  - erp.query_nothing\n---\n正文",
+            "---\nname: broken\ntitle: 坏的\nsummary: 引用了不存在的工具\ntools:\n  - erp.query_nothing\n---\n正文",
         )
         loader.reload()
 
@@ -460,8 +453,6 @@ class TestChatChainWiring:
         """`skill.load` 必须出现在对话的工具目录里，否则索引是个空头承诺。"""
         from fashionops.chat.tools import build_catalog
 
-        catalog = build_catalog(
-            granted_scopes=frozenset({"kb:read"}), permission_codes=frozenset()
-        )
+        catalog = build_catalog(granted_scopes=frozenset({"kb:read"}), permission_codes=frozenset())
         names = {item["function"]["name"] for item in catalog}
         assert "skill__load" in names

@@ -32,6 +32,7 @@ seed 的 `escalated` 是这么生成的：
 * **漏转**（规则没转、标注转了）：危险方向，必须逐条查清
 * **多转**（规则转了、标注没转）：安全方向，其中相当一部分是"标注随机没转"
 """
+
 from __future__ import annotations
 
 import json
@@ -84,8 +85,7 @@ def load_labels(*, path: Path | None = None) -> dict[str, Any]:
     target = path or DEFAULT_LABELS_PATH
     if not target.exists():
         raise FileNotFoundError(
-            f"评测集不存在：{target}\n"
-            "必须先跑 fashionops-ticket export-labels（而且要在任何时候处理工单**之前**）"
+            f"评测集不存在：{target}\n必须先跑 fashionops-ticket export-labels（而且要在任何时候处理工单**之前**）"
         )
     return json.loads(target.read_text(encoding="utf-8"))
 

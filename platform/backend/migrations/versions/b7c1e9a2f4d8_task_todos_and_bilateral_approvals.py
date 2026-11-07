@@ -16,7 +16,6 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-
 revision: str = "b7c1e9a2f4d8"
 down_revision: str | None = "d5eb1be3d355"
 branch_labels: str | Sequence[str] | None = None
@@ -75,16 +74,12 @@ def upgrade() -> None:
     # 纯装饰性的改动不值得换来这个风险，原因记在 models_chat.py 里。
     with op.batch_alter_table("chat_approvals", schema=None) as batch_op:
         batch_op.add_column(sa.Column("task_no", sa.String(length=64), nullable=True))
-        batch_op.add_column(
-            sa.Column("todo_seq", sa.Integer(), nullable=True, comment="任务侧：第几个 todo")
-        )
+        batch_op.add_column(sa.Column("todo_seq", sa.Integer(), nullable=True, comment="任务侧：第几个 todo"))
         batch_op.create_index("ix_chat_approval_task", ["task_no", "status"], unique=False)
         batch_op.create_index("ix_chat_approvals_task_no", ["task_no"], unique=False)
         # 对话侧填 conversation_id，任务侧填 task_no —— 两边都不用的只能是脏数据。
         # 原来 NOT NULL，任务侧根本写不进来。
-        batch_op.alter_column(
-            "conversation_id", existing_type=sa.Integer(), nullable=True
-        )
+        batch_op.alter_column("conversation_id", existing_type=sa.Integer(), nullable=True)
 
 
 def downgrade() -> None:
@@ -95,9 +90,7 @@ def downgrade() -> None:
     op.execute("DELETE FROM chat_approvals WHERE conversation_id IS NULL")
 
     with op.batch_alter_table("chat_approvals", schema=None) as batch_op:
-        batch_op.alter_column(
-            "conversation_id", existing_type=sa.Integer(), nullable=False
-        )
+        batch_op.alter_column("conversation_id", existing_type=sa.Integer(), nullable=False)
         batch_op.drop_index("ix_chat_approvals_task_no")
         batch_op.drop_index("ix_chat_approval_task")
         batch_op.drop_column("todo_seq")

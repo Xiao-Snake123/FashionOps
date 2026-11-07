@@ -280,11 +280,7 @@ def approve_task(
     # 任务就永远卡在 waiting_approval：界面上那条"等待人工确认"的横幅还在
     # （它读的是 `task.approval_payload`，不是审批表），但两个按钮点了都没用 ——
     # 这比"单子过期了"本身更难理解。
-    if (
-        payload.approved
-        and pending is not None
-        and pending["status"] == APPROVAL_STATUS_EXPIRED
-    ):
+    if payload.approved and pending is not None and pending["status"] == APPROVAL_STATUS_EXPIRED:
         raise HTTPException(
             status_code=409,
             detail=(
@@ -345,9 +341,7 @@ def approve_task(
         },
     )
     verb = "批准" if payload.approved else "驳回"
-    return TaskActionResponse(
-        task_no=task_no, status="running", message=f"已{verb}，任务从断点继续执行"
-    )
+    return TaskActionResponse(task_no=task_no, status="running", message=f"已{verb}，任务从断点继续执行")
 
 
 # ---------------------------------------------------------------------------
@@ -395,9 +389,7 @@ def get_task(
     if task is None:
         raise HTTPException(status_code=404, detail=f"任务 {task_no} 不存在")
 
-    todos = session.scalars(
-        select(TaskTodo).where(TaskTodo.task_id == task.id).order_by(TaskTodo.seq)
-    ).all()
+    todos = session.scalars(select(TaskTodo).where(TaskTodo.task_id == task.id).order_by(TaskTodo.seq)).all()
 
     detail = TaskDetailOut.model_validate(task)
     # 这两个是**进程内**状态，不在库里，得手工补 ——
@@ -409,9 +401,7 @@ def get_task(
     return detail
 
 
-def _related_docs(
-    session: Session, task: Task, todos: list[TaskTodo]
-) -> list[dict[str, str]]:
+def _related_docs(session: Session, task: Task, todos: list[TaskTodo]) -> list[dict[str, str]]:
     """这个任务在别的模块里留下了哪些单据。
 
     两个来源，缺一不可：
@@ -435,13 +425,9 @@ def _related_docs(
         seen.add(key)
         docs.append({"kind": kind, "label": label, "ref": ref, "href": href})
 
-    for no in session.scalars(
-        select(AdCampaign.campaign_no).where(AdCampaign.task_id == task.id)
-    ):
+    for no in session.scalars(select(AdCampaign.campaign_no).where(AdCampaign.task_id == task.id)):
         add("campaign", "广告计划", no, "/campaigns")
-    for no in session.scalars(
-        select(EmailMessage.message_no).where(EmailMessage.task_id == task.id)
-    ):
+    for no in session.scalars(select(EmailMessage.message_no).where(EmailMessage.task_id == task.id)):
         add("email", "邮件", no, "/emails")
 
     # result 里扫编号。前缀规则和各表的编号前缀一致（见 db/models 的 *_no 生成处）
@@ -485,9 +471,7 @@ def stream_task(
     task_no: str,
     principal: StreamPrincipal,
     since_seq: int = Query(0, ge=0, description="只推 seq 大于该值的事件"),
-    last_event_id: str | None = Query(
-        None, alias="Last-Event-ID", description="浏览器 EventSource 断线重连时自动带上"
-    ),
+    last_event_id: str | None = Query(None, alias="Last-Event-ID", description="浏览器 EventSource 断线重连时自动带上"),
 ) -> StreamingResponse:
     """Server-Sent Events。
 
@@ -562,9 +546,7 @@ def _event_source(task_no: str, cursor: int) -> Any:
             for event in read_events(task_no, since_seq=cursor):
                 cursor = int(event["seq"])
                 yield frame(event)
-            done = json.dumps(
-                {"type": "done", "status": snapshot["status"], "seq": cursor}, ensure_ascii=False
-            )
+            done = json.dumps({"type": "done", "status": snapshot["status"], "seq": cursor}, ensure_ascii=False)
             yield f"data: {done}\n\n"
             return
 

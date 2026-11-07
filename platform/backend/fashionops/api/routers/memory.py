@@ -79,9 +79,7 @@ def forget_memory(
     row = session.get(AgentMemory, memory_id)
     if row is None or row.user_id != principal.user_id:
         raise HTTPException(status_code=404, detail=f"记忆 {memory_id} 不存在")
-    session.execute(
-        sa_delete(AgentMemory).where(AgentMemory.id == memory_id)
-    )
+    session.execute(sa_delete(AgentMemory).where(AgentMemory.id == memory_id))
     session.commit()
     logger.info("用户 %s 删除了自己的记忆 %s（topic=%s）", principal.username, memory_id, row.topic)
     return {"ok": True, "id": memory_id}

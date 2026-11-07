@@ -24,30 +24,29 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-import sqlalchemy as sa
 from alembic import op
 
-revision: str = 'c1d2e3f4a5b6'
-down_revision: str | None = 'a9b8c7d6e5f4'
+revision: str = "c1d2e3f4a5b6"
+down_revision: str | None = "a9b8c7d6e5f4"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
     op.create_index(
-        'ix_tickets_status_created',
-        'tickets',
-        ['status', 'created_at'],
+        "ix_tickets_status_created",
+        "tickets",
+        ["status", "created_at"],
         unique=False,
     )
     op.create_index(
-        'ix_email_gate_decision',
-        'email_messages',
-        ['gate_decision'],
+        "ix_email_gate_decision",
+        "email_messages",
+        ["gate_decision"],
         unique=False,
     )
 
 
 def downgrade() -> None:
-    op.drop_index('ix_email_gate_decision', table_name='email_messages')
-    op.drop_index('ix_tickets_status_created', table_name='tickets')
+    op.drop_index("ix_email_gate_decision", table_name="email_messages")
+    op.drop_index("ix_tickets_status_created", table_name="tickets")

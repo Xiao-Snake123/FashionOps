@@ -62,9 +62,7 @@ class MemoryVectorStore:
         if name in self._data:
             existing = self._dims[name]
             if existing != dimension:
-                raise ValueError(
-                    f"collection {name!r} 的维度是 {existing}，但当前配置是 {dimension} 维。"
-                )
+                raise ValueError(f"collection {name!r} 的维度是 {existing}，但当前配置是 {dimension} 维。")
             return False
         self._data[name] = {}
         self._dims[name] = dimension
@@ -76,8 +74,7 @@ class MemoryVectorStore:
         for record in records:
             if len(record.vector) != self._dims[name]:
                 raise ValueError(
-                    f"向量维度不一致：collection {name!r} 是 {self._dims[name]} 维，"
-                    f"但传入的是 {len(record.vector)} 维"
+                    f"向量维度不一致：collection {name!r} 是 {self._dims[name]} 维，但传入的是 {len(record.vector)} 维"
                 )
             self._data[name][record.id] = record
         return len(records)
@@ -241,8 +238,8 @@ def _sparse_score(query_sparse: dict[str, SparseVector], record_sparse: dict[str
         rvec = record_sparse.get(name)
         if not qvec or not rvec:
             continue
-        q_map = dict(zip(qvec.indices, qvec.values))
-        for idx, val in zip(rvec.indices, rvec.values):
+        q_map = dict(zip(qvec.indices, qvec.values, strict=True))
+        for idx, val in zip(rvec.indices, rvec.values, strict=True):
             total += q_map.get(idx, 0.0) * val
     return total
 

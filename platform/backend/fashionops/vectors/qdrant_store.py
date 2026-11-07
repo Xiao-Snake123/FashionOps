@@ -173,9 +173,7 @@ class QdrantVectorStore:
 
         for sname in names:
             try:
-                self._client.create_sparse_vector_config(
-                    name, {sname: models.SparseVectorParams()}
-                )
+                self._client.create_sparse_vector_config(name, {sname: models.SparseVectorParams()})
             except Exception as exc:  # noqa: BLE001
                 # 已存在会报冲突，忽略；其它异常降级为告警，不让建索引整体失败
                 logger.warning("给 %s 补稀疏向量 %s 失败（若已存在可忽略）：%s", name, sname, exc)
@@ -230,9 +228,7 @@ class QdrantVectorStore:
             if r.sparse:
                 vector: Any = {KB_DENSE_VECTOR_NAME: r.vector}
                 for sname, svec in r.sparse.items():
-                    vector[sname] = models.SparseVector(
-                        indices=list(svec.indices), values=list(svec.values)
-                    )
+                    vector[sname] = models.SparseVector(indices=list(svec.indices), values=list(svec.values))
             else:
                 vector = r.vector
             points.append(
@@ -318,15 +314,11 @@ class QdrantVectorStore:
         """
         from qdrant_client import models
 
-        prefetches = [
-            models.Prefetch(query=dense_vector, using=KB_DENSE_VECTOR_NAME, limit=limit)
-        ]
+        prefetches = [models.Prefetch(query=dense_vector, using=KB_DENSE_VECTOR_NAME, limit=limit)]
         for sname, svec in sparse_vectors.items():
             prefetches.append(
                 models.Prefetch(
-                    query=models.SparseVector(
-                        indices=list(svec.indices), values=list(svec.values)
-                    ),
+                    query=models.SparseVector(indices=list(svec.indices), values=list(svec.values)),
                     using=sname,
                     limit=limit,
                 )
@@ -430,9 +422,7 @@ class QdrantVectorStore:
         并在这里显示出来，是让"库里是旧向量"这件事变得可见的最低成本做法。
         """
         try:
-            points, _ = self._client.scroll(
-                collection_name=name, limit=1, with_payload=True, with_vectors=False
-            )
+            points, _ = self._client.scroll(collection_name=name, limit=1, with_payload=True, with_vectors=False)
         except Exception:  # noqa: BLE001
             return None
         if not points:
@@ -512,9 +502,7 @@ def _to_qdrant_filter(flt: Filter | None) -> Any:  # noqa: ANN401
     for key, values in flt.any_of.items():
         conditions.append(models.FieldCondition(key=key, match=models.MatchAny(any=list(values))))
     for key, value in flt.must_not.items():
-        conditions.append(
-            models.FieldCondition(key=key, match=models.MatchValue(value=value))
-        )
+        conditions.append(models.FieldCondition(key=key, match=models.MatchValue(value=value)))
 
     must = conditions[: len(flt.must) + len(flt.any_of)]
     must_not = conditions[len(must) :]

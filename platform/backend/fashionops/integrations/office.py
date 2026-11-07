@@ -27,6 +27,7 @@ office-docs / office-email / office-calendar 各自一台子进程。
 
 两者都没有时，接入层是空操作 —— 不会起任何子进程，不影响启动。
 """
+
 from __future__ import annotations
 
 import contextlib

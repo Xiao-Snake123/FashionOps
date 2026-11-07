@@ -71,16 +71,15 @@ UNION_TYPES = (Union, types.UnionType)
 # ---------------------------------------------------------------------------
 #: (字段名里的关键词, 生成函数)。顺序有意义：先匹配到的先用。
 _STRING_HINTS: list[tuple[tuple[str, ...], str]] = [
-    (("reason", "rationale", "why", "explain", "justify"),
-     "该款近 30 天动销率 68%，高于类目均值 23 个百分点，且竞品价格带存在空档"),
-    (("summary", "conclusion", "comment", "insight"),
-     "综合评分领先，建议优先排产；注意库存深度不足以支撑首波投放"),
-    (("title", "name", "subject"),
-     "秋季法式醋酸连衣裙收腰显瘦"),
+    (
+        ("reason", "rationale", "why", "explain", "justify"),
+        "该款近 30 天动销率 68%，高于类目均值 23 个百分点，且竞品价格带存在空档",
+    ),
+    (("summary", "conclusion", "comment", "insight"), "综合评分领先，建议优先排产；注意库存深度不足以支撑首波投放"),
+    (("title", "name", "subject"), "秋季法式醋酸连衣裙收腰显瘦"),
     (("sku",), "SKU00001"),
     (("spu",), "SPU20260001"),
-    (("code", "no", "number"),
-     "T260911001"),
+    (("code", "no", "number"), "T260911001"),
     (("url", "link", "href"), "https://mock-ecom.example.com/item/1000001"),
     (("email", "mail"), "ops@example.com"),
     (("color",), "米白"),
@@ -220,18 +219,12 @@ def fake_value(  # noqa: C901, PLR0911, PLR0912
         args = get_args(annotation)
         item_type = args[0] if args else str
         count = rng.randint(2, 3)
-        return [
-            fake_value(item_type, f"{field_name}_{i}", None, rng, depth=depth)
-            for i in range(count)
-        ]
+        return [fake_value(item_type, f"{field_name}_{i}", None, rng, depth=depth) for i in range(count)]
 
     if origin is dict:
         args = get_args(annotation)
         value_type = args[1] if len(args) > 1 else str
-        return {
-            f"key{i}": fake_value(value_type, f"{field_name}_{i}", None, rng, depth=depth)
-            for i in range(2)
-        }
+        return {f"key{i}": fake_value(value_type, f"{field_name}_{i}", None, rng, depth=depth) for i in range(2)}
 
     # ---- 标量 ----
     if annotation is str or annotation is Any or annotation is None:
@@ -378,9 +371,7 @@ class MockModelClient:
         **_: Any,
     ) -> ModelResponse:
         started = time.perf_counter()
-        response = self._compose(
-            messages, tools=tools, response_schema=response_schema, model=model
-        )
+        response = self._compose(messages, tools=tools, response_schema=response_schema, model=model)
 
         # 真的睡一下。虽然是假的，但让调用方感受到"模型是有延迟的"，
         # 才能暴露出并发、超时、进度反馈这些只在真实延迟下才出现的问题。
@@ -413,9 +404,7 @@ class MockModelClient:
         而内容的正确性由同一份逻辑保证。
         """
         started = time.perf_counter()
-        response = self._compose(
-            messages, tools=tools, response_schema=response_schema, model=model
-        )
+        response = self._compose(messages, tools=tools, response_schema=response_schema, model=model)
 
         # 工具调用不切片：它是一次性的结构体，切片没有意义，
         # 切了反而会让上游的"参数齐了没"判断变复杂。
@@ -529,10 +518,7 @@ class MockModelClient:
         required = func.get("parameters", {}).get("required", []) or []
         properties = func.get("parameters", {}).get("properties", {}) or {}
 
-        args = {
-            key: _default_for(properties.get(key, {}))
-            for key in required
-        }
+        args = {key: _default_for(properties.get(key, {})) for key in required}
         return ToolCall(
             id=f"call_{random.Random(hash(func.get('name', ''))).randrange(10**8):08d}",
             name=str(func.get("name", "")),

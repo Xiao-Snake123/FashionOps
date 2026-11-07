@@ -22,6 +22,7 @@
 审计表经常被同步到别的地方（ELK、数仓），
 密码一旦进去就等于泄漏，而且没人会想到去审计表里找密码。
 """
+
 from __future__ import annotations
 
 import logging
@@ -69,9 +70,7 @@ def _admin_errors() -> Iterator[None]:
     except AuthError as exc:
         # service 层抛的这些（用户名重复、邮箱占用、密码强度不够）都是**用户能修**的
         logger.info("账号管理参数被拒（%s）：%s", exc.reason or "-", exc)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 def _serialize_department(dept: Department) -> dict:
@@ -154,9 +153,7 @@ class UpdateDepartmentRequest(BaseModel):
 @router.get("/accounts", summary="账号列表（按管理范围自动过滤）")
 def list_accounts(
     q: str | None = Query(default=None, description="按用户名 / 姓名 / 邮箱模糊搜索"),
-    status_filter: str | None = Query(
-        default=None, alias="status", description="active / disabled / locked / pending"
-    ),
+    status_filter: str | None = Query(default=None, alias="status", description="active / disabled / locked / pending"),
     department_id: int | None = Query(default=None, description="仅跨部门管理员可用"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
@@ -195,12 +192,8 @@ def list_accounts(
             # 那它就不再是"我有多少账号"的答案，而只是一个重复的计数
             "stats": rules.account_stats(session, scope),
             "items": [rules.serialize_account(scope, u) for u in items],
-            "departments": [
-                _serialize_department(d) for d in rules.list_departments(session, scope)
-            ],
-            "assignable_roles": [
-                _serialize_role(r) for r in rules.assignable_roles(session, scope)
-            ],
+            "departments": [_serialize_department(d) for d in rules.list_departments(session, scope)],
+            "assignable_roles": [_serialize_role(r) for r in rules.assignable_roles(session, scope)],
         }
 
 
@@ -367,9 +360,7 @@ def create_department(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"部门标识 {code} 已存在",
             )
-        dept = Department(
-            code=code, name=payload.name.strip(), description=payload.description
-        )
+        dept = Department(code=code, name=payload.name.strip(), description=payload.description)
         session.add(dept)
         session.flush()
         record_audit(
@@ -582,9 +573,7 @@ def list_login_events(
                 "auth_method": event.auth_method,
                 "ip": event.ip,
                 "user_agent": event.user_agent,
-                "created_at": event.created_at.isoformat(timespec="seconds")
-                if event.created_at
-                else None,
+                "created_at": event.created_at.isoformat(timespec="seconds") if event.created_at else None,
                 "anomalies": flags,
                 "anomaly_note": _anomaly_note(flags, event),
             }

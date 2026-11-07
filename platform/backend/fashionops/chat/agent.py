@@ -190,9 +190,7 @@ class TurnSetup:
         self.principal = principal
         #: 用户权限 ∩ 对话 Agent 权限集。
         #: **这是唯一真实的越权防线** —— 用户自己没有的权限，对话里的 Agent 也不能有。
-        self.granted_scopes: frozenset[str] = effective_scopes(
-            principal, AGENT_SCOPES[CHAT_AGENT_NAME]
-        )
+        self.granted_scopes: frozenset[str] = effective_scopes(principal, AGENT_SCOPES[CHAT_AGENT_NAME])
         self.permissions: frozenset[str] = frozenset(principal.permissions)
 
 
@@ -214,9 +212,7 @@ def _load_conversation(conversation_no: str) -> dict[str, Any]:
 # ===========================================================================
 # 主入口
 # ===========================================================================
-def stream_turn(
-    *, conversation_no: str, principal: Principal, user_text: str
-) -> Iterator[dict[str, Any]]:
+def stream_turn(*, conversation_no: str, principal: Principal, user_text: str) -> Iterator[dict[str, Any]]:
     """用户发一句话，跑一个回合。
 
     用户消息在**启动后台线程之前**就落库了 —— 这样即使模型调用立刻失败，
@@ -234,9 +230,7 @@ def stream_turn(
     conversation_id = int(conversation["id"])
     setup = TurnSetup(conversation_no=conversation_no, principal=principal)
 
-    user_message = store.append_message(
-        conversation_id, role=MSG_ROLE_USER, content=user_text
-    )
+    user_message = store.append_message(conversation_id, role=MSG_ROLE_USER, content=user_text)
     if conversation["title"] in ("", "新对话"):
         store.rename(conversation_id, user_text[:60])
 
@@ -259,9 +253,7 @@ def stream_resume(*, conversation_no: str, principal: Principal) -> Iterator[dic
     yield from _drain(conversation, setup, None)
 
 
-def _drain(
-    conversation: dict[str, Any], setup: TurnSetup, user_text: str | None
-) -> Iterator[dict[str, Any]]:
+def _drain(conversation: dict[str, Any], setup: TurnSetup, user_text: str | None) -> Iterator[dict[str, Any]]:
     """起后台线程跑循环，把队列里的事件逐个吐出来。"""
     events: queue.Queue = queue.Queue()
     worker = threading.Thread(
@@ -301,9 +293,7 @@ _SENTINEL = object()
 # DeerFlow（LangGraph sidecar）后端的"漏桶"：和 _drain 同构，只是后台跑的是
 # DeerFlow 编排而不是平台自研循环。前端收到的帧格式完全一致。
 # ---------------------------------------------------------------------------
-def _drain_deerflow(
-    conversation: dict[str, Any], setup: TurnSetup, user_text: str
-) -> Iterator[dict[str, Any]]:
+def _drain_deerflow(conversation: dict[str, Any], setup: TurnSetup, user_text: str) -> Iterator[dict[str, Any]]:
     """新回合：worker 跑 DeerFlow 编排，主线程把队列里的平台帧转成 SSE。"""
     events: queue.Queue = queue.Queue()
     worker = threading.Thread(
@@ -436,8 +426,7 @@ def resolve_approval(
         # "接下来怎么办"由**调用方**补（`expired_message` 刻意不写死）：
         # 对话里的出路是重新说一遍，任务里是驳回把它停掉，两边不一样。
         raise ValueError(
-            lifecycle.expired_message(tool_name=tool_name)
-            + "请重新说一遍需求，我会基于当前数据重新准备。"
+            lifecycle.expired_message(tool_name=tool_name) + "请重新说一遍需求，我会基于当前数据重新准备。"
         )
 
     settings = get_settings()
@@ -446,15 +435,12 @@ def resolve_approval(
         # ---- 两道检查，都是"谁有权做这件事" ----
         required = _required_scopes(tool_name)
         if required and not (required & setup.granted_scopes):
-            raise PermissionError(
-                f"当前账号没有执行 {tool_name} 所需的权限：{' / '.join(sorted(required))}"
-            )
+            raise PermissionError(f"当前账号没有执行 {tool_name} 所需的权限：{' / '.join(sorted(required))}")
         if settings.approval_require_separate_user and principal.username == owner_username:
             # 能发起和能批准必须是两个人，否则闸口退化成"点一下就过"。
             # 这条和任务审批走的是同一个配置开关，行为保持一致。
             raise PermissionError(
-                "不能批准自己发起的操作（FASHIONOPS_APPROVAL_REQUIRE_SEPARATE_USER=true）。"
-                "请让另一位有权限的同事处理"
+                "不能批准自己发起的操作（FASHIONOPS_APPROVAL_REQUIRE_SEPARATE_USER=true）。请让另一位有权限的同事处理"
             )
 
     if approved:
@@ -466,10 +452,7 @@ def resolve_approval(
             "error": {
                 "code": "USER_REJECTED",
                 "message": "用户拒绝了这次操作",
-                "hint": (
-                    "**不要重试同一个操作**。可以问用户希望怎么改，"
-                    "或者改成一个不涉及该动作的方案。"
-                ),
+                "hint": ("**不要重试同一个操作**。可以问用户希望怎么改，或者改成一个不涉及该动作的方案。"),
                 "reason": reason,
             },
         }
@@ -645,9 +628,7 @@ def _drive(
     # 网关每次新起一个：它是**请求级**的（限流器、熔断器都带状态），
     # 复用进程级单例会让不同用户的调用互相影响配额。
     gateway = ToolGateway(registry)
-    catalog = build_catalog(
-        granted_scopes=setup.granted_scopes, permission_codes=setup.permissions
-    )
+    catalog = build_catalog(granted_scopes=setup.granted_scopes, permission_codes=setup.permissions)
 
     with session_scope() as session:
         rows = store.history(session, conversation_id, limit=memory.context_limit())
@@ -702,9 +683,7 @@ def _drive(
             )
 
         if internal == FORGET:
-            return longterm.forget_tool(
-                user_id=setup.principal.user_id, arguments=arguments
-            )
+            return longterm.forget_tool(user_id=setup.principal.user_id, arguments=arguments)
 
         if internal == ASK_USER:
             # 模型自己承认"我不确定"。**不做任何事**，把这一轮停下来等人。
@@ -717,9 +696,7 @@ def _drive(
                 {
                     "question": str(arguments.get("question") or "").strip(),
                     "options": [
-                        str(option).strip()
-                        for option in (arguments.get("options") or [])
-                        if str(option).strip()
+                        str(option).strip() for option in (arguments.get("options") or []) if str(option).strip()
                     ][:4],
                     "assumption": str(arguments.get("assumption") or "").strip(),
                 },

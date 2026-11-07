@@ -26,7 +26,7 @@ Create Date: 2026-09-21 09:00:00.000000
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import sqlalchemy as sa
 from alembic import op
@@ -39,10 +39,11 @@ def _now() -> datetime:
     引用 `fashionops.db.base.utcnow` 会让"以后这个函数改了签名"变成
     "历史迁移跑不动了"，而历史迁移是不能改的。
     """
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(UTC).replace(tzinfo=None)
 
-revision: str = 'd3e4f5a6b7c8'
-down_revision: str | None = 'c1d2e3f4a5b6'
+
+revision: str = "d3e4f5a6b7c8"
+down_revision: str | None = "c1d2e3f4a5b6"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -60,53 +61,53 @@ _SEED_DEPARTMENTS = (
 
 def upgrade() -> None:
     op.create_table(
-        'departments',
-        sa.Column('id', sa.Integer(), nullable=False),
-        sa.Column('code', sa.String(length=64), nullable=False),
-        sa.Column('name', sa.String(length=128), nullable=False),
+        "departments",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("code", sa.String(length=64), nullable=False),
+        sa.Column("name", sa.String(length=128), nullable=False),
         # description **不能带 server_default**：MySQL 拒绝给 TEXT 列设默认值
         # （错误 1101）。默认值由 ORM 侧给（`default=""`），
         # 建表 DDL 不需要它 —— 迁移脚本自己插入种子行时也会显式传值。
-        sa.Column('description', sa.Text(), nullable=False),
-        sa.Column('is_active', sa.Boolean(), nullable=False, server_default=sa.true()),
-        sa.Column('created_at', sa.DateTime(), nullable=False),
-        sa.Column('updated_at', sa.DateTime(), nullable=False),
-        sa.PrimaryKeyConstraint('id'),
+        sa.Column("description", sa.Text(), nullable=False),
+        sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
+        sa.Column("created_at", sa.DateTime(), nullable=False),
+        sa.Column("updated_at", sa.DateTime(), nullable=False),
+        sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index('ix_departments_code', 'departments', ['code'], unique=True)
+    op.create_index("ix_departments_code", "departments", ["code"], unique=True)
 
     # 用 batch 模式：SQLite 不支持 ALTER TABLE ADD CONSTRAINT，
     # 批量模式会重建表来达到同样效果，MySQL 上则退化成普通 ALTER。
-    with op.batch_alter_table('users') as batch:
-        batch.add_column(sa.Column('department_id', sa.Integer(), nullable=True))
-        batch.create_index('ix_users_department_id', ['department_id'])
+    with op.batch_alter_table("users") as batch:
+        batch.add_column(sa.Column("department_id", sa.Integer(), nullable=True))
+        batch.create_index("ix_users_department_id", ["department_id"])
         batch.create_foreign_key(
-            'fk_users_department_id',
-            'departments',
-            ['department_id'],
-            ['id'],
-            ondelete='SET NULL',
+            "fk_users_department_id",
+            "departments",
+            ["department_id"],
+            ["id"],
+            ondelete="SET NULL",
         )
 
     now = _now()
     op.bulk_insert(
         sa.table(
-            'departments',
-            sa.column('code', sa.String),
-            sa.column('name', sa.String),
-            sa.column('description', sa.Text),
-            sa.column('is_active', sa.Boolean),
-            sa.column('created_at', sa.DateTime),
-            sa.column('updated_at', sa.DateTime),
+            "departments",
+            sa.column("code", sa.String),
+            sa.column("name", sa.String),
+            sa.column("description", sa.Text),
+            sa.column("is_active", sa.Boolean),
+            sa.column("created_at", sa.DateTime),
+            sa.column("updated_at", sa.DateTime),
         ),
         [
             {
-                'code': code,
-                'name': name,
-                'description': desc,
-                'is_active': True,
-                'created_at': now,
-                'updated_at': now,
+                "code": code,
+                "name": name,
+                "description": desc,
+                "is_active": True,
+                "created_at": now,
+                "updated_at": now,
             }
             for code, name, desc in _SEED_DEPARTMENTS
         ],
@@ -114,10 +115,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    with op.batch_alter_table('users') as batch:
-        batch.drop_constraint('fk_users_department_id', type_='foreignkey')
-        batch.drop_index('ix_users_department_id')
-        batch.drop_column('department_id')
+    with op.batch_alter_table("users") as batch:
+        batch.drop_constraint("fk_users_department_id", type_="foreignkey")
+        batch.drop_index("ix_users_department_id")
+        batch.drop_column("department_id")
 
-    op.drop_index('ix_departments_code', table_name='departments')
-    op.drop_table('departments')
+    op.drop_index("ix_departments_code", table_name="departments")
+    op.drop_table("departments")

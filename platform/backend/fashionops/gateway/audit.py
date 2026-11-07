@@ -31,9 +31,24 @@ logger = logging.getLogger("fashionops.audit")
 
 #: 键名命中这些词就脱敏（大小写不敏感，做子串匹配）
 SENSITIVE_KEYWORDS: tuple[str, ...] = (
-    "password", "passwd", "secret", "token", "api_key", "apikey",
-    "authorization", "auth", "credential", "private_key", "access_key",
-    "session", "cookie", "signature", "mobile", "phone", "id_card", "idcard",
+    "password",
+    "passwd",
+    "secret",
+    "token",
+    "api_key",
+    "apikey",
+    "authorization",
+    "auth",
+    "credential",
+    "private_key",
+    "access_key",
+    "session",
+    "cookie",
+    "signature",
+    "mobile",
+    "phone",
+    "id_card",
+    "idcard",
 )
 
 MASK = "***"

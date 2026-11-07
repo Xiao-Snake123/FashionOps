@@ -45,6 +45,7 @@
 比对，防止文档里写了一个不存在的工具名，让模型照着调、拿到 `TOOL_NOT_FOUND`，
 而报错点离原因（md 里打错一个字）很远。
 """
+
 from __future__ import annotations
 
 from fashionops.skills.facts import describe, facts

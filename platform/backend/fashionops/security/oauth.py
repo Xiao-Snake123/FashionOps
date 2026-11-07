@@ -40,6 +40,7 @@
 进去了也是个空壳，反而会让管理员为了"能用"而随手给个高权限角色。
 **先建号、再授权**是更安全的顺序。
 """
+
 from __future__ import annotations
 
 import logging
@@ -288,8 +289,7 @@ def available_providers(settings: Any) -> list[dict[str, Any]]:
                 "configured": provider.configured,
                 "implemented": implemented,
                 "hint": (
-                    "已留好适配位：数据模型与配置项就绪，"
-                    "真实 HTTP 调用待接入（见 security/oauth.py）"
+                    "已留好适配位：数据模型与配置项就绪，真实 HTTP 调用待接入（见 security/oauth.py）"
                     if not implemented
                     else ""
                 ),

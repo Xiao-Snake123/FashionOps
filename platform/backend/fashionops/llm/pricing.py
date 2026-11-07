@@ -65,10 +65,7 @@ def estimate_cost(model: str, prompt_tokens: int, completion_tokens: int) -> Dec
     存库用 ``Numeric(12, 6)``，和这里对齐。
     """
     inp, out = price_of(model)
-    cost = (
-        Decimal(prompt_tokens) * inp / _PER_MILLION
-        + Decimal(completion_tokens) * out / _PER_MILLION
-    )
+    cost = Decimal(prompt_tokens) * inp / _PER_MILLION + Decimal(completion_tokens) * out / _PER_MILLION
     return cost.quantize(Decimal("0.000001"))
 
 

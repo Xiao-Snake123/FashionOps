@@ -21,6 +21,7 @@ MCP 客户端把服务端当**子进程**拉起（`python -m fashionops.mcp.serv
 `scopes` 的作用只是**收窄**（比如给外部系统一把只能读库存的 key），
 不是放大。
 """
+
 from __future__ import annotations
 
 import os

@@ -72,6 +72,7 @@
 
 Revision 级别的删除（清理测试数据）请用 CLI，不要做成接口。
 """
+
 from __future__ import annotations
 
 import logging
@@ -226,8 +227,7 @@ def _assert_not_self(scope: AdminScope, target: User, *, action: str) -> None:
     """规则 3：不能对自己做这些动作。"""
     if target.id == scope.principal.user_id:
         raise AdminError(
-            f"不能{action}自己的账号。"
-            "修改自己的密码请用「修改密码」入口（需要原密码）",
+            f"不能{action}自己的账号。修改自己的密码请用「修改密码」入口（需要原密码）",
             reason="self_target",
         )
 
@@ -257,16 +257,12 @@ def assignable_roles(session: Session, scope: AdminScope) -> list[Role]:
     return [r for r in roles if r.permission_codes() <= mine]
 
 
-def _resolve_roles(
-    session: Session, scope: AdminScope, codes: list[str]
-) -> list[Role]:
+def _resolve_roles(session: Session, scope: AdminScope, codes: list[str]) -> list[Role]:
     """把角色码解析成角色实体，并校验每一个都在可授予范围内。"""
     by_code = {r.code: r for r in all_roles(session)}
     unknown = [c for c in codes if c not in by_code]
     if unknown:
-        raise AdminError(
-            f"角色不存在：{'、'.join(unknown)}", reason="unknown_role"
-        )
+        raise AdminError(f"角色不存在：{'、'.join(unknown)}", reason="unknown_role")
 
     allowed = {r.code for r in assignable_roles(session, scope)}
     forbidden = [c for c in codes if c not in allowed]
@@ -308,26 +304,19 @@ def account_stats(session: Session, scope: AdminScope) -> dict[str, int]:
     """
     if not scope.global_scope:
         if scope.department_id is None:
-            return dict.fromkeys(
-                ("total", "active", "disabled", "locked", "pending", "superusers"), 0
-            )
+            return dict.fromkeys(("total", "active", "disabled", "locked", "pending", "superusers"), 0)
         scope_filter = [User.department_id == scope.department_id]
     else:
         scope_filter = []
 
     rows = session.execute(
-        select(User.status, func.count())
-        .select_from(User)
-        .where(*scope_filter)
-        .group_by(User.status)
+        select(User.status, func.count()).select_from(User).where(*scope_filter).group_by(User.status)
     ).all()
     by_status = {status: int(count) for status, count in rows}
 
-    superusers = session.scalar(
-        select(func.count())
-        .select_from(User)
-        .where(*scope_filter, User.is_superuser.is_(True))
-    ) or 0
+    superusers = (
+        session.scalar(select(func.count()).select_from(User).where(*scope_filter, User.is_superuser.is_(True))) or 0
+    )
 
     return {
         "total": sum(by_status.values()),
@@ -347,9 +336,7 @@ def get_account(session: Session, user_id: int) -> User | None:
     会退化成按需加载，甚至在某些 session 状态下直接算成空集，
     而空集意味着"这个人权限最低，谁都能管"，是个**开在权限判定上的洞**。
     """
-    return session.scalar(
-        select(User).options(_USER_LOAD).where(User.id == user_id)
-    )
+    return session.scalar(select(User).options(_USER_LOAD).where(User.id == user_id))
 
 
 def list_accounts(
@@ -392,19 +379,10 @@ def list_accounts(
             )
         )
 
-    total = session.scalar(
-        select(func.count()).select_from(User).where(*filters)
-    ) or 0
+    total = session.scalar(select(func.count()).select_from(User).where(*filters)) or 0
 
     items = list(
-        session.scalars(
-            select(User)
-            .options(_USER_LOAD)
-            .where(*filters)
-            .order_by(User.id)
-            .limit(limit)
-            .offset(offset)
-        )
+        session.scalars(select(User).options(_USER_LOAD).where(*filters).order_by(User.id).limit(limit).offset(offset))
     )
     return items, int(total)
 
@@ -438,22 +416,16 @@ def create_account(
     principal = scope.principal
 
     if is_superuser and not principal.is_superuser:
-        raise _forbidden(
-            "只有超级管理员能创建超级管理员账号", reason="escalation_superuser"
-        )
+        raise _forbidden("只有超级管理员能创建超级管理员账号", reason="escalation_superuser")
 
     # 部门：部门主管建号一律落在自己部门。
     # 显式传了别的部门时**报错而不是静默改写** —— 静默改写会让调用方
     # 以为自己成功地把人放进了目标部门，直到很久以后对不上号才发现。
     if not scope.global_scope:
         if scope.department_id is None:
-            raise _forbidden(
-                "你的账号还没有归属部门，无法新建账号", reason="actor_without_department"
-            )
+            raise _forbidden("你的账号还没有归属部门，无法新建账号", reason="actor_without_department")
         if department_id is not None and department_id != scope.department_id:
-            raise _forbidden(
-                "只能在本部门内新建账号", reason="out_of_department"
-            )
+            raise _forbidden("只能在本部门内新建账号", reason="out_of_department")
         department_id = scope.department_id
 
     if department_id is not None:
@@ -485,9 +457,7 @@ def create_account(
         # 没给角色的账号登进去什么都看不见。这不是错误（"先建号、后授权"
         # 是合理的流程），但必须说出来，否则会变成一张"账号建了但没有用"的工单
         warnings.append("该账号还没有任何角色，登录后将看不到任何功能")
-    return CreatedAccount(
-        user=user, generated_password=result.generated_password, warnings=warnings
-    )
+    return CreatedAccount(user=user, generated_password=result.generated_password, warnings=warnings)
 
 
 def _assert_department_exists(session: Session, department_id: int) -> Department:
@@ -495,15 +465,11 @@ def _assert_department_exists(session: Session, department_id: int) -> Departmen
     if dept is None:
         raise AdminError(f"部门 {department_id} 不存在", reason="unknown_department")
     if not dept.is_active:
-        raise AdminError(
-            f"部门「{dept.name}」已停用，不能再往里面加人", reason="department_inactive"
-        )
+        raise AdminError(f"部门「{dept.name}」已停用，不能再往里面加人", reason="department_inactive")
     return dept
 
 
-def _replace_roles(
-    session: Session, user: User, roles: list[Role], *, granted_by: str
-) -> None:
+def _replace_roles(session: Session, user: User, roles: list[Role], *, granted_by: str) -> None:
     """把用户的角色**替换**成给定集合（不是追加）。
 
     替换语义是接口唯一能表达"我把他的权限改成了什么"的方式。
@@ -513,9 +479,7 @@ def _replace_roles(
     session.execute(UserRole.__table__.delete().where(UserRole.user_id == user.id))
     session.flush()
     for role in roles:
-        session.add(
-            UserRole(user_id=user.id, role_id=role.id, granted_by=granted_by)
-        )
+        session.add(UserRole(user_id=user.id, role_id=role.id, granted_by=granted_by))
     session.flush()
     session.expire(user, ["roles"])
 
@@ -572,9 +536,7 @@ def update_account(
     if department_id is not _UNSET:
         _assert_not_self(scope, target, action="调整部门")
         if not scope.global_scope and department_id != scope.department_id:
-            raise _forbidden(
-                "只能把账号留在本部门内", reason="out_of_department"
-            )
+            raise _forbidden("只能把账号留在本部门内", reason="out_of_department")
         if department_id is not None:
             _assert_department_exists(session, department_id)
         target.department_id = department_id
@@ -620,9 +582,7 @@ def reset_password(
     # 旧会话还在的话攻击者手里的 refresh token 照样能换新 access token，
     # 重置就成了心理安慰。
     set_password(session, target, password)
-    logger.info(
-        "管理员 %s 重置了 %s 的密码", scope.principal.username, target.username
-    )
+    logger.info("管理员 %s 重置了 %s 的密码", scope.principal.username, target.username)
     return generated or ""
 
 
@@ -647,12 +607,8 @@ def serialize_account(scope: AdminScope, user: User) -> dict[str, Any]:
         "department_id": user.department_id,
         "roles": user.role_codes(),
         "permissions": sorted(user_permission_codes(user)),
-        "last_login_at": user.last_login_at.isoformat(timespec="seconds")
-        if user.last_login_at
-        else None,
-        "created_at": user.created_at.isoformat(timespec="seconds")
-        if user.created_at
-        else None,
+        "last_login_at": user.last_login_at.isoformat(timespec="seconds") if user.last_login_at else None,
+        "created_at": user.created_at.isoformat(timespec="seconds") if user.created_at else None,
         # 供界面决定这一行的按钮是可用还是灰掉。**不是安全边界** ——
         # 后端每次写操作都会重新判一遍。
         "can_manage": blocker is None,

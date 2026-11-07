@@ -54,9 +54,7 @@ class SheetSpec(BaseModel):
 
 
 class ExportExcelArgs(BaseModel):
-    filename: str = Field(
-        min_length=1, max_length=120, description="文件名（不含路径），如「选品分析.xlsx」"
-    )
+    filename: str = Field(min_length=1, max_length=120, description="文件名（不含路径），如「选品分析.xlsx」")
     title: str = Field(description="报表大标题")
     subtitle: str | None = Field(default=None, description="副标题，通常写数据口径与时间范围")
     sheets: list[SheetSpec] = Field(min_length=1, max_length=10)
@@ -230,10 +228,7 @@ def export_excel_core(
 def register(registry: ToolRegistry) -> None:
     @registry.tool(
         name="report.export_excel",
-        description=(
-            "把结构化数据渲染成 Excel 报表，落盘并登记为素材。"
-            "返回 asset_no 与访问 URL，可以写进邮件正文。"
-        ),
+        description=("把结构化数据渲染成 Excel 报表，落盘并登记为素材。返回 asset_no 与访问 URL，可以写进邮件正文。"),
         args_model=ExportExcelArgs,
         scopes=(Scope.ASSET_WRITE,),
         read_only=False,

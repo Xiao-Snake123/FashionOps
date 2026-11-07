@@ -83,9 +83,7 @@ class ScoreWeights:
     stock_depth: float = 0.10
 
     def __post_init__(self) -> None:
-        total = (
-            self.sell_through + self.margin + self.price_gap + self.rating + self.stock_depth
-        )
+        total = self.sell_through + self.margin + self.price_gap + self.rating + self.stock_depth
         if abs(total - 1.0) > 1e-6:
             # 权重和不为 1 时总分范围会漂移，排序还能用但分数没有可比性。
             # 明确报错比"默默接受"好 —— 后者会让不同批次的分数字段对不上。
@@ -217,9 +215,7 @@ class SelectionOutcome:
 # ---------------------------------------------------------------------------
 # 硬约束
 # ---------------------------------------------------------------------------
-def check_constraints(
-    candidate: Mapping[str, Any], constraints: HardConstraints
-) -> Rejection | None:
+def check_constraints(candidate: Mapping[str, Any], constraints: HardConstraints) -> Rejection | None:
     """返回 ``None`` 表示通过；返回 ``Rejection`` 表示被挡掉。"""
     spu = str(candidate.get("spu_code") or "?")
     title = str(candidate.get("title") or "")
@@ -230,7 +226,9 @@ def check_constraints(
     stock = int(candidate.get("available_stock") or 0)
     if stock < constraints.min_stock:
         return Rejection(
-            spu, title, "stock",
+            spu,
+            title,
+            "stock",
             f"可用库存 {stock} 件，低于下限 {constraints.min_stock} 件（卖出去发不了货）",
         )
 
@@ -239,7 +237,9 @@ def check_constraints(
         return Rejection(spu, title, "margin", "缺少成本或吊牌价，无法计算毛利")
     if float(margin) < constraints.min_margin_rate:
         return Rejection(
-            spu, title, "margin",
+            spu,
+            title,
+            "margin",
             f"毛利率 {float(margin):.1%}，低于下限 {constraints.min_margin_rate:.0%}",
         )
 
@@ -247,7 +247,9 @@ def check_constraints(
         cost = candidate.get("cost_price")
         if cost is None or Decimal(str(cost)) > constraints.max_cost:
             return Rejection(
-                spu, title, "cost",
+                spu,
+                title,
+                "cost",
                 f"成本 ¥{cost} 超过上限 ¥{constraints.max_cost}",
             )
 
@@ -255,7 +257,9 @@ def check_constraints(
         rating = candidate.get("rating")
         if rating is None or float(rating) < constraints.min_rating:
             return Rejection(
-                spu, title, "rating",
+                spu,
+                title,
+                "rating",
                 f"评分 {rating} 低于下限 {constraints.min_rating}",
             )
 
@@ -345,9 +349,7 @@ def score_candidates(
             "sell_through": sell_rank,
             "margin": _clamp(margin / TARGET_MARGIN_RATE),
             "rating": (
-                _clamp((float(rating) - RATING_FLOOR) / (RATING_CEIL - RATING_FLOOR))
-                if rating is not None
-                else 0.0
+                _clamp((float(rating) - RATING_FLOOR) / (RATING_CEIL - RATING_FLOOR)) if rating is not None else 0.0
             ),
             "stock_depth": _clamp(stock / TARGET_STOCK),
             "price_gap": _price_gap_score(price, competitor),
@@ -405,9 +407,7 @@ def _price_gap_score(price: Any, competitor_avg: Any) -> float:
     return _clamp(gap / 0.30)
 
 
-def _build_highlights(
-    candidate: Mapping[str, Any], dimensions: dict[str, float], weights: ScoreWeights
-) -> list[str]:
+def _build_highlights(candidate: Mapping[str, Any], dimensions: dict[str, float], weights: ScoreWeights) -> list[str]:
     """给每个候选生成可读的加分理由。
 
     注意这是**代码生成的**，不是模型编的 —— 每条都能对回具体数字，

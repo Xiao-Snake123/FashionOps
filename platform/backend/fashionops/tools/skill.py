@@ -14,6 +14,7 @@
 （见 `agents/loop.py` 的 `_guide_for`），题面已知，直接注入正文。
 同一条链上，是代码知道的事就不该再去问模型一次。
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -24,9 +25,7 @@ from fashionops.gateway.registry import ToolRegistry
 
 
 class LoadSkillArgs(BaseModel):
-    name: str = Field(
-        description="技能名，**必须来自系统提示里的技能索引**，例如 sku-selection。不要猜名字"
-    )
+    name: str = Field(description="技能名，**必须来自系统提示里的技能索引**，例如 sku-selection。不要猜名字")
 
 
 def register(registry: ToolRegistry) -> None:
@@ -62,10 +61,7 @@ def register(registry: ToolRegistry) -> None:
                 "found": False,
                 "reason": "skill_not_found",
                 "message": f"没有名为 {name!r} 的技能",
-                "hint": (
-                    f"可用技能：{'、'.join(skill_names())}。"
-                    "请从系统提示的技能索引里选一个，**不要猜技能名**。"
-                ),
+                "hint": (f"可用技能：{'、'.join(skill_names())}。请从系统提示的技能索引里选一个，**不要猜技能名**。"),
             }
 
         return {

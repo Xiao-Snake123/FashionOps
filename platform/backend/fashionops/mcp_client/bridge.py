@@ -17,6 +17,7 @@
 `office:read` / `office:write`（见 `integrations/office.py`），因此「谁能读邮件、
 谁能发邮件」由平台 RBAC 统一管，而不是每个 office 服务器各搞一套。
 """
+
 from __future__ import annotations
 
 import logging

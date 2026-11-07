@@ -15,6 +15,7 @@ stdio 是 MCP 客户端拉起服务器最稳的方式：不需要服务器先起
 模式，关键是 **loop 和会话都常驻**，而不是每次调用现开一个（那样每次都起子进程，
 慢且状态全丢）。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -94,9 +95,7 @@ class McpStdioConnection:
         self._thread.start()
         if not self._ready.wait(self._startup_timeout):
             self.close()
-            raise McpConnectionError(
-                f"连接 {self.name} 超时（{self._startup_timeout}s 未初始化完成）"
-            )
+            raise McpConnectionError(f"连接 {self.name} 超时（{self._startup_timeout}s 未初始化完成）")
         if self._startup_error is not None:
             err = self._startup_error
             self.close()
@@ -152,9 +151,7 @@ class McpStdioConnection:
         try:
             return future.result(self._call_timeout)
         except TimeoutError as exc:
-            raise McpConnectionError(
-                f"调用 {self.name} 超时（>{self._call_timeout}s）"
-            ) from exc
+            raise McpConnectionError(f"调用 {self.name} 超时（>{self._call_timeout}s）") from exc
 
     def list_tools(self) -> list[Any]:
         result = self._submit(self._session.list_tools())

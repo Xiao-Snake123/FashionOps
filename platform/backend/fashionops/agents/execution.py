@@ -238,9 +238,7 @@ def mark_failed(task_no: str, exc: Exception) -> None:
     try:
         from fashionops.agents.recorder import TaskRecorder
 
-        TaskRecorder().finish(
-            task_no=task_no, status="failed", error_message=f"{type(exc).__name__}: {exc}"
-        )
+        TaskRecorder().finish(task_no=task_no, status="failed", error_message=f"{type(exc).__name__}: {exc}")
     except Exception:  # noqa: BLE001
         logger.exception("任务 %s 的失败状态也没能写进数据库", task_no)
 
@@ -262,17 +260,13 @@ def recover_orphaned_tasks() -> tuple[int, int]:
     task_count = 0
     try:
         with session_scope() as session:
-            orphans = session.scalars(
-                select(TaskTodo).where(TaskTodo.status == TODO_STATUS_RUNNING)
-            ).all()
+            orphans = session.scalars(select(TaskTodo).where(TaskTodo.status == TODO_STATUS_RUNNING)).all()
             for todo in orphans:
                 todo.status = TODO_STATUS_FAILED
                 todo.error = "后端重启，执行中断（启动自动回收）"
                 todo_count += 1
 
-            running_tasks = session.scalars(
-                select(Task).where(Task.status == TODO_STATUS_RUNNING)
-            ).all()
+            running_tasks = session.scalars(select(Task).where(Task.status == TODO_STATUS_RUNNING)).all()
             for task in running_tasks:
                 task.status = TODO_STATUS_FAILED
                 task.error_message = "后端重启，执行中断（启动自动回收）"

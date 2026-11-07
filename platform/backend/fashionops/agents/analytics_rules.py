@@ -138,9 +138,7 @@ def detect_alerts(
     return sorted(alerts, key=lambda a: (order[a.level], -a.value))
 
 
-def _scan_groups(
-    groups: list[dict[str, Any]], kind: str, overall_aov: float
-) -> list[Alert]:
+def _scan_groups(groups: list[dict[str, Any]], kind: str, overall_aov: float) -> list[Alert]:
     out: list[Alert] = []
     for row in groups:
         name = row["group"]
@@ -209,10 +207,7 @@ def _scan_groups(
                         metric="客单价",
                         value=round(aov, 2),
                         threshold=round(overall_aov * (1 - AOV_GAP_WARNING), 2),
-                        message=(
-                            f"{kind}「{name}」客单价 {aov:,.2f} 元，"
-                            f"比整体 {overall_aov:,.2f} 元低 {_pct(gap)}"
-                        ),
+                        message=(f"{kind}「{name}」客单价 {aov:,.2f} 元，比整体 {overall_aov:,.2f} 元低 {_pct(gap)}"),
                     )
                 )
     return out

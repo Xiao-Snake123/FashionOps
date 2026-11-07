@@ -176,9 +176,7 @@ def list_conversations(
         resolved = None
     elif resolved != "archived":
         raise HTTPException(status_code=400, detail="status 只能是 active / archived / all")
-    rows = store.list_conversations(
-        session, user_id=user_id, limit=limit, offset=offset, status=resolved
-    )
+    rows = store.list_conversations(session, user_id=user_id, limit=limit, offset=offset, status=resolved)
     return {
         "items": [store.serialize_conversation(r) for r in rows],
         # 真实总数（不是本页条数）—— 否则 limit=50 时前端永远看不到

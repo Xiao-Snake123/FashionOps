@@ -57,17 +57,13 @@ class MailSendArgs(BaseModel):
     body_text: str = Field(min_length=1, max_length=MAX_BODY_CHARS, description="纯文本正文")
     cc_addrs: list[str] | None = Field(default=None, description="抄送，可选")
     bcc_addrs: list[str] | None = Field(default=None, description="密送，可选")
-    body_html: str | None = Field(
-        default=None, max_length=MAX_BODY_CHARS, description="HTML 正文，可选"
-    )
+    body_html: str | None = Field(default=None, max_length=MAX_BODY_CHARS, description="HTML 正文，可选")
     attachment_asset_nos: list[str] | None = Field(
         default=None,
         max_length=5,
         description="附件素材编号列表，如 ['AS2609120001']。**只能传素材编号，不能传路径**",
     )
-    purpose: str | None = Field(
-        default=None, max_length=200, description="这封信为什么发，便于事后复盘"
-    )
+    purpose: str | None = Field(default=None, max_length=200, description="这封信为什么发，便于事后复盘")
     task_id: int | None = None
 
 
@@ -89,10 +85,7 @@ def _load_attachments(asset_nos: list[str]) -> tuple[list[AttachmentInfo], list[
     found: list[AttachmentInfo] = []
     missing: list[str] = []
     with session_scope() as session:
-        rows = {
-            a.asset_no: a
-            for a in session.scalars(select(Asset).where(Asset.asset_no.in_(asset_nos))).all()
-        }
+        rows = {a.asset_no: a for a in session.scalars(select(Asset).where(Asset.asset_no.in_(asset_nos))).all()}
     for asset_no in asset_nos:
         asset = rows.get(asset_no)
         if asset is None:
@@ -153,11 +146,7 @@ def _record(
             body_text=body_text,
             body_html=body_html,
             attachments=(
-                [
-                    {"filename": a.filename, "asset_no": a.asset_no, "size": a.size_bytes}
-                    for a in attachments
-                ]
-                or None
+                [{"filename": a.filename, "asset_no": a.asset_no, "size": a.size_bytes} for a in attachments] or None
             ),
             status=status,
             gate_decision=decision_code,

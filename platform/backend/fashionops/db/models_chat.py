@@ -113,9 +113,7 @@ class Conversation(Base):
     status: Mapped[str] = mapped_column(String(32), default=CONVERSATION_STATUS_ACTIVE)
 
     # ---- 归属 ----
-    user_id: Mapped[int | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"), index=True
-    )
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
     #: 用户名快照，理由见模块顶部的第 4 条
     username: Mapped[str] = mapped_column(String(64), default="user")
 
@@ -191,9 +189,7 @@ class ChatMessage(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    conversation_id: Mapped[int] = mapped_column(
-        ForeignKey("chat_conversations.id", ondelete="CASCADE"), index=True
-    )
+    conversation_id: Mapped[int] = mapped_column(ForeignKey("chat_conversations.id", ondelete="CASCADE"), index=True)
     seq: Mapped[int] = mapped_column(Integer, comment="会话内单调递增，SSE 靠它断点续传")
 
     role: Mapped[str] = mapped_column(String(16), comment="user/assistant/tool/system")
@@ -310,9 +306,7 @@ class Approval(Base):
 
     #: 提出这个请求的那条 assistant 消息（仅对话侧有）。
     #: 前端据此把审批卡片渲染在那条消息下面 —— 而不是在列表开头堆一堆卡片。
-    message_id: Mapped[int | None] = mapped_column(
-        ForeignKey("chat_messages.id", ondelete="SET NULL")
-    )
+    message_id: Mapped[int | None] = mapped_column(ForeignKey("chat_messages.id", ondelete="SET NULL"))
 
     #: 对话侧：第几轮。任务侧：第几个 todo（前端据此定位到具体步骤）。
     todo_seq: Mapped[int | None] = mapped_column(Integer)
@@ -331,9 +325,7 @@ class Approval(Base):
     status: Mapped[str] = mapped_column(String(32), default=APPROVAL_STATUS_PENDING)
 
     # ---- 决定留痕（HITL 存在的全部意义）----
-    decided_by_id: Mapped[int | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL")
-    )
+    decided_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     decided_by: Mapped[str | None] = mapped_column(String(64))
     decided_at: Mapped[datetime | None] = mapped_column(DateTime)
     decision_reason: Mapped[str | None] = mapped_column(Text)

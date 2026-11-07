@@ -30,58 +30,67 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = 'e5f6a7b8c9d0'
-down_revision: str | None = 'd3e4f5a6b7c8'
+revision: str = "e5f6a7b8c9d0"
+down_revision: str | None = "d3e4f5a6b7c8"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
     # ---- 1. tickets：人工侧字段（全部可空，不动已有数据）----
-    with op.batch_alter_table('tickets', schema=None) as batch_op:
-        batch_op.add_column(sa.Column('assignee', sa.String(length=64), nullable=True, comment='人工处理负责人（用户名）'))
-        batch_op.add_column(sa.Column('assigned_at', sa.DateTime(), nullable=True))
-        batch_op.add_column(sa.Column('human_status', sa.String(length=32), nullable=True, comment='人工处理阶段'))
-        batch_op.add_column(sa.Column('human_note', sa.String(length=255), nullable=True, comment='最新一条人工备注'))
-        batch_op.add_column(sa.Column('human_updated_at', sa.DateTime(), nullable=True))
-        batch_op.create_index(batch_op.f('ix_tickets_assignee_created'), ['assignee', 'created_at'], unique=False)
+    with op.batch_alter_table("tickets", schema=None) as batch_op:
+        batch_op.add_column(
+            sa.Column("assignee", sa.String(length=64), nullable=True, comment="人工处理负责人（用户名）")
+        )
+        batch_op.add_column(sa.Column("assigned_at", sa.DateTime(), nullable=True))
+        batch_op.add_column(sa.Column("human_status", sa.String(length=32), nullable=True, comment="人工处理阶段"))
+        batch_op.add_column(sa.Column("human_note", sa.String(length=255), nullable=True, comment="最新一条人工备注"))
+        batch_op.add_column(sa.Column("human_updated_at", sa.DateTime(), nullable=True))
+        batch_op.create_index(batch_op.f("ix_tickets_assignee_created"), ["assignee", "created_at"], unique=False)
 
     # ---- 2. 登录事件表 ----
     op.create_table(
-        'login_events',
-        sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column('username', sa.String(length=64), nullable=False, comment='登录时填的用户名。用户不存在时也要记 —— 探测账号名的行为本身就是信号'),
-        sa.Column('user_id', sa.Integer(), nullable=True, comment='登录成功才有。用 SET NULL，用户被删后事件仍然保留'),
-        sa.Column('success', sa.Boolean(), nullable=False, comment='是否登录成功'),
-        sa.Column('reason', sa.String(length=64), nullable=True, comment='失败原因：bad_password/disabled/locked/unknown_user'),
-        sa.Column('auth_method', sa.String(length=32), nullable=False, comment='password/api_key/oauth:dingtalk'),
-        sa.Column('ip', sa.String(length=64), nullable=True),
+        "login_events",
+        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
+        sa.Column(
+            "username",
+            sa.String(length=64),
+            nullable=False,
+            comment="登录时填的用户名。用户不存在时也要记 —— 探测账号名的行为本身就是信号",
+        ),
+        sa.Column("user_id", sa.Integer(), nullable=True, comment="登录成功才有。用 SET NULL，用户被删后事件仍然保留"),
+        sa.Column("success", sa.Boolean(), nullable=False, comment="是否登录成功"),
+        sa.Column(
+            "reason", sa.String(length=64), nullable=True, comment="失败原因：bad_password/disabled/locked/unknown_user"
+        ),
+        sa.Column("auth_method", sa.String(length=32), nullable=False, comment="password/api_key/oauth:dingtalk"),
+        sa.Column("ip", sa.String(length=64), nullable=True),
         # UA 只截前 255：它是客户端完全可控的字段，存全文等于给别人一个
         # 往库里塞超长字符串的地方（MySQL 的 TEXT 也不便宜）
-        sa.Column('user_agent', sa.String(length=255), nullable=True),
-        sa.Column('created_at', sa.DateTime(), nullable=False),
-        sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='SET NULL'),
-        sa.PrimaryKeyConstraint('id'),
+        sa.Column("user_agent", sa.String(length=255), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=False),
+        sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="SET NULL"),
+        sa.PrimaryKeyConstraint("id"),
     )
     # 查询模式固定是"按用户看最近 N 次"和"按时间倒序看全部" —— 两个索引各管一个
-    op.create_index(op.f('ix_login_events_username_created'), 'login_events', ['username', 'created_at'], unique=False)
-    op.create_index(op.f('ix_login_events_created'), 'login_events', ['created_at'], unique=False)
-    op.create_index(op.f('ix_login_events_user'), 'login_events', ['user_id'], unique=False)
+    op.create_index(op.f("ix_login_events_username_created"), "login_events", ["username", "created_at"], unique=False)
+    op.create_index(op.f("ix_login_events_created"), "login_events", ["created_at"], unique=False)
+    op.create_index(op.f("ix_login_events_user"), "login_events", ["user_id"], unique=False)
     # "扫失败登录"是安全排查里最常做的动作，单独一个索引避免全表扫
-    op.create_index(op.f('ix_login_events_success_created'), 'login_events', ['success', 'created_at'], unique=False)
+    op.create_index(op.f("ix_login_events_success_created"), "login_events", ["success", "created_at"], unique=False)
 
 
 def downgrade() -> None:
-    op.drop_index(op.f('ix_login_events_success_created'), table_name='login_events')
-    op.drop_index(op.f('ix_login_events_user'), table_name='login_events')
-    op.drop_index(op.f('ix_login_events_created'), table_name='login_events')
-    op.drop_index(op.f('ix_login_events_username_created'), table_name='login_events')
-    op.drop_table('login_events')
+    op.drop_index(op.f("ix_login_events_success_created"), table_name="login_events")
+    op.drop_index(op.f("ix_login_events_user"), table_name="login_events")
+    op.drop_index(op.f("ix_login_events_created"), table_name="login_events")
+    op.drop_index(op.f("ix_login_events_username_created"), table_name="login_events")
+    op.drop_table("login_events")
 
-    with op.batch_alter_table('tickets', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_tickets_assignee_created'))
-        batch_op.drop_column('human_updated_at')
-        batch_op.drop_column('human_note')
-        batch_op.drop_column('human_status')
-        batch_op.drop_column('assigned_at')
-        batch_op.drop_column('assignee')
+    with op.batch_alter_table("tickets", schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f("ix_tickets_assignee_created"))
+        batch_op.drop_column("human_updated_at")
+        batch_op.drop_column("human_note")
+        batch_op.drop_column("human_status")
+        batch_op.drop_column("assigned_at")
+        batch_op.drop_column("assignee")

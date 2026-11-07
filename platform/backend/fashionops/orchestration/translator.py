@@ -21,6 +21,7 @@ DeerFlow v2 的 SSE 用 LangGraph 的 stream modes：``messages`` / ``values`` /
 
 所以这里用 ``_SSEDecoder`` 显式持有状态，同步/异步两种喂法共用同一份实现。
 """
+
 from __future__ import annotations
 
 import json
@@ -32,6 +33,7 @@ class _SSEDecoder:
 
     用法：每读一行调一次 :meth:`feed`，读完调一次 :meth:`flush`。
     """
+
     __slots__ = ("_event", "_data")
 
     def __init__(self) -> None:

@@ -163,10 +163,7 @@ def cmd_init(_args: Namespace) -> int:
     if has_schema and version == "（未标记）":
         # 接管已存在的库：只写版本号，不跑 DDL。
         # 绝不能在这里 upgrade —— 那些表已经在了，CREATE TABLE 会直接报错。
-        print(
-            f"\n检测到库里已有 {len(_app_tables())} 张表（早期 create_all 建的），"
-            "先把迁移版本标到当前 head。"
-        )
+        print(f"\n检测到库里已有 {len(_app_tables())} 张表（早期 create_all 建的），先把迁移版本标到当前 head。")
         command.stamp(_alembic_config(), "head")
         print("已标记。后续变更走迁移，不再动这些表。")
         return cmd_info(_args)
@@ -255,9 +252,7 @@ def build_parser() -> ArgumentParser:
 
     p_rev = sub.add_parser("revision", help="生成新迁移")
     p_rev.add_argument("-m", "--message", required=True)
-    p_rev.add_argument(
-        "--no-autogenerate", action="store_true", help="生成空模板，手写升级逻辑"
-    )
+    p_rev.add_argument("--no-autogenerate", action="store_true", help="生成空模板，手写升级逻辑")
 
     for name, help_text in (("drop", "删除所有表"), ("reset", "删表后按迁移重建")):
         p = sub.add_parser(name, help=help_text)

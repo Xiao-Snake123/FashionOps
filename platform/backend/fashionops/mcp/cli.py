@@ -13,6 +13,7 @@ key 没配、key 过期、或者那把 key 的归属用户根本没有对应权�
 `tools` 让你**不用打开 Claude Desktop** 就能看到这把 key 究竟能暴露什么，
 把"客户端那边看不见工具"这个问题在命令行里就定位掉。
 """
+
 from __future__ import annotations
 
 import sys

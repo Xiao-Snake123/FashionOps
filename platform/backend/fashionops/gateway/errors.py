@@ -48,9 +48,7 @@ class ErrorCode(StrEnum):
 #:
 #: 注意 ``RATE_LIMITED`` **不在**这里：限流说明我们已经在给对方压力了，
 #: 立刻重试只会让情况更糟 —— 应该等冷却时间过去（hint 里会写清楚等多久）。
-RETRYABLE: frozenset[ErrorCode] = frozenset(
-    {ErrorCode.UPSTREAM_TIMEOUT, ErrorCode.UPSTREAM_ERROR}
-)
+RETRYABLE: frozenset[ErrorCode] = frozenset({ErrorCode.UPSTREAM_TIMEOUT, ErrorCode.UPSTREAM_ERROR})
 
 #: 网关层错误（限流/熔断/权限）意味着"这次调用根本没发出去"。
 #: 审计日志里要区分它们和下游错误，否则熔断统计会把两件事混在一起。

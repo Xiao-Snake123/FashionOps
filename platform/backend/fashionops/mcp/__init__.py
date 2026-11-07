@@ -38,6 +38,7 @@ MCP 客户端把服务端当子进程拉起，JSON-RPC 帧走**标准输出**。
 "哪个外部系统、什么时候、调了什么"这种记录丢不起 —— 所以服务进程里
 显式传 `SqlAuditSink()`，让 MCP 调用落到 `audit_logs` 表。
 """
+
 from __future__ import annotations
 
 from fashionops.mcp.auth import ENV_API_KEY, McpIdentity, resolve

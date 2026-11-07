@@ -52,9 +52,7 @@ def build_vector_store(settings: Settings | None = None) -> VectorStore:
             "要临时离线跑，把 FASHIONOPS_VECTOR_BACKEND 设为 memory。"
         )
 
-    raise ValueError(
-        f"未知的向量后端 {backend!r}。可选：qdrant（默认）/ memory（测试用）"
-    )
+    raise ValueError(f"未知的向量后端 {backend!r}。可选：qdrant（默认）/ memory（测试用）")
 
 
 def get_vector_store(settings: Settings | None = None) -> VectorStore:

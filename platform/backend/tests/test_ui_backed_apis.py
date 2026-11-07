@@ -17,12 +17,12 @@
 
 from __future__ import annotations
 
-import pytest
 from decimal import Decimal
 
+import pytest
+from conftest import TEST_ADMIN_USERNAME, admin_headers_for
 from sqlalchemy.orm import sessionmaker
 
-from conftest import TEST_ADMIN_USERNAME, admin_headers_for
 from fashionops.db.models import AdCampaign, Ticket
 from fashionops.db.models_identity import LoginEvent
 
@@ -57,14 +57,14 @@ def test_campaign_approve_then_pause(client, db):  # noqa: ANN001
     )
     headers = admin_headers_for(client, db)
 
-    r = client.post(f"/api/v1/campaigns/AC20261001001/approve", headers=headers, json={})
+    r = client.post("/api/v1/campaigns/AC20261001001/approve", headers=headers, json={})
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["status"] == "running"
     assert body["approved_by"] is not None
 
     # 止损是唯一直达 paused、且不需要再走一轮审批的写操作
-    r = client.post(f"/api/v1/campaigns/AC20261001001/pause", headers=headers, json={})
+    r = client.post("/api/v1/campaigns/AC20261001001/pause", headers=headers, json={})
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "paused"
 
@@ -82,11 +82,11 @@ def test_campaign_reject_requires_reason(client, db):  # noqa: ANN001
     headers = admin_headers_for(client, db)
 
     # 驳回必须写原因：申请人要靠它知道怎么改
-    r = client.post(f"/api/v1/campaigns/AC20261001002/reject", headers=headers, json={})
+    r = client.post("/api/v1/campaigns/AC20261001002/reject", headers=headers, json={})
     assert r.status_code == 400, r.text
 
     r = client.post(
-        f"/api/v1/campaigns/AC20261001002/reject",
+        "/api/v1/campaigns/AC20261001002/reject",
         headers=headers,
         json={"reason": "预算超标，等月底再提"},
     )
@@ -107,7 +107,7 @@ def test_campaign_change_budget(client, db):  # noqa: ANN001
     headers = admin_headers_for(client, db)
 
     r = client.post(
-        f"/api/v1/campaigns/AC20261001003/budget",
+        "/api/v1/campaigns/AC20261001003/budget",
         headers=headers,
         json={"budget_daily": 500},
     )
@@ -128,7 +128,7 @@ def test_campaign_approve_wrong_state_is_409(client, db):  # noqa: ANN001
         ),
     )
     headers = admin_headers_for(client, db)
-    r = client.post(f"/api/v1/campaigns/AC20261001004/approve", headers=headers, json={})
+    r = client.post("/api/v1/campaigns/AC20261001004/approve", headers=headers, json={})
     assert r.status_code == 409, r.text
 
 
@@ -167,7 +167,7 @@ def test_ticket_assign_and_progress(client, db):  # noqa: ANN001
     headers = admin_headers_for(client, db)
 
     r = client.post(
-        f"/api/v1/service/tickets/TK20261001001/assign",
+        "/api/v1/service/tickets/TK20261001001/assign",
         headers=headers,
         json={"assignee": "alice"},
     )
@@ -175,7 +175,7 @@ def test_ticket_assign_and_progress(client, db):  # noqa: ANN001
     assert r.json()["assignee"] == "alice"
 
     r = client.post(
-        f"/api/v1/service/tickets/TK20261001001/progress",
+        "/api/v1/service/tickets/TK20261001001/progress",
         headers=headers,
         json={"human_status": "contacted", "note": "已电话答复"},
     )

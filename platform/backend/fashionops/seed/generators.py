@@ -99,8 +99,7 @@ KB_CATEGORIES = {
     "物流": [
         (
             "多久发货",
-            "付款后 48 小时内发货，大促期间（双11/618）可能延长至 72 小时，"
-            "下单页会显示预计发货时间。",
+            "付款后 48 小时内发货，大促期间（双11/618）可能延长至 72 小时，下单页会显示预计发货时间。",
         ),
         ("能指定快递吗", "默认发中通/圆通。需要指定顺丰请下单备注，顺丰需补差价 8 元。"),
         (
@@ -111,11 +110,11 @@ KB_CATEGORIES = {
     "材质": [
         (
             "醋酸面料怎么洗",
-            "建议干洗或手洗（30 度以下冷水），不可漂白、不可拧干，阴凉处悬挂晾干。醋酸怕高温，禁止熨烫超过 110 度。"),
+            "建议干洗或手洗（30 度以下冷水），不可漂白、不可拧干，阴凉处悬挂晾干。醋酸怕高温，禁止熨烫超过 110 度。",
+        ),
         (
             "羊毛会起球吗",
-            "羊毛混纺在摩擦部位（袖口、腋下）会有轻微起球，属正常现象。"
-            "用毛球修剪器处理即可，不影响穿着。",
+            "羊毛混纺在摩擦部位（袖口、腋下）会有轻微起球，属正常现象。用毛球修剪器处理即可，不影响穿着。",
         ),
         ("掉色正常吗", "深色纯棉首次下水有轻微浮色属正常。建议单独手洗、冷水、加少量食盐固色。"),
     ],
@@ -213,9 +212,7 @@ def make_products(rng: random.Random, count: int = 60) -> list[dict]:
         cost = Decimal(rng.randrange(4000, 22000)) / 100  # 40.00 ~ 220.00
         list_price = (cost * Decimal(str(round(rng.uniform(2.6, 4.2), 2)))).quantize(Decimal("0.01"))
 
-        status = rng.choices(
-            ["on_sale", "ready", "draft", "off_shelf"], weights=[5, 2, 2, 1]
-        )[0]
+        status = rng.choices(["on_sale", "ready", "draft", "off_shelf"], weights=[5, 2, 2, 1])[0]
         products.append(
             {
                 "spu_code": f"SPU{2026}{i + 1:04d}",
@@ -225,9 +222,7 @@ def make_products(rng: random.Random, count: int = 60) -> list[dict]:
                 "season": season,
                 "brand": f"{style}衣橱",
                 "style_tags": rng.sample(STYLES, k=2),
-                "target_audience": rng.choice(
-                    ["18-25 学生党", "25-30 职场新人", "30-38 轻熟白领", "全年龄段"]
-                ),
+                "target_audience": rng.choice(["18-25 学生党", "25-30 职场新人", "30-38 轻熟白领", "全年龄段"]),
                 "fabric": fabric,
                 "cost_price": cost,
                 "list_price": list_price,
@@ -327,9 +322,7 @@ def make_competitors(rng: random.Random, count: int = 80) -> list[dict]:
 # ===========================================================================
 # 库存
 # ===========================================================================
-def make_inventory(
-    rng: random.Random, sku_count: int, days: int = 60
-) -> tuple[list[dict], dict[int, int]]:
+def make_inventory(rng: random.Random, sku_count: int, days: int = 60) -> tuple[list[dict], dict[int, int]]:
     """生成库存流水，并返回**期末可用库存**快照。
 
     ``final_stock[sku_index]`` 是选品 Agent 做硬约束过滤时用的库存量。
@@ -346,9 +339,7 @@ def make_inventory(
     """
     start = seed_now() - timedelta(days=days)
     end = seed_now()
-    stockout_skus = set(
-        rng.sample(range(1, sku_count + 1), k=max(1, int(sku_count * STOCKOUT_RATIO)))
-    )
+    stockout_skus = set(rng.sample(range(1, sku_count + 1), k=max(1, int(sku_count * STOCKOUT_RATIO))))
 
     rows: list[dict] = []
     final_stock: dict[int, int] = {}
@@ -365,9 +356,7 @@ def make_inventory(
                 hours=rng.randrange(9, 22),
                 minutes=rng.randrange(0, 60),
             )
-            kind = rng.choices(
-                ["sale", "return", "in", "out", "adjust"], weights=[10, 2, 3, 2, 1]
-            )[0]
+            kind = rng.choices(["sale", "return", "in", "out", "adjust"], weights=[10, 2, 3, 2, 1])[0]
             if kind == "sale":
                 qty = -rng.randrange(1, 6)
             elif kind == "return":
@@ -427,11 +416,7 @@ def make_inventory(
                     "quantity": target - balance,
                     "quantity_after": target,
                     "ref_no": f"ADJ{end.strftime('%y%m%d')}{sku_index:05d}",
-                    "note": (
-                        "盘点调整：可售不足 5 件，需立即补货"
-                        if is_stockout
-                        else "月度盘点调整"
-                    ),
+                    "note": ("盘点调整：可售不足 5 件，需立即补货" if is_stockout else "月度盘点调整"),
                     "occurred_at": end,
                 }
             )
@@ -446,17 +431,13 @@ def make_inventory(
 # ===========================================================================
 # 订单与 BI
 # ===========================================================================
-def make_orders(
-    rng: random.Random, sku_meta: list[dict], days: int = 60, count: int = 800
-) -> list[dict]:
+def make_orders(rng: random.Random, sku_meta: list[dict], days: int = 60, count: int = 800) -> list[dict]:
     """``sku_meta`` 每项需含 ``sku_index / sale_price / product_title / category``。"""
     orders: list[dict] = []
     now = seed_now()
     for i in range(count):
         sku = rng.choice(sku_meta)
-        paid_at = now - timedelta(
-            days=rng.randrange(0, days), hours=rng.randrange(0, 14), minutes=rng.randrange(0, 60)
-        )
+        paid_at = now - timedelta(days=rng.randrange(0, days), hours=rng.randrange(0, 14), minutes=rng.randrange(0, 60))
         qty = rng.choices([1, 2, 3], weights=[82, 14, 4])[0]
         unit = sku["sale_price"]
         total = (unit * qty).quantize(Decimal("0.01"))
@@ -471,9 +452,7 @@ def make_orders(
             ["completed", "shipped", "paid", "refunded", "refunding", "cancelled"],
             weights=[58, 16, 8, 11, 5, 2],
         )[0]
-        refunded_at = (
-            paid_at + timedelta(days=rng.randrange(2, 12)) if status == "refunded" else None
-        )
+        refunded_at = paid_at + timedelta(days=rng.randrange(2, 12)) if status == "refunded" else None
         orders.append(
             {
                 "order_no": f"SO{paid_at.strftime('%y%m%d')}{i + 1:05d}",
@@ -525,9 +504,7 @@ def make_bi_metrics(rng: random.Random, orders: list[dict], days: int = 60) -> l
         day = now - timedelta(days=offset)
         # 周末流量高、工作日转化高 —— 制造一点可被 Agent 发现的规律
         weekend = day.weekday() >= 5
-        total_orders = sum(
-            s["orders"] for (d, _), s in sub_cat_stats.items() if d == day.isoformat()
-        )
+        total_orders = sum(s["orders"] for (d, _), s in sub_cat_stats.items() if d == day.isoformat())
         base_uv = rng.randrange(6000, 12000) * (1.25 if weekend else 1.0)
 
         for cat in cats:
@@ -572,9 +549,7 @@ def make_bi_metrics(rng: random.Random, orders: list[dict], days: int = 60) -> l
                     "gmv": gmv.quantize(Decimal("0.01")),
                     "order_count": order_count,
                     "customer_count": customers,
-                    "avg_order_value": (
-                        (gmv / order_count).quantize(Decimal("0.01")) if order_count else None
-                    ),
+                    "avg_order_value": ((gmv / order_count).quantize(Decimal("0.01")) if order_count else None),
                     "refund_amount": refund.quantize(Decimal("0.01")),
                     "return_rate": Decimal(str(round(return_rate, 6))),
                     "uv": uv,
@@ -614,9 +589,7 @@ def make_kb_articles() -> list[dict]:
     return rows
 
 
-def make_tickets(
-    rng: random.Random, order_nos: list[str], count: int = 60
-) -> list[dict]:
+def make_tickets(rng: random.Random, order_nos: list[str], count: int = 60) -> list[dict]:
     """生成工单。
 
     按 ``ANGRY_TICKET_RATIO`` 强制制造情绪激动的纠纷工单，
@@ -674,13 +647,9 @@ def make_tickets(
                 ),
                 "resolution": resolution,
                 "cited_article_nos": (
-                    [f"KB{rng.randrange(1, 14):04d}" for _ in range(rng.randrange(1, 3))]
-                    if not escalated
-                    else None
+                    [f"KB{rng.randrange(1, 14):04d}" for _ in range(rng.randrange(1, 3))] if not escalated else None
                 ),
-                "confidence": (
-                    None if escalated else Decimal(str(round(rng.uniform(0.62, 0.97), 6)))
-                ),
+                "confidence": (None if escalated else Decimal(str(round(rng.uniform(0.62, 0.97), 6)))),
                 "first_response_seconds": rng.randrange(2, 240) if handler == "agent" else rng.randrange(600, 7200),
                 "resolved_at": created + timedelta(hours=rng.randrange(1, 48)) if status == "closed" else None,
                 "created_at": created,
@@ -837,8 +806,7 @@ def make_tasks(rng: random.Random, count: int = 20) -> list[dict]:
                 "result": (
                     {
                         "summary": (
-                            f"已完成 {len(plan)} 步："
-                            + " ｜ ".join(_KIND_SUMMARY.get(s.kind, "已完成") for s in plan)
+                            f"已完成 {len(plan)} 步：" + " ｜ ".join(_KIND_SUMMARY.get(s.kind, "已完成") for s in plan)
                         ),
                         "todo_count": len(plan),
                     }
@@ -951,8 +919,15 @@ def _events_for_task(rng: random.Random, task_index: int, task: dict) -> list[di
     base = task["created_at"]
     rows: list[dict] = []
 
-    def emit(event_type: str, *, node: str | None = None, level: str = "info",
-             message: str = "", payload=None, duration_ms: int | None = None) -> None:
+    def emit(
+        event_type: str,
+        *,
+        node: str | None = None,
+        level: str = "info",
+        message: str = "",
+        payload=None,
+        duration_ms: int | None = None,
+    ) -> None:
         rows.append(
             {
                 "task_index": task_index,
@@ -984,40 +959,54 @@ def _events_for_task(rng: random.Random, task_index: int, task: dict) -> list[di
         if spec.seq > stop_at:
             # 取消/驳回之后，余下的步骤是被跳过的，不是失败
             if status == "cancelled":
-                emit("node_finished", node=node, level="warn",
-                     message=f"第 {spec.seq} 步被跳过：上游未通过人工确认")
+                emit("node_finished", node=node, level="warn", message=f"第 {spec.seq} 步被跳过：上游未通过人工确认")
             continue
 
         emit("todo_started", node=node, message=f"第 {spec.seq} 步（{spec.kind}）：{spec.goal}")
 
         for _ in range(rng.randrange(1, 4)):
             event_type, level, message = rng.choice(TODO_EVENT_TEMPLATES)
-            emit(event_type, node=node, level=level, message=message,
-                 payload={"elapsed_step": len(rows) + 1},
-                 duration_ms=rng.randrange(80, 9000))
+            emit(
+                event_type,
+                node=node,
+                level=level,
+                message=message,
+                payload={"elapsed_step": len(rows) + 1},
+                duration_ms=rng.randrange(80, 9000),
+            )
 
         if status == "waiting_approval" and spec.seq == stop_at:
-            emit("approval_required", node=node, level="warn",
-                 message="这一步会产生对外不可撤销的副作用，已挂起等待人工确认",
-                 payload=task.get("approval_payload"))
+            emit(
+                "approval_required",
+                node=node,
+                level="warn",
+                message="这一步会产生对外不可撤销的副作用，已挂起等待人工确认",
+                payload=task.get("approval_payload"),
+            )
             break
         if status == "running" and spec.seq == stop_at:
             break
         if status == "failed" and spec.seq == stop_at:
-            emit("node_finished", node=node, level="error",
-                 message=f"第 {spec.seq} 步失败：{task['error_message']}",
-                 duration_ms=rng.randrange(200, 24000))
+            emit(
+                "node_finished",
+                node=node,
+                level="error",
+                message=f"第 {spec.seq} 步失败：{task['error_message']}",
+                duration_ms=rng.randrange(200, 24000),
+            )
             break
 
-        emit("node_finished", node=node,
-             message=_KIND_SUMMARY.get(spec.kind, f"第 {spec.seq} 步完成"),
-             duration_ms=rng.randrange(200, 24000))
+        emit(
+            "node_finished",
+            node=node,
+            message=_KIND_SUMMARY.get(spec.kind, f"第 {spec.seq} 步完成"),
+            duration_ms=rng.randrange(200, 24000),
+        )
 
     if status == "succeeded":
         emit("task_finished", node="finalize", message="任务完成")
     elif status == "failed":
-        emit("task_failed", node="finalize", level="error",
-             message=task["error_message"] or "任务失败")
+        emit("task_failed", node="finalize", level="error", message=task["error_message"] or "任务失败")
     elif status == "cancelled":
         emit("task_cancelled", node="finalize", level="warn", message="任务已被人工取消")
     return rows
@@ -1100,15 +1089,10 @@ def make_task_todos(rng: random.Random, tasks: list[dict]) -> list[dict]:
                     "goal": spec.goal,
                     "kind": spec.kind,
                     "status": todo_status,
-                    "tool_names": (
-                        _KIND_TOOLS.get(spec.kind, []) if todo_status in ("done", "failed") else None
-                    ),
-                    "result_summary": (
-                        _KIND_SUMMARY.get(spec.kind) if todo_status == "done" else None
-                    ),
+                    "tool_names": (_KIND_TOOLS.get(spec.kind, []) if todo_status in ("done", "failed") else None),
+                    "result_summary": (_KIND_SUMMARY.get(spec.kind) if todo_status == "done" else None),
                     "artifact_nos": (
-                        ["AS20260911000001"] if spec.kind == "analytics" and todo_status == "done"
-                        else None
+                        ["AS20260911000001"] if spec.kind == "analytics" and todo_status == "done" else None
                     ),
                     "error": (
                         task["error_message"]
@@ -1158,14 +1142,9 @@ def make_agent_runs(rng: random.Random, tasks: list[dict]) -> list[dict]:
                     "agent_name": agent,
                     # 一次运行对应**一个 todo**，所以 node_name 是 todo-N；
                     # 客服那条链路跑的是工单，没有 todo，记 service
-                    "node_name": (
-                        None if agent == "service"
-                        else f"todo-{rng.randrange(1, len(task['_plan']) + 1)}"
-                    ),
+                    "node_name": (None if agent == "service" else f"todo-{rng.randrange(1, len(task['_plan']) + 1)}"),
                     "run_index": rng.randrange(1, 3),
-                    "model": rng.choices(
-                        ["deepseek-chat", "deepseek-chat", "qwen-turbo"], weights=[6, 3, 1]
-                    )[0],
+                    "model": rng.choices(["deepseek-chat", "deepseek-chat", "qwen-turbo"], weights=[6, 3, 1])[0],
                     "prompt_tokens": prompt_tokens,
                     "completion_tokens": completion_tokens,
                     "total_tokens": prompt_tokens + completion_tokens,
@@ -1227,14 +1206,11 @@ def make_assets(rng: random.Random, tasks: list[dict], count: int = 50) -> list[
                 "source": rng.choices(["generated", "uploaded"], weights=[8, 2])[0],
                 "generator": rng.choice(["creative", "video", "analytics"]),
                 "prompt": (
-                    f"秋季女装{ rng.choice(FABRICS) }{rng.choice(CATEGORIES['女装'])}，"
+                    f"秋季女装{rng.choice(FABRICS)}{rng.choice(CATEGORIES['女装'])}，"
                     f"{rng.choice(STYLES)}风格，模特实拍，柔和自然光，纯色背景"
                 ),
                 "review_status": review,
-                "review_note": (
-                    "手部比例不自然，已重绘" if review == "rejected"
-                    else None
-                ),
+                "review_note": ("手部比例不自然，已重绘" if review == "rejected" else None),
                 "regenerate_count": rng.randrange(0, 3) if review != "approved" else 0,
                 "meta": {"model": "mock-image-v1", "seed": rng.randrange(1, 10**6)},
                 "created_at": created,
@@ -1395,9 +1371,7 @@ def make_audit_logs(rng: random.Random, count: int = 300) -> list[dict]:
                 "action": action,
                 "resource": resource,
                 "args_digest": {"tool": tool_name, "sample_args": {"limit": rng.randrange(1, 200)}},
-                "result_summary": (
-                    f"返回 {rng.randrange(1, 500)} 条记录" if status == "success" else None
-                ),
+                "result_summary": (f"返回 {rng.randrange(1, 500)} 条记录" if status == "success" else None),
                 "status": status,
                 "error_code": (
                     rng.choice(["RATE_LIMITED", "CIRCUIT_OPEN", "PERMISSION_DENIED", "TOOL_TIMEOUT"])
@@ -1539,9 +1513,7 @@ def make_chat_demo(rng: random.Random, *, now: datetime | None = None) -> dict:
                     "completion_tokens": completion_tokens,
                     "cost": Decimal(str(round((prompt_tokens * 1e-6 + completion_tokens * 2e-6) * 7.2, 6))),
                     "latency_ms": rng.randrange(600, 12000) if role == "assistant" else None,
-                    "finish_reason": (
-                        "tool_calls" if tool_name else ("stop" if role == "assistant" else None)
-                    ),
+                    "finish_reason": ("tool_calls" if tool_name else ("stop" if role == "assistant" else None)),
                     "interrupted": False,
                     "created_at": created + timedelta(seconds=seq * 7),
                 }

@@ -114,9 +114,7 @@ class TestSemanticChecks:
 
         名字（如果写对）和值看起来都"像那么回事"，只有语义检查能发现。
         """
-        settings = _settings_from_env(
-            tmp_path, "FASHIONOPS_SMTP_HOST=3272109547@qq.com\n", monkeypatch
-        )
+        settings = _settings_from_env(tmp_path, "FASHIONOPS_SMTP_HOST=3272109547@qq.com\n", monkeypatch)
         report = check_config(settings)
 
         issue = next(i for i in report.issues if i.key == "FASHIONOPS_SMTP_HOST")
@@ -126,9 +124,7 @@ class TestSemanticChecks:
         assert "smtp.qq.com" in issue.suggestion
 
     def test_smtp_host_with_scheme(self, tmp_path, monkeypatch):
-        settings = _settings_from_env(
-            tmp_path, "FASHIONOPS_SMTP_HOST=smtp://smtp.qq.com\n", monkeypatch
-        )
+        settings = _settings_from_env(tmp_path, "FASHIONOPS_SMTP_HOST=smtp://smtp.qq.com\n", monkeypatch)
         report = check_config(settings)
         assert any("协议头" in i.message for i in report.issues)
 
@@ -157,9 +153,7 @@ class TestSemanticChecks:
         assert not report.errors
 
     def test_allowlist_entries_that_are_not_emails(self, tmp_path, monkeypatch):
-        settings = _settings_from_env(
-            tmp_path, "FASHIONOPS_MAIL_SEND_ALLOWLIST=ops@qq.com,not-an-email\n", monkeypatch
-        )
+        settings = _settings_from_env(tmp_path, "FASHIONOPS_MAIL_SEND_ALLOWLIST=ops@qq.com,not-an-email\n", monkeypatch)
         report = check_config(settings)
         assert any("不像邮箱" in i.message for i in report.issues)
 
@@ -232,9 +226,7 @@ class TestTheDoctorItself:
         clean = check_config(_settings_from_env(tmp_path, "", monkeypatch))
         assert clean.ok or clean.errors == []  # 空 .env 最多是 warning
 
-        dirty = check_config(
-            _settings_from_env(tmp_path, "FASHIONOPS_TYPO_HERE=1\n", monkeypatch)
-        )
+        dirty = check_config(_settings_from_env(tmp_path, "FASHIONOPS_TYPO_HERE=1\n", monkeypatch))
         assert not dirty.ok
         assert len(dirty.errors) == 1
 
@@ -259,6 +251,4 @@ def test_env_parsing_handles_common_shapes(tmp_path, monkeypatch, line, expected
     settings = _settings_from_env(tmp_path, f"{line}\n", monkeypatch)
     report = check_config(settings)
     unknown = [i for i in report.issues if "不存在" in i.message]
-    assert not any(i.key == expected for i in unknown), (
-        f"{line!r} 被误判为未知键 —— 解析器没处理好这种写法"
-    )
+    assert not any(i.key == expected for i in unknown), f"{line!r} 被误判为未知键 —— 解析器没处理好这种写法"

@@ -29,6 +29,7 @@
 共用一套之后，用户的权限集合可以**直接和 Agent 的权限集合求交集**（见
 `service.effective_scopes()`），"用户权限向下传导给 Agent"这件事就变成一行代码。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -172,8 +173,7 @@ PERMISSIONS: Final[tuple[PermissionDef, ...]] = (
         PERM_DEPT_USER,
         "管理本部门账号",
         "admin",
-        "只对本部门账号生效：新建/修改/停用、重置密码。"
-        "**不能跨部门，也不能授予自己没拥有的权限**",
+        "只对本部门账号生效：新建/修改/停用、重置密码。**不能跨部门，也不能授予自己没拥有的权限**",
     ),
     PermissionDef(PERM_ADMIN_ROLE, "管理角色", "admin", "创建角色、分配权限"),
     PermissionDef(PERM_ADMIN_AUDIT, "查看审计", "admin", "查看操作审计与登录记录"),
@@ -200,9 +200,7 @@ ROLE_ANALYST: Final = "analyst"
 ROLE_VIEWER: Final = "viewer"
 
 #: 只读权限集合（多个角色共用）
-_READONLY: Final = frozenset(
-    {PERM_TASK_READ, PERM_ERP_READ, PERM_ECOM_READ, PERM_AD_READ, PERM_KB_READ}
-)
+_READONLY: Final = frozenset({PERM_TASK_READ, PERM_ERP_READ, PERM_ECOM_READ, PERM_AD_READ, PERM_KB_READ})
 
 
 @dataclass(frozen=True)
@@ -272,8 +270,7 @@ ROLE_PRESETS: Final[tuple[RoleDef, ...]] = (
         "运营专员",
         "能发起任务、生成报表、用对话助手、处理客服工单，**不能审批、不能对外发信**",
         frozenset(
-            _READONLY
-            | {PERM_TASK_SUBMIT, PERM_CHAT_USE, PERM_TICKET_HANDLE, PERM_ASSET_WRITE, PERM_OFFICE_READ}
+            _READONLY | {PERM_TASK_SUBMIT, PERM_CHAT_USE, PERM_TICKET_HANDLE, PERM_ASSET_WRITE, PERM_OFFICE_READ}
         ),
     ),
     RoleDef(

@@ -32,9 +32,7 @@ from fashionops.tools import AGENT_SCOPES
 def _new_task(task_no: str, request: str) -> None:
     from fashionops.agents.execution import create_task_row
 
-    create_task_row(
-        task_no, user_request=request, task_type="generic", created_by="pytest"
-    )
+    create_task_row(task_no, user_request=request, task_type="generic", created_by="pytest")
 
 
 def _candidate(code: str = "SPU-001") -> dict:
@@ -56,11 +54,7 @@ def _todo_rows(bind, task_no: str) -> list[TaskTodo]:
     with Session(bind) as session:
         task = session.scalar(select(Task).where(Task.task_no == task_no))
         assert task is not None
-        return list(
-            session.scalars(
-                select(TaskTodo).where(TaskTodo.task_id == task.id).order_by(TaskTodo.seq)
-            ).all()
-        )
+        return list(session.scalars(select(TaskTodo).where(TaskTodo.task_id == task.id).order_by(TaskTodo.seq)).all())
 
 
 def _task(bind, task_no: str) -> Task:
@@ -86,9 +80,7 @@ def _tool_call_count(bind, task_no: str, tool: str) -> int:
         task = session.scalar(select(Task).where(Task.task_no == task_no))
         assert task is not None
         rows = session.scalars(
-            select(TaskEvent).where(
-                TaskEvent.task_id == task.id, TaskEvent.event_type == "tool_call"
-            )
+            select(TaskEvent).where(TaskEvent.task_id == task.id, TaskEvent.event_type == "tool_call")
         ).all()
         return sum(1 for r in rows if (r.payload or {}).get("tool") == tool)
 

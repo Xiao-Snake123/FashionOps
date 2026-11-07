@@ -154,11 +154,7 @@ class RedisRateLimiter:
 
         allowed = bool(int(allowed))
         count = int(count)
-        retry_after = (
-            0.0
-            if allowed
-            else max(0.0, window_s - (now_ms - int(oldest_ms)) / 1000)
-        )
+        retry_after = 0.0 if allowed else max(0.0, window_s - (now_ms - int(oldest_ms)) / 1000)
 
         return RateLimitDecision(
             allowed=allowed,

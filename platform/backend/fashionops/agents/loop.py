@@ -141,10 +141,7 @@ KIND_TOOLS: dict[str, tuple[str, ...]] = {
 #: **它刻意不是一个技能文档**：`generic` 是"关键词一个都没命中"的降级路径，
 #: 没有业务 SOP 可讲 —— 写成 md 只是把这两句话换个地方放，还多一次文件读取。
 #: 技能文档的门槛是"这里有一套值得被 review 和版本管理的业务规范"。
-_GENERIC_GUIDE = (
-    "用只读工具查到用户要的信息，然后用两三句中文给出结论。"
-    "数字必须来自工具返回，查不到就如实说查不到。"
-)
+_GENERIC_GUIDE = "用只读工具查到用户要的信息，然后用两三句中文给出结论。数字必须来自工具返回，查不到就如实说查不到。"
 
 
 def _guide_for(kind: str) -> str:
@@ -164,6 +161,7 @@ def _guide_for(kind: str) -> str:
     if skill is not None:
         return skill.body
     return _GENERIC_GUIDE
+
 
 SYSTEM_PROMPT = """你是「服装电商多 Agent 运营中台」的任务执行 Agent。
 你正在执行一个任务中的**一个步骤**，这个步骤的目标在下面会告诉你。
@@ -278,9 +276,7 @@ def resume_task(
     # 这里抛异常而不是 noop：`execution.resume` 会接住并 `mark_failed`，
     # 任务能落到终态、错误原因也写进去了；noop 会让它永远挂着。
     if approved and approval_lifecycle.is_expired(pending.get("created_at")):
-        raise RuntimeError(
-            approval_lifecycle.expired_message(tool_name=str(pending.get("tool_name") or ""))
-        )
+        raise RuntimeError(approval_lifecycle.expired_message(tool_name=str(pending.get("tool_name") or "")))
 
     seq = int(pending.get("todo_seq") or 0)
 
@@ -311,9 +307,7 @@ def resume_task(
     granted = _resolve_scopes(scopes)
     tool_name = str(pending.get("tool_name") or "")
     arguments = dict(pending.get("tool_arguments") or {})
-    result = _call_tool(
-        _build_gateway(), tool_name, arguments, granted, actor=f"task-approval:{by}"
-    )
+    result = _call_tool(_build_gateway(), tool_name, arguments, granted, actor=f"task-approval:{by}")
 
     approval_records.decide(
         pending["approval_no"],
@@ -437,13 +431,9 @@ def _execute(
             return {"status": "failed", "todo_seq": seq}
 
         done += 1
-        carry.append(
-            {"seq": seq, "goal": row["goal"], "summary": outcome["summary"]}
-        )
+        carry.append({"seq": seq, "goal": row["goal"], "summary": outcome["summary"]})
         run_artifacts.extend(outcome.get("artifacts") or [])
-        recorder.update_progress(
-            task_no, status="running", progress=_progress(done, total), node=f"todo-{seq}"
-        )
+        recorder.update_progress(task_no, status="running", progress=_progress(done, total), node=f"todo-{seq}")
 
     metrics = _metrics(task_no)
     summaries = [c["summary"] for c in carry if c["summary"]]
@@ -517,9 +507,7 @@ def _run_todo(
     )
 
     catalog = _catalog_for(kind, scopes)
-    messages = _todo_messages(
-        user_request=user_request, seq=seq, goal=goal, kind=kind, carry=carry
-    )
+    messages = _todo_messages(user_request=user_request, seq=seq, goal=goal, kind=kind, carry=carry)
 
     pending_call: list[Any] = []
     artifact_nos: list[str] = []
@@ -590,9 +578,7 @@ def _run_todo(
         tools=catalog,
         tool_runner=tool_runner,
         max_steps=MAX_STEPS_PER_TODO,
-        first_tool_choice=None
-        if already_done
-        else (_forced_choice(catalog, required) if required else None),
+        first_tool_choice=None if already_done else (_forced_choice(catalog, required) if required else None),
     )
 
     # ---- "必须调用的工具"还没被调用 ----
@@ -856,9 +842,7 @@ def _run_todo(
 # ===========================================================================
 # 提示词
 # ===========================================================================
-def _todo_messages(
-    *, user_request: str, seq: int, goal: str, kind: str, carry: list[dict[str, Any]]
-) -> list[Any]:
+def _todo_messages(*, user_request: str, seq: int, goal: str, kind: str, carry: list[dict[str, Any]]) -> list[Any]:
     from fashionops.llm import Message
 
     parts = [
@@ -878,9 +862,7 @@ def _todo_messages(
     return [Message.system(SYSTEM_PROMPT), Message.user("\n\n".join(parts))]
 
 
-def _replay_call(
-    approval: dict[str, Any], tool_result: dict[str, Any], messages: list[Any]
-) -> Any:
+def _replay_call(approval: dict[str, Any], tool_result: dict[str, Any], messages: list[Any]) -> Any:
     """把"已经批准并执行过"的那次调用补进消息历史，以便继续这一轮。
 
     ## 为什么必须补，而不是让模型重新调一次
@@ -899,9 +881,7 @@ def _replay_call(
         arguments=dict(approval.get("tool_arguments") or {}),
     )
     messages.append(Message.assistant("", tool_calls=[call]))
-    messages.append(
-        Message.tool(call.id, json.dumps(tool_result, ensure_ascii=False, default=str))
-    )
+    messages.append(Message.tool(call.id, json.dumps(tool_result, ensure_ascii=False, default=str)))
     return call
 
 
@@ -921,11 +901,7 @@ def _catalog_for(kind: str, scopes: frozenset[str]) -> list[dict[str, Any]]:
         register_all_tools(registry)
 
     allowed = set(KIND_TOOLS.get(kind, KIND_TOOLS["generic"]))
-    return [
-        schema
-        for schema in registry.openai_schemas(scopes)
-        if _schema_name(schema) in allowed
-    ]
+    return [schema for schema in registry.openai_schemas(scopes) if _schema_name(schema) in allowed]
 
 
 def _schema_name(schema: dict[str, Any]) -> str:
@@ -1039,9 +1015,7 @@ def _todo_rows(task_no: str) -> list[dict[str, Any]]:
         task = session.scalar(select(Task).where(Task.task_no == task_no))
         if task is None:
             return []
-        rows = session.scalars(
-            select(TaskTodo).where(TaskTodo.task_id == task.id).order_by(TaskTodo.seq)
-        ).all()
+        rows = session.scalars(select(TaskTodo).where(TaskTodo.task_id == task.id).order_by(TaskTodo.seq)).all()
         return [
             {
                 "seq": r.seq,
@@ -1061,9 +1035,7 @@ def _set_todo(task_no: str, seq: int, **fields: Any) -> None:
         task = session.scalar(select(Task).where(Task.task_no == task_no))
         if task is None:
             return
-        row = session.scalar(
-            select(TaskTodo).where(TaskTodo.task_id == task.id, TaskTodo.seq == seq)
-        )
+        row = session.scalar(select(TaskTodo).where(TaskTodo.task_id == task.id, TaskTodo.seq == seq))
         if row is None:
             return
         for key, value in fields.items():
@@ -1082,9 +1054,7 @@ def _skip_from(task_no: str, seq: int, *, error: str) -> None:
         if task is None:
             return
         rows = session.scalars(
-            select(TaskTodo)
-            .where(TaskTodo.task_id == task.id, TaskTodo.seq >= seq)
-            .order_by(TaskTodo.seq)
+            select(TaskTodo).where(TaskTodo.task_id == task.id, TaskTodo.seq >= seq).order_by(TaskTodo.seq)
         ).all()
         for row in rows:
             if row.status in (TODO_STATUS_DONE,):

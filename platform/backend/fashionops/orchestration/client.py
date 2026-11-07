@@ -72,12 +72,15 @@ class DeerFlowClient:
             # 想要哪几种流就列哪几种；messages 给 token，values 给工具快照。
             "stream_mode": ["messages", "values", "custom"],
         }
-        async with httpx.AsyncClient(timeout=None) as c, c.stream(
-            "POST",
-            f"{self.base}/threads/{thread_id}/runs/stream",
-            headers=self._headers,
-            json=body,
-        ) as resp:
+        async with (
+            httpx.AsyncClient(timeout=None) as c,
+            c.stream(
+                "POST",
+                f"{self.base}/threads/{thread_id}/runs/stream",
+                headers=self._headers,
+                json=body,
+            ) as resp,
+        ):
             resp.raise_for_status()
             async for line in resp.aiter_lines():
                 yield line

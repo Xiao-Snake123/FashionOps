@@ -10,6 +10,7 @@
 
 用 ``python _mcp_echo_server.py`` 即可被 stdio 拉起（默认 stdio 传输）。
 """
+
 from __future__ import annotations
 
 import sys

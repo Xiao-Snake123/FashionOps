@@ -196,10 +196,7 @@ def build_chunks(text: str, **kwargs: int) -> list[Chunk]:
     """切分并带上序号信息。索引层用这个。"""
     normalized = normalize(text)
     total = len(normalized)
-    return [
-        Chunk(index=i, text=piece, source_chars=total)
-        for i, piece in enumerate(split_text(normalized, **kwargs))
-    ]
+    return [Chunk(index=i, text=piece, source_chars=total) for i, piece in enumerate(split_text(normalized, **kwargs))]
 
 
 __all__ = [

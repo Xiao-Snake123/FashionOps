@@ -518,10 +518,7 @@ def _load_email_attachments(session: Session, stored: list | None) -> list[Attac
     asset_nos = [str(item.get("asset_no")) for item in stored if isinstance(item, dict) and item.get("asset_no")]
     if not asset_nos:
         return []
-    rows = {
-        a.asset_no: a
-        for a in session.scalars(select(Asset).where(Asset.asset_no.in_(asset_nos))).all()
-    }
+    rows = {a.asset_no: a for a in session.scalars(select(Asset).where(Asset.asset_no.in_(asset_nos))).all()}
     out: list[AttachmentInfo] = []
     for item in stored:
         if not isinstance(item, dict):

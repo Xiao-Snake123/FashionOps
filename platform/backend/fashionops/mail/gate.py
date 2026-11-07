@@ -206,9 +206,7 @@ class MailGate:
                 ),
                 *who,
             )
-        outside = [
-            a for a in recipients if not any(_matches(a.lower(), p.lower()) for p in allowlist)
-        ]
+        outside = [a for a in recipients if not any(_matches(a.lower(), p.lower()) for p in allowlist)]
         if outside:
             return self._block(
                 "blocked_whitelist",
@@ -263,10 +261,7 @@ class MailGate:
                 if not decision.allowed:
                     return self._block(
                         "blocked_ratelimit",
-                        (
-                            f"收件人 {address} 最近一分钟已收 {decision.limit} 封，"
-                            f"超过上限 {per_minute} 封"
-                        ),
+                        (f"收件人 {address} 最近一分钟已收 {decision.limit} 封，超过上限 {per_minute} 封"),
                         (
                             f"请等待约 {int(decision.retry_after_s) + 1} 秒后重试。"
                             "如果这是循环发信，说明任务逻辑有问题。"
@@ -308,9 +303,7 @@ class MailGate:
         cc: tuple[str, ...] = (),
         bcc: tuple[str, ...] = (),
     ) -> GateDecision:
-        return GateDecision(
-            allowed=False, code=code, reason=reason, hint=hint, to=to, cc=cc, bcc=bcc
-        )
+        return GateDecision(allowed=False, code=code, reason=reason, hint=hint, to=to, cc=cc, bcc=bcc)
 
     @property
     def policy(self) -> dict[str, object]:

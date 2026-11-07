@@ -198,10 +198,7 @@ class StructuredResult:
     def require(self) -> BaseModel:
         """强制要求成功，失败则抛异常。给"拿不到结果就没法继续"的场景用。"""
         if self.value is None:
-            raise ModelError(
-                f"结构化输出失败，已尝试 {self.attempted} 次。最后错误："
-                + " | ".join(self.errors[-2:])
-            )
+            raise ModelError(f"结构化输出失败，已尝试 {self.attempted} 次。最后错误：" + " | ".join(self.errors[-2:]))
         return self.value
 
 
@@ -251,16 +248,13 @@ def structured_call(
             value = schema.model_validate_json(payload)
         except ValidationError as exc:
             detail = "; ".join(
-                f"{'.'.join(str(p) for p in e['loc']) or '<root>'}: {e['msg']}"
-                for e in exc.errors()[:6]
+                f"{'.'.join(str(p) for p in e['loc']) or '<root>'}: {e['msg']}" for e in exc.errors()[:6]
             )
             errors.append(f"校验失败：{detail}")
         except (json.JSONDecodeError, ValueError) as exc:
             errors.append(f"JSON 解析失败：{exc}")
         else:
-            return StructuredResult(
-                value=value, response=response, repair_rounds=repair, attempted=attempted
-            )
+            return StructuredResult(value=value, response=response, repair_rounds=repair, attempted=attempted)
 
         if attempted > max_repair:
             break
@@ -442,8 +436,7 @@ def run_tool_loop(
                 # 工具执行抛异常也要喂回给模型，让它知道发生了什么并改策略。
                 # 直接往上抛会把"一次工具失败"升级成"整个任务失败"。
                 logger.warning("工具 %s 执行抛异常：%s", call.name, exc)
-                payload = {"ok": False, "error": {"code": "TOOL_EXECUTION_FAILED",
-                                                  "message": str(exc)}}
+                payload = {"ok": False, "error": {"code": "TOOL_EXECUTION_FAILED", "message": str(exc)}}
 
             # 只有**真的执行了**才记进 executed。
             # 挂起的那次没执行，记进去会让审计说"调用过这个工具"—— 而它没被调用。
@@ -483,9 +476,7 @@ def _obtain_response(
 ) -> ModelResponse:
     """拿一次响应 —— 整块或流式，对调用方是同一件事。"""
     if not stream:
-        response = client.complete(
-            messages, tools=tools, model=model, temperature=temperature, tool_choice=tool_choice
-        )
+        response = client.complete(messages, tools=tools, model=model, temperature=temperature, tool_choice=tool_choice)
         # 非流式也回调一次：让调用方不必为两种模式各写一套"把文本显示出去"的逻辑。
         # 少了这一句就会出现"切换 stream 开关后前端不显示内容"这种莫名其妙的 bug
         if on_token is not None and response.content:
@@ -493,9 +484,7 @@ def _obtain_response(
         return response
 
     response: ModelResponse | None = None
-    for chunk in client.stream(
-        messages, tools=tools, model=model, temperature=temperature, tool_choice=tool_choice
-    ):
+    for chunk in client.stream(messages, tools=tools, model=model, temperature=temperature, tool_choice=tool_choice):
         if chunk.kind is StreamChunkKind.CONTENT:
             if on_token is not None and chunk.text:
                 on_token(chunk.text)

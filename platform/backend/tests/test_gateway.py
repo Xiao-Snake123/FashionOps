@@ -219,10 +219,7 @@ class TestRegistry:
         assert "demo__create_listing" not in names
 
         # 拿到 ECOM_WRITE → 能看上架工具
-        names = {
-            s["function"]["name"]
-            for s in reg.openai_schemas(frozenset({Scope.ECOM_WRITE}))
-        }
+        names = {s["function"]["name"] for s in reg.openai_schemas(frozenset({Scope.ECOM_WRITE}))}
         assert "demo__create_listing" in names
 
     def test_openai_schema_none_means_no_filtering(self):

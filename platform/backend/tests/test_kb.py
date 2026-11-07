@@ -19,6 +19,7 @@
 任何一个不可用都会让测试变成"看运气"。这里全换成可注入的实现，
 所以这个文件**永远能跑**，也永远在几百毫秒内跑完。
 """
+
 from __future__ import annotations
 
 import math
@@ -37,7 +38,7 @@ from fashionops.kb.chunking import (
 from fashionops.kb.indexer import article_chunks
 from fashionops.kb.sparse import encode
 from fashionops.llm.embeddings import MockEmbeddingClient
-from fashionops.vectors import Filter, MemoryVectorStore, SparseVector, VectorRecord
+from fashionops.vectors import Filter, MemoryVectorStore, VectorRecord
 
 # ===========================================================================
 # 测试数据
@@ -511,9 +512,7 @@ class TestArticleChunks:
 
 class TestBuildIndex:
     def test_writes_all_active_articles(self, kb_env, store, embedder):
-        stats = build_index(
-            store=store, embedder=embedder, settings=kb_env, collection=COLLECTION
-        )
+        stats = build_index(store=store, embedder=embedder, settings=kb_env, collection=COLLECTION)
         # 4 篇里 1 篇下架，只索引 3 篇
         assert stats.articles == 3
         assert stats.chunks == 3  # 每篇 retrieval_text 都很短，各成一块
@@ -540,14 +539,10 @@ class TestBuildIndex:
         这是"改了切分参数重跑一次"的日常操作。不幂等的后果是
         top-k 里全是同一篇的多个副本，检索质量直接崩掉而报错却一个没有。
         """
-        first = build_index(
-            store=store, embedder=embedder, settings=kb_env, collection=COLLECTION
-        )
+        first = build_index(store=store, embedder=embedder, settings=kb_env, collection=COLLECTION)
         count_after_first = store.count(COLLECTION)
 
-        second = build_index(
-            store=store, embedder=embedder, settings=kb_env, collection=COLLECTION
-        )
+        second = build_index(store=store, embedder=embedder, settings=kb_env, collection=COLLECTION)
         assert second.chunks == first.chunks
         assert store.count(COLLECTION) == count_after_first
         assert second.before_count == count_after_first
@@ -606,17 +601,13 @@ class TestBuildIndex:
         assert store.count(COLLECTION) == 3
 
     def test_stats_summary_mentions_everything_important(self, kb_env, store, embedder):
-        stats = build_index(
-            store=store, embedder=embedder, settings=kb_env, collection=COLLECTION
-        )
+        stats = build_index(store=store, embedder=embedder, settings=kb_env, collection=COLLECTION)
         summary = stats.summary()
         for token in (COLLECTION, "3", "mock-embedding", "256"):
             assert token in summary
 
     def test_stats_records_dimension_and_model(self, kb_env, store, embedder):
-        stats = build_index(
-            store=store, embedder=embedder, settings=kb_env, collection=COLLECTION
-        )
+        stats = build_index(store=store, embedder=embedder, settings=kb_env, collection=COLLECTION)
         assert stats.dimension == 256
         assert stats.embedding_model == "mock-embedding"
 
@@ -644,7 +635,10 @@ class TestSearchKB:
         """
         store, embedder, settings = indexed
         hits = search_kb(
-            "退货怎么处理", store=store, embedder=embedder, settings=settings,
+            "退货怎么处理",
+            store=store,
+            embedder=embedder,
+            settings=settings,
             collection=COLLECTION,
         )
         assert hits, "检索没有命中任何内容"
@@ -662,8 +656,12 @@ class TestSearchKB:
     def test_routes_to_correct_category(self, indexed, query, expected):
         store, embedder, settings = indexed
         hits = search_kb(
-            query, store=store, embedder=embedder, settings=settings,
-            collection=COLLECTION, top_k=1,
+            query,
+            store=store,
+            embedder=embedder,
+            settings=settings,
+            collection=COLLECTION,
+            top_k=1,
         )
         assert hits[0]["article_no"] == expected
 
@@ -674,17 +672,19 @@ class TestSearchKB:
         payload / score 这些内部结构。
         """
         store, embedder, settings = indexed
-        hit = search_kb(
-            "退货", store=store, embedder=embedder, settings=settings, collection=COLLECTION
-        )[0]
+        hit = search_kb("退货", store=store, embedder=embedder, settings=settings, collection=COLLECTION)[0]
         assert set(hit) == {"article_no", "title", "category", "content", "score"}
         assert isinstance(hit["score"], float)
 
     def test_score_is_descending(self, indexed):
         store, embedder, settings = indexed
         hits = search_kb(
-            "退货 物流 尺码", store=store, embedder=embedder, settings=settings,
-            collection=COLLECTION, top_k=3,
+            "退货 物流 尺码",
+            store=store,
+            embedder=embedder,
+            settings=settings,
+            collection=COLLECTION,
+            top_k=3,
         )
         scores = [h["score"] for h in hits]
         assert scores == sorted(scores, reverse=True)
@@ -692,23 +692,30 @@ class TestSearchKB:
     def test_top_k_is_honored(self, indexed):
         store, embedder, settings = indexed
         hits = search_kb(
-            "退货", store=store, embedder=embedder, settings=settings,
-            collection=COLLECTION, top_k=2,
+            "退货",
+            store=store,
+            embedder=embedder,
+            settings=settings,
+            collection=COLLECTION,
+            top_k=2,
         )
         assert len(hits) <= 2
 
     def test_empty_query_returns_empty(self, indexed):
         """空 query 直接返回空，不要去打一次 embedding API 浪费钱。"""
         store, embedder, settings = indexed
-        assert search_kb(
-            "   ", store=store, embedder=embedder, settings=settings, collection=COLLECTION
-        ) == []
+        assert search_kb("   ", store=store, embedder=embedder, settings=settings, collection=COLLECTION) == []
 
     def test_category_filter_excludes_others(self, indexed):
         store, embedder, settings = indexed
         hits = search_kb(
-            "退货", store=store, embedder=embedder, settings=settings,
-            collection=COLLECTION, category="物流", top_k=10,
+            "退货",
+            store=store,
+            embedder=embedder,
+            settings=settings,
+            collection=COLLECTION,
+            category="物流",
+            top_k=10,
         )
         assert all(h["category"] == "物流" for h in hits)
 
@@ -720,8 +727,12 @@ class TestSearchKB:
         """
         store, embedder, settings = indexed
         hits = search_kb(
-            "退货", store=store, embedder=embedder, settings=settings,
-            collection=COLLECTION, category="不存在的类目",
+            "退货",
+            store=store,
+            embedder=embedder,
+            settings=settings,
+            collection=COLLECTION,
+            category="不存在的类目",
         )
         assert hits == []
 
@@ -733,18 +744,14 @@ class TestSearchKB:
         静默变空比报错危险得多。
         """
         with pytest.raises(RuntimeError) as excinfo:
-            search_kb(
-                "退货", store=store, embedder=embedder, settings=kb_env, collection=COLLECTION
-            )
+            search_kb("退货", store=store, embedder=embedder, settings=kb_env, collection=COLLECTION)
         assert "fashionops-kb index" in str(excinfo.value), "报错要给出修复命令"
 
     def test_raises_when_collection_exists_but_empty(self, kb_env, store, embedder):
         """collection 存在但一个点都没有，同样算"索引没建"。"""
         store.ensure_collection(COLLECTION, dimension=256)
         with pytest.raises(RuntimeError, match="不存在或为空"):
-            search_kb(
-                "退货", store=store, embedder=embedder, settings=kb_env, collection=COLLECTION
-            )
+            search_kb("退货", store=store, embedder=embedder, settings=kb_env, collection=COLLECTION)
 
     def test_filters_out_inactive_records_at_query_time(self, indexed):
         """查询侧再防一次下架文章。
@@ -778,8 +785,12 @@ class TestSearchKB:
         )
 
         hits = search_kb(
-            query, store=store, embedder=embedder, settings=settings,
-            collection=COLLECTION, top_k=10,
+            query,
+            store=store,
+            embedder=embedder,
+            settings=settings,
+            collection=COLLECTION,
+            top_k=10,
         )
         assert all(h["article_no"] != "KB-9999" for h in hits), "下架文章被召回了"
         assert hits[0]["article_no"] == "KB-0001"
@@ -797,8 +808,12 @@ class TestHybridRetrieval:
     def test_hybrid_is_default_and_works(self, indexed):
         store, embedder, settings = indexed
         hits = search_kb(
-            "尺码怎么选", store=store, embedder=embedder, settings=settings,
-            collection=COLLECTION, top_k=3,
+            "尺码怎么选",
+            store=store,
+            embedder=embedder,
+            settings=settings,
+            collection=COLLECTION,
+            top_k=3,
         )
         assert hits, "混合检索没有命中"
         # 形状必须和改之前完全一致，工具层才不会崩
@@ -811,8 +826,12 @@ class TestHybridRetrieval:
         kb_env.retrieval_hybrid = False
         build_index(store=store, embedder=embedder, settings=kb_env, collection=COLLECTION)
         hits = search_kb(
-            "退款要多久到账", store=store, embedder=embedder, settings=kb_env,
-            collection=COLLECTION, top_k=1,
+            "退款要多久到账",
+            store=store,
+            embedder=embedder,
+            settings=kb_env,
+            collection=COLLECTION,
+            top_k=1,
         )
         assert hits[0]["article_no"] == "KB-0001"
 

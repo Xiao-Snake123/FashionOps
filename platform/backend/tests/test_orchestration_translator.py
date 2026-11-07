@@ -19,6 +19,7 @@
 
 这种 bug 靠读代码很难发现，所以这里用真实形状的报文把它钉死。
 """
+
 from __future__ import annotations
 
 from fashionops.orchestration.translator import (
@@ -31,6 +32,7 @@ from fashionops.orchestration.translator import (
     split_sse,
 )
 
+
 # ---------------------------------------------------------------------------
 # 1. ★ 事件名不能丢
 # ---------------------------------------------------------------------------
@@ -38,7 +40,7 @@ class TestEventNameSurvives:
     def test_realistic_stream_keeps_event_names(self):
         """真实形状：三种事件 + 心跳，名字和数据都要对。"""
         lines = [
-            ": ping",                                    # 心跳，不是数据
+            ": ping",  # 心跳，不是数据
             "event: metadata",
             'data: {"run_id": "r1"}',
             "",
@@ -75,8 +77,8 @@ class TestEventNameSurvives:
 
         per_line = [ev for line in lines for ev in split_sse([line])]
         assert per_line == [
-            ("messages", ""),        # 名字对了，但 data 丢了
-            ("message", "[1, 2]"),   # 数据对了，但名字丢了
+            ("messages", ""),  # 名字对了，但 data 丢了
+            ("message", "[1, 2]"),  # 数据对了，但名字丢了
         ]
 
         # 正确做法：整个行流交给同一个解析器

@@ -67,9 +67,7 @@ class KBCategoriesArgs(BaseModel):
     ``None`` 会直接 `TypeError`。"""
 
 
-def _search(
-    query: str, top_k: int, category: str | None, *, settings: Any = None
-) -> dict[str, Any]:
+def _search(query: str, top_k: int, category: str | None, *, settings: Any = None) -> dict[str, Any]:
     from fashionops.kb import search_kb
 
     try:

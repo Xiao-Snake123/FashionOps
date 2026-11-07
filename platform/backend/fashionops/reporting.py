@@ -162,8 +162,7 @@ def build_workbook(
         if sheet.rows:
             worksheet.freeze_panes = worksheet.cell(row=header_row + 1, column=1)
             worksheet.auto_filter.ref = (
-                f"A{header_row}:{get_column_letter(len(sheet.columns))}"
-                f"{header_row + len(sheet.rows)}"
+                f"A{header_row}:{get_column_letter(len(sheet.columns))}{header_row + len(sheet.rows)}"
             )
 
     # 一个 sheet 都没有时给个占位，否则 openpyxl 存盘会报错
@@ -179,6 +178,6 @@ def _safe_sheet_name(name: str) -> str:
     """Excel 的 sheet 名有长度和字符限制：不能超过 31 字符，
     也不能包含 ``: \\ / ? * [ ]``。不处理的话创建 sheet 时直接抛异常。
     """
-    for ch in ':\\/?*[]':
+    for ch in ":\\/?*[]":
         name = name.replace(ch, "_")
     return (name or "Sheet")[:31]

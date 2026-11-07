@@ -249,9 +249,7 @@ class OpenAICompatClient:
 
                 for call in getattr(delta, "tool_calls", None) or []:
                     index = getattr(call, "index", 0)
-                    slot = pending.setdefault(
-                        index if index is not None else 0, {"id": "", "name": "", "args": ""}
-                    )
+                    slot = pending.setdefault(index if index is not None else 0, {"id": "", "name": "", "args": ""})
                     if getattr(call, "id", None):
                         slot["id"] = call.id
                     function = getattr(call, "function", None)
@@ -353,9 +351,7 @@ class OpenAICompatClient:
         if usage.total_tokens == 0:
             usage.total_tokens = usage.prompt_tokens + usage.completion_tokens
 
-        finish = _FINISH_MAP.get(
-            str(getattr(choice, "finish_reason", "") or ""), FinishReason.STOP
-        )
+        finish = _FINISH_MAP.get(str(getattr(choice, "finish_reason", "") or ""), FinishReason.STOP)
 
         return ModelResponse(
             content=message.content or "",
@@ -396,9 +392,7 @@ def _classify(exc: Exception) -> ModelError:
     区分这个很重要：把 429（限流）当成不可重试，会白白失败掉任务；
     把 401（Key 错了）当成可重试，会一直重试到把配额耗尽。
     """
-    status = getattr(exc, "status_code", None) or getattr(
-        getattr(exc, "response", None), "status_code", None
-    )
+    status = getattr(exc, "status_code", None) or getattr(getattr(exc, "response", None), "status_code", None)
     text = f"{type(exc).__name__}: {exc}"
 
     if status in (408, 409, 429) or (status is not None and status >= 500):
@@ -413,8 +407,7 @@ def _classify(exc: Exception) -> ModelError:
 
     if status == 400:
         # 参数问题重试也没用，但很可能是 prompt 太长这类可以改的地方
-        return ModelError(f"模型请求被拒绝（可能是上下文超长或参数不合法）：{text}",
-                          retryable=False, status=status)
+        return ModelError(f"模型请求被拒绝（可能是上下文超长或参数不合法）：{text}", retryable=False, status=status)
 
     # 网络类异常（连接超时、DNS 失败）值得重试
     if any(word in text.lower() for word in ("timeout", "connection", "temporarily")):

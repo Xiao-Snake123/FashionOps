@@ -10,6 +10,7 @@ mcp-servers 那个独立项目，保证单测零外部依赖。
 
 另外用 ``integrations.office.register_office_tools`` 验证整条装配链路。
 """
+
 from __future__ import annotations
 
 import json
@@ -78,9 +79,7 @@ def test_allow_any_args_passes_through(registry: ToolRegistry) -> None:
 # ---------------------------------------------------------------------------
 def test_call_through_gateway_returns_data(registry: ToolRegistry) -> None:
     gw = ToolGateway(registry)
-    res = gw.call(
-        "test.echo", {"x": 7}, ctx=CallContext(actor="u", scopes=frozenset({Scope.OFFICE_READ}))
-    )
+    res = gw.call("test.echo", {"x": 7}, ctx=CallContext(actor="u", scopes=frozenset({Scope.OFFICE_READ})))
     assert res.ok, res.error
     assert res.data["echo"] == {"x": 7}
 
@@ -94,9 +93,7 @@ def test_missing_scope_is_denied_by_gateway(registry: ToolRegistry) -> None:
 
 def test_protocol_error_is_surfaced(registry: ToolRegistry) -> None:
     gw = ToolGateway(registry)
-    res = gw.call(
-        "test.boom", {}, ctx=CallContext(actor="u", scopes=frozenset({Scope.OFFICE_WRITE}))
-    )
+    res = gw.call("test.boom", {}, ctx=CallContext(actor="u", scopes=frozenset({Scope.OFFICE_WRITE})))
     assert not res.ok
     # 协议层失败 → 网关按上游错误归类（可重试）
     assert res.error.code.value == "UPSTREAM_ERROR"

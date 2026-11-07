@@ -29,6 +29,7 @@
 3. 事实只放"业务规范"类数字。像 `MAX_CHUNK_CHARS` 这种纯实现参数不要放 ——
    技能文档讲的是**怎么做业务**，不是系统怎么实现的。
 """
+
 from __future__ import annotations
 
 from functools import lru_cache

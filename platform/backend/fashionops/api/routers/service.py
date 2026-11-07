@@ -201,10 +201,7 @@ def ticket_statuses(
 ) -> dict[str, object]:
     """下拉框的选项从后端取，不在前端写死 —— 加一个阶段只改后端一处。"""
     return {
-        "human_statuses": [
-            {"value": value, "label": HUMAN_STATUS_LABEL.get(value, value)}
-            for value in HUMAN_STATUSES
-        ]
+        "human_statuses": [{"value": value, "label": HUMAN_STATUS_LABEL.get(value, value)} for value in HUMAN_STATUSES]
     }
 
 
@@ -231,9 +228,7 @@ def handle_one(
         detail={"ticket_no": ticket_no, "mode": "single"},
         request=request,
     )
-    return StreamingResponse(
-        _sse(_stream_one(ticket_no)), media_type="text/event-stream", headers=_SSE_HEADERS
-    )
+    return StreamingResponse(_sse(_stream_one(ticket_no)), media_type="text/event-stream", headers=_SSE_HEADERS)
 
 
 def _stream_one(ticket_no: str) -> Iterator[dict[str, Any]]:
@@ -280,9 +275,7 @@ def handle_pending(
         detail={"count": len(ticket_nos), "all": payload.all, "limit": payload.limit},
         request=request,
     )
-    return StreamingResponse(
-        _sse(_stream_batch(ticket_nos)), media_type="text/event-stream", headers=_SSE_HEADERS
-    )
+    return StreamingResponse(_sse(_stream_batch(ticket_nos)), media_type="text/event-stream", headers=_SSE_HEADERS)
 
 
 def _stream_batch(ticket_nos: list[str]) -> Iterator[dict[str, Any]]:
