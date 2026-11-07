@@ -115,7 +115,7 @@ def test_detect_alerts_registered_and_callable(clean_registry):
     assert levels <= {"critical", "warning", "info"}
 
 
-def test_render_business_report_creates_asset(clean_registry):
+def test_render_business_report_creates_asset(clean_registry, db):
     spec = registry.get("analytics.render_business_report")
     assert spec.read_only is False
     assert spec.idempotent is True
