@@ -39,7 +39,12 @@ def db(tmp_path, monkeypatch):  # noqa: ANN001, ANN201
     做法是把 `fashionops.db.base.get_settings` 换成指向 `tmp_path` 的配置，
     再建表。改动是 monkeypatch 的，夹具结束自动还原。
     """
+    # 确保模型已注册到 Base.metadata，否则 create_all 会漏建表（如 assets）。
+    # 不能依赖测试模块的导入顺序来注册模型——CI 的干净 SQLite 上就会暴露。
     import fashionops.db.base as db_base
+    import fashionops.db.models  # noqa: F401
+    import fashionops.db.models_chat  # noqa: F401
+    import fashionops.db.models_identity  # noqa: F401
     from fashionops.config import Settings
     from fashionops.db.base import Base, build_engine, reset_engine
 

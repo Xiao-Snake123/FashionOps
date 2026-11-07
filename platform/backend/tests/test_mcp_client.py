@@ -47,6 +47,20 @@ def registry():
     conn.close()
 
 
+@pytest.fixture
+def gateway(registry: ToolRegistry) -> ToolGateway:
+    # CI 没有 Redis：限流器 / 熔断器必须走内存实现，否则 fail-closed 会把调用拒成 RATE_LIMITED。
+    # 这正对应 core.py 里"写测试时必须开 use_redis=False 这个开关"的要求。
+    from fashionops.gateway.circuit_breaker import get_circuit_breaker
+    from fashionops.gateway.rate_limit import get_rate_limiter
+
+    return ToolGateway(
+        registry,
+        rate_limiter=get_rate_limiter("memory"),
+        breaker=get_circuit_breaker("memory"),
+    )
+
+
 # ---------------------------------------------------------------------------
 # 1. 注册与 schema
 # ---------------------------------------------------------------------------
@@ -61,10 +75,10 @@ def test_tools_are_registered_with_real_schema(registry: ToolRegistry) -> None:
     assert params["properties"]["x"]["type"] == "integer"
 
 
-def test_allow_any_args_passes_through(registry: ToolRegistry) -> None:
+def test_allow_any_args_passes_through(registry: ToolRegistry, gateway: ToolGateway) -> None:
     # 网关的 args_model 是透传的，不会因为多了字段就拒掉这次调用
     # （真实校验由下游办公服务器做；这里只验证网关不拦截）。
-    gw = ToolGateway(registry)
+    gw = gateway
     res = gw.call(
         "test.echo",
         {"x": 3, "extra_field": "keep-me"},
@@ -77,22 +91,22 @@ def test_allow_any_args_passes_through(registry: ToolRegistry) -> None:
 # ---------------------------------------------------------------------------
 # 2. 治理：权限 + 审计
 # ---------------------------------------------------------------------------
-def test_call_through_gateway_returns_data(registry: ToolRegistry) -> None:
-    gw = ToolGateway(registry)
+def test_call_through_gateway_returns_data(registry: ToolRegistry, gateway: ToolGateway) -> None:
+    gw = gateway
     res = gw.call("test.echo", {"x": 7}, ctx=CallContext(actor="u", scopes=frozenset({Scope.OFFICE_READ})))
     assert res.ok, res.error
     assert res.data["echo"] == {"x": 7}
 
 
-def test_missing_scope_is_denied_by_gateway(registry: ToolRegistry) -> None:
-    gw = ToolGateway(registry)
+def test_missing_scope_is_denied_by_gateway(registry: ToolRegistry, gateway: ToolGateway) -> None:
+    gw = gateway
     res = gw.call("test.echo", {"x": 1}, ctx=CallContext(actor="u", scopes=frozenset()))
     assert not res.ok
     assert res.error.code.value == "PERMISSION_DENIED"
 
 
-def test_protocol_error_is_surfaced(registry: ToolRegistry) -> None:
-    gw = ToolGateway(registry)
+def test_protocol_error_is_surfaced(registry: ToolRegistry, gateway: ToolGateway) -> None:
+    gw = gateway
     res = gw.call("test.boom", {}, ctx=CallContext(actor="u", scopes=frozenset({Scope.OFFICE_WRITE})))
     assert not res.ok
     # 协议层失败 → 网关按上游错误归类（可重试）
